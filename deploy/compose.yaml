@@ -1,0 +1,116 @@
+# syslog-yard — generate → route/filter → store, on one internal bridge.
+#
+#   syslog-hose  UI  http://localhost:8080   (traffic generator)
+#   syslog-valve UI  http://localhost:8081   (visual router — lands in S1)
+#   syslog-bucket UI http://localhost:8082   (email-style triage)
+#
+# External syslog entry point: host port 5514 (udp/tcp, RFC3164) and
+# 5601 (tcp, RFC5424) — unprivileged so this works rootless. Once
+# syslog-valve lands, the entry point moves to the valve and the bucket's
+# receiver stops publishing host ports.
+
+name: syslog-yard
+
+networks:
+  yardnet:
+
+volumes:
+  hose-data:
+  bucket-dbdata:
+  # ---- external share examples ----------------------------------------
+  # Define a share once here, then hand it to any tool as /shares/<name>
+  # (and list the name in that tool's YARD_SHARES env). For rootless
+  # podman, prefer bind-mounting a share already mounted on the host:
+  #   volumes: [ /mnt/nas/syslog:/shares/archive ]
+  #
+  # logshare-nfs:
+  #   driver: local
+  #   driver_opts:
+  #     type: nfs
+  #     o: addr=nas.example.lan,rw,nfsvers=4
+  #     device: ":/export/syslog"
+  #
+  # logshare-smb:
+  #   driver: local
+  #   driver_opts:
+  #     type: cifs
+  #     o: username=user,password=pass,uid=0,file_mode=0660,dir_mode=0770
+  #     device: "//nas.example.lan/syslog"
+
+services:
+  syslog-hose:
+    build: ../apps/syslog-hose
+    image: syslog-hose:latest
+    networks: [yardnet]
+    ports:
+      - "8080:8080"
+    environment:
+      HOSE_ADDR: ":8080"
+      HOSE_DATA: /data
+      # Neighbor hint (UI default destination, wired up in S4). Points at
+      # the bucket's receiver until syslog-valve takes its place.
+      HOSE_SUGGESTED_DEST: "bucket-syslog:514"
+    volumes:
+      - hose-data:/data
+    restart: unless-stopped
+
+  # ---- syslog-valve (S1) -----------------------------------------------
+  # syslog-valve:
+  #   build: ../apps/syslog-valve
+  #   image: syslog-valve:latest
+  #   networks: [yardnet]
+  #   ports:
+  #     - "8081:8081"
+  #     - "5514:514/udp"
+  #     - "5514:514/tcp"
+  #   environment:
+  #     VALVE_SUGGESTED_FORWARD: "bucket-syslog:514"
+  #     YARD_SHARES: ""            # e.g. "archive"
+  #   volumes:
+  #     - valve-data:/data
+  #     # - logshare-nfs:/shares/archive
+
+  bucket-db:
+    image: postgres:17-alpine
+    networks: [yardnet]
+    environment:
+      POSTGRES_USER: syslog_bucket
+      POSTGRES_PASSWORD: syslog_bucket
+      POSTGRES_DB: syslog_bucket
+    volumes:
+      - bucket-dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U syslog_bucket"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  syslog-bucket:
+    build: ../apps/syslog-bucket
+    image: syslog-bucket:latest
+    networks: [yardnet]
+    ports:
+      - "8082:8080"
+    environment:
+      BUCKET_DB_URL: postgres://syslog_bucket:syslog_bucket@bucket-db:5432/syslog_bucket?sslmode=disable
+      BUCKET_API_ADDR: ":8080"
+      BUCKET_INGEST_ADDR: ":6601"
+    depends_on:
+      bucket-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  bucket-syslog:
+    image: balabit/syslog-ng:4.8.3
+    command: ["--no-caps", "-F"]
+    networks: [yardnet]
+    volumes:
+      - ./syslog-ng/bucket.conf:/etc/syslog-ng/syslog-ng.conf:ro
+    ports:
+      - "5514:514/udp"
+      - "5514:514/tcp"
+      - "5601:601/tcp"
+    depends_on:
+      - syslog-bucket
+    restart: unless-stopped

@@ -12,4 +12,4 @@ Each tool runs standalone; together they form a complete loop —
 generate → route/filter → store — on one internal bridge network, with UIs on
 ports 8080 / 8081 / 8082 and optional external NAS shares for log storage.
 
-See [docs/PLAN.md](docs/PLAN.md) for the build plan. Status: planning / S0.
+See [docs/PLAN.md](docs/PLAN.md) for the build plan. Status: S0 complete — suite boots via `deploy/compose.yaml`; next: S1 (syslog-valve).
