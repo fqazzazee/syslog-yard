@@ -25,6 +25,8 @@ UIs: hose http://localhost:8080 · valve http://localhost:8081 · bucket
 http://localhost:8082. External syslog entry: host port **6514** (udp/tcp)
 into the valve's IN port 514.
 
-See [docs/PLAN.md](docs/PLAN.md) for the build plan. Status: S1 complete —
-valve spine works end-to-end (hose → valve → bucket); next: S3 valve
-filtering & cache nodes (S2's bucket ingest came pre-built).
+See [docs/PLAN.md](docs/PLAN.md) for the build plan. Status: S3 complete —
+filter nodes (severity/program/regex with match/else ports) and cache nodes
+(logrotate retention, external shares) work end-to-end; a FortiGate security
+demo ships pre-wired (hose → valve splits critical/high to the bucket,
+noise to disk). Next: S4 cross-UI cohesion.
