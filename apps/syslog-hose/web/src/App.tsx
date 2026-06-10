@@ -47,7 +47,7 @@ export default function App() {
     <div className="app">
       <header>
         <h1>
-          <span className="logo">⟫⟫</span> syshose
+          <span className="logo">⟫⟫</span> syslog-hose
         </h1>
         <span className="sub">syslog generator</span>
         <nav>

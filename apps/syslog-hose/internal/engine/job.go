@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tesla/syshose/internal/preset"
+	"github.com/syslog-yard/syslog-hose/internal/preset"
 )
 
 // JobConfig is the persisted definition of a generator stream.

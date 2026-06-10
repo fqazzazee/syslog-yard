@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tesla/syshose/internal/preset"
+	"github.com/syslog-yard/syslog-hose/internal/preset"
 )
 
 func TestFrame(t *testing.T) {
@@ -28,7 +28,9 @@ func TestJobSendsUDP(t *testing.T) {
 	port := pc.LocalAddr().(*net.UDPAddr).Port
 
 	received := make(chan string, 1000)
+	readerDone := make(chan struct{})
 	go func() {
+		defer close(readerDone)
 		buf := make([]byte, 65536)
 		for {
 			n, _, err := pc.ReadFrom(buf)
@@ -62,6 +64,11 @@ func TestJobSendsUDP(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// let the reader drain in-flight datagrams, then stop it before closing
+	// the channel it sends on
+	time.Sleep(100 * time.Millisecond)
+	pc.Close()
+	<-readerDone
 	close(received)
 	count := 0
 	for msg := range received {

@@ -52,7 +52,7 @@ func NewStore(dir string) (*Store, error) {
 			}
 			p, err := Parse(raw)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "syshose: skipping custom preset %s: %v\n", f, err)
+				fmt.Fprintf(os.Stderr, "syslog-hose: skipping custom preset %s: %v\n", f, err)
 				continue
 			}
 			s.presets[p.Name] = p

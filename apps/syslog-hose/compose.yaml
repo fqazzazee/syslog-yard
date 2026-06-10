@@ -1,13 +1,13 @@
 services:
-  syshose:
+  syslog-hose:
     build: .
-    image: syshose:latest
-    container_name: syshose
+    image: syslog-hose:latest
+    container_name: syslog-hose
     ports:
       - "8080:8080"
     volumes:
-      - syshose-data:/data
+      - syslog-hose-data:/data
     restart: unless-stopped
 
 volumes:
-  syshose-data:
+  syslog-hose-data:

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tesla/syshose/internal/preset"
+	"github.com/syslog-yard/syslog-hose/internal/preset"
 )
 
 // TailEvent is one emitted message kept for the live tail.
@@ -55,7 +55,7 @@ func NewManager(store *preset.Store, dataDir string) (*Manager, error) {
 	for _, j := range m.jobs {
 		if j.cfg.Autostart {
 			if err := m.Start(j.cfg.ID); err != nil {
-				fmt.Fprintf(os.Stderr, "syshose: autostart %q: %v\n", j.cfg.Name, err)
+				fmt.Fprintf(os.Stderr, "syslog-hose: autostart %q: %v\n", j.cfg.Name, err)
 			}
 		}
 	}

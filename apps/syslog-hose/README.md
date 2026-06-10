@@ -1,4 +1,4 @@
-# ⟫⟫ Syshose
+# ⟫⟫ syslog-hose
 
 **A containerized syslog generator with a web UI.** Point the hose at any collector —
 a SIEM, [Sysbucket](https://github.com/), syslog-ng, rsyslog, Splunk, Graylog — and it
@@ -31,16 +31,16 @@ testing parsers, load-testing pipelines, demos, and lab work.
 ### Docker
 
 ```bash
-docker run -d --name syshose \
+docker run -d --name syslog-hose \
   -p 8080:8080 \
-  -v syshose-data:/data \
-  syshose:latest
+  -v syslog-hose-data:/data \
+  syslog-hose:latest
 ```
 
 Or with compose (builds from source):
 
 ```bash
-git clone <repo-url> && cd syshose
+git clone <repo-url> && cd syslog-hose
 docker compose up -d
 ```
 
@@ -48,28 +48,28 @@ Open **http://localhost:8080**, create a job, point it at your collector's IP:po
 
 ### Podman
 
-Works rootless out of the box — Syshose only makes *outbound* connections and never
+Works rootless out of the box — syslog-hose only makes *outbound* connections and never
 binds privileged ports:
 
 ```bash
-podman build -t syshose .
-podman run -d --name syshose \
+podman build -t syslog-hose .
+podman run -d --name syslog-hose \
   -p 8080:8080 \
-  -v syshose-data:/data \
-  syshose
+  -v syslog-hose-data:/data \
+  syslog-hose
 ```
 
 To run it as a systemd service with quadlet, create
-`~/.config/containers/systemd/syshose.container`:
+`~/.config/containers/systemd/syslog-hose.container`:
 
 ```ini
 [Unit]
-Description=Syshose syslog generator
+Description=syslog-hose syslog generator
 
 [Container]
-Image=localhost/syshose:latest
+Image=localhost/syslog-hose:latest
 PublishPort=8080:8080
-Volume=syshose-data:/data
+Volume=syslog-hose-data:/data
 
 [Service]
 Restart=always
@@ -78,7 +78,7 @@ Restart=always
 WantedBy=default.target
 ```
 
-then `systemctl --user daemon-reload && systemctl --user start syshose`.
+then `systemctl --user daemon-reload && systemctl --user start syslog-hose`.
 
 > **Bind mounts:** if you prefer `-v ./data:/data` over a named volume, the directory
 > must be writable by uid 65532 (`chown 65532 data`, or on rootless podman:
@@ -88,8 +88,8 @@ then `systemctl --user daemon-reload && systemctl --user start syshose`.
 
 | Env var        | Default | Meaning                          |
 |----------------|---------|----------------------------------|
-| `SYSHOSE_ADDR` | `:8080` | Web UI / API listen address      |
-| `SYSHOSE_DATA` | `/data` | Jobs + custom presets directory  |
+| `HOSE_ADDR` | `:8080` | Web UI / API listen address      |
+| `HOSE_DATA` | `/data` | Jobs + custom presets directory  |
 
 Everything else is configured in the UI. State lives in `/data/jobs.json` and
 `/data/presets/*.yaml`.
@@ -142,7 +142,7 @@ simulate a whole fleet of differently named devices.
 ```bash
 make build        # builds web UI (node 20+) then the Go binary (go 1.26+)
 make test         # go test ./...
-SYSHOSE_DATA=./data ./syshose
+HOSE_DATA=./data ./syslog-hose
 ```
 
 The REST API under `/api` is internal and unversioned — the UI is the supported
@@ -153,7 +153,7 @@ interface for now.
 - Spoofing **source IPs** is intentionally out of scope (it needs raw sockets and
   CAP_NET_RAW). To simulate many devices, run several jobs with different HOSTNAME
   fields — collectors key on the header hostname anyway.
-- Syshose generates *load and shape*, not attack content. Event payloads are
+- syslog-hose generates *load and shape*, not attack content. Event payloads are
   fictional (RFC 1918 internals, documentation-style URLs, invented users).
 
 ## License

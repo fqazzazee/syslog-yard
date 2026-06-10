@@ -2,6 +2,6 @@
 data
 web/node_modules
 web/dist
-syshose
+syslog-hose
 docs
 *.log

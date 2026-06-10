@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tesla/syshose/internal/engine"
-	"github.com/tesla/syshose/internal/preset"
+	"github.com/syslog-yard/syslog-hose/internal/engine"
+	"github.com/syslog-yard/syslog-hose/internal/preset"
 )
 
 // Server wires the manager and preset store into an http.Handler.

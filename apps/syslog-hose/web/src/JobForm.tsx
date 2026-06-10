@@ -229,7 +229,7 @@ export function JobForm(props: {
               checked={cfg.autostart ?? false}
               onChange={(e) => set("autostart", e.target.checked)}
             />
-            Start automatically when syshose boots
+            Start automatically when syslog-hose boots
           </label>
         </div>
 

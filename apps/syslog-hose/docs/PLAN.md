@@ -1,4 +1,4 @@
-# Syshose — Build Plan
+# syslog-hose — Build Plan
 
 A containerized web app that generates **random-but-realistic syslog events** toward a
 user-defined destination IP/port at a configurable rate. Companion tool to
@@ -9,7 +9,7 @@ syslog collector (SIEM load tests, parser development, lab demos).
 
 | Decision | Choice |
 |---|---|
-| Name | **Syshose** (verified collision-free) |
+| Name | **syslog-hose** (verified collision-free) |
 | Backend | **Go**, single static binary |
 | Frontend | **React + TypeScript** (Vite), built to static assets, embedded in the Go binary via `embed` |
 | Transports | **UDP**, **TCP** (RFC 6587 octet-counting + LF framing), **TLS** (RFC 5425) |
@@ -93,7 +93,7 @@ REST API is internal (UI-only, like Sysbucket v1): `/api/jobs`, `/api/presets`,
   listens on **8080**.
 - `compose.yaml` with a `/data` volume.
 - README quick starts:
-  - `docker run -d -p 8080:8080 -v syshose-data:/data ghcr.io/<user>/syshose`
+  - `docker run -d -p 8080:8080 -v syslog-hose-data:/data ghcr.io/<user>/syslog-hose`
   - `podman run` equivalent + **rootless note** (outbound UDP/TCP needs no privileges;
     we only *send*, never bind 514) + a **quadlet** `.container` unit for systemd.
 - Source-IP spoofing is explicitly **out of scope** (needs raw sockets/CAP_NET_RAW);

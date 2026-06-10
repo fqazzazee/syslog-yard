@@ -1,4 +1,4 @@
-module github.com/tesla/syshose
+module github.com/syslog-yard/syslog-hose
 
 go 1.26.4
 

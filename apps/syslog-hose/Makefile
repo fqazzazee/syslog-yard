@@ -4,13 +4,13 @@ ui:
 	cd web && npm ci && npm run build
 
 build: ui
-	go build -trimpath -ldflags="-s -w" -o syshose ./cmd/syshose
+	go build -trimpath -ldflags="-s -w" -o syslog-hose ./cmd/syslog-hose
 
 test:
 	go test ./...
 
 run: build
-	SYSHOSE_DATA=./data ./syshose
+	HOSE_DATA=./data ./syslog-hose
 
 image:
-	podman build -t syshose:latest . 2>/dev/null || docker build -t syshose:latest .
+	podman build -t syslog-hose:latest . 2>/dev/null || docker build -t syslog-hose:latest .
