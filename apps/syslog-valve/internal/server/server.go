@@ -15,6 +15,7 @@ import (
 
 	"github.com/syslog-yard/syslog-valve/internal/codegen"
 	"github.com/syslog-yard/syslog-valve/internal/graph"
+	"github.com/syslog-yard/syslog-valve/internal/rotate"
 	"github.com/syslog-yard/syslog-valve/internal/supervisor"
 )
 
@@ -23,15 +24,19 @@ type Server struct {
 	sup       *supervisor.Supervisor
 	graphPath string
 	hints     map[string]string
+	shares    codegen.Shares
+	rotator   *rotate.Rotator
 	mu        sync.Mutex // serializes graph writes and applies
 }
 
-func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]string) *Server {
+func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]string, shares codegen.Shares, rotator *rotate.Rotator) *Server {
 	s := &Server{
 		mux:       http.NewServeMux(),
 		sup:       sup,
 		graphPath: filepath.Join(dataDir, "graph.json"),
 		hints:     hints,
+		shares:    shares,
+		rotator:   rotator,
 	}
 	s.mux.HandleFunc("GET /api/graph", s.getGraph)
 	s.mux.HandleFunc("PUT /api/graph", s.putGraph)
@@ -41,6 +46,7 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 	s.mux.HandleFunc("GET /api/config", s.config)
 	s.mux.HandleFunc("GET /api/status", s.status)
 	s.mux.HandleFunc("GET /api/hints", s.getHints)
+	s.mux.HandleFunc("POST /api/rotate", s.rotateNow)
 	s.mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]string{"status": "ok"})
 	})
@@ -104,7 +110,12 @@ func (s *Server) apply(w http.ResponseWriter, _ *http.Request) {
 		httpError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
-	conf, err := codegen.Generate(g, s.sup.Version())
+	conf, err := codegen.Generate(g, s.sup.Version(), s.shares)
+	if err != nil {
+		httpError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	lr, err := codegen.GenerateLogrotate(g, s.shares)
 	if err != nil {
 		httpError(w, http.StatusUnprocessableEntity, err)
 		return
@@ -113,7 +124,11 @@ func (s *Server) apply(w http.ResponseWriter, _ *http.Request) {
 		httpError(w, http.StatusUnprocessableEntity, fmt.Errorf("syslog-ng rejected the config: %w", err))
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true, "config": conf})
+	if err := os.WriteFile(s.rotator.ConfPath, []byte(lr), 0o644); err != nil {
+		httpError(w, http.StatusInternalServerError, fmt.Errorf("writing logrotate config: %w", err))
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "config": conf, "logrotate": lr})
 }
 
 func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +166,15 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) getHints(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.hints)
+}
+
+func (s *Server) rotateNow(w http.ResponseWriter, _ *http.Request) {
+	out, err := s.rotator.Run()
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, map[string]string{"result": out})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

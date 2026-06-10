@@ -1,11 +1,33 @@
-export type NodeType = "source" | "forward";
+export type NodeType = "source" | "filter" | "forward" | "cache";
 
 export interface NodeConfig {
-  transport: "udp" | "tcp";
-  port: number;
+  transport?: "udp" | "tcp";
+  port?: number;
   bind?: string;
   host?: string;
+  // filter
+  severityMax?: number; // pass if syslog severity <= this (0 emerg .. 7 debug)
+  program?: string;
+  match?: string;
+  // cache
+  location?: string; // "" local, else share name
+  dir?: string;
+  maxSizeMB?: number;
+  maxAgeDays?: number;
+  rotate?: number;
+  compress?: boolean;
 }
+
+export const SEVERITIES = [
+  "emerg",
+  "alert",
+  "crit",
+  "err",
+  "warning",
+  "notice",
+  "info",
+  "debug",
+] as const;
 
 export interface GraphNode {
   id: string;
@@ -18,6 +40,7 @@ export interface GraphNode {
 
 export interface GraphEdge {
   from: string;
+  fromPort?: string; // filters: "match" | "else"
   to: string;
 }
 

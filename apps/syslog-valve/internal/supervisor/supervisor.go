@@ -5,8 +5,8 @@
 package supervisor
 
 import (
-	"context"
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -57,8 +57,8 @@ func New(bin, dataDir string) *Supervisor {
 	return &Supervisor{bin: bin, dataDir: dataDir}
 }
 
-func (s *Supervisor) ConfPath() string    { return filepath.Join(s.dataDir, "current.conf") }
-func (s *Supervisor) historyDir() string  { return filepath.Join(s.dataDir, "history") }
+func (s *Supervisor) ConfPath() string   { return filepath.Join(s.dataDir, "current.conf") }
+func (s *Supervisor) historyDir() string { return filepath.Join(s.dataDir, "history") }
 func (s *Supervisor) graphFor(id string) string {
 	return filepath.Join(s.historyDir(), id+".graph.json")
 }

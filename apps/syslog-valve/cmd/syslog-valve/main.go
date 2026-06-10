@@ -13,7 +13,10 @@ import (
 	"syscall"
 	"time"
 
+	"strings"
+
 	"github.com/syslog-yard/syslog-valve/internal/codegen"
+	"github.com/syslog-yard/syslog-valve/internal/rotate"
 	"github.com/syslog-yard/syslog-valve/internal/server"
 	"github.com/syslog-yard/syslog-valve/internal/supervisor"
 	"github.com/syslog-yard/syslog-valve/web"
@@ -56,7 +59,34 @@ func main() {
 		hints["suggestedForward"] = v
 	}
 
-	srv := &http.Server{Addr: addr, Handler: server.New(sup, dataDir, ui, hints)}
+	// External shares are mounted by the deployment under /shares/<name>;
+	// YARD_SHARES lists which names to offer in the UI.
+	shares := codegen.Shares{}
+	if v := os.Getenv("YARD_SHARES"); v != "" {
+		var ok []string
+		for _, name := range strings.Split(v, ",") {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			mount := filepath.Join("/shares", name)
+			if st, err := os.Stat(mount); err != nil || !st.IsDir() {
+				fmt.Fprintf(os.Stderr, "syslog-valve: share %q: %s not mounted, skipping\n", name, mount)
+				continue
+			}
+			shares[name] = mount
+			ok = append(ok, name)
+		}
+		hints["shares"] = strings.Join(ok, ",")
+	}
+
+	rotator := &rotate.Rotator{
+		ConfPath:  filepath.Join(dataDir, "logrotate.conf"),
+		StatePath: filepath.Join(dataDir, "logrotate.state"),
+	}
+	go rotator.Loop(ctx, time.Hour)
+
+	srv := &http.Server{Addr: addr, Handler: server.New(sup, dataDir, ui, hints, shares, rotator)}
 	go func() {
 		fmt.Printf("syslog-valve listening on %s (data dir %s, syslog-ng %s)\n",
 			addr, dataDir, sup.Version())

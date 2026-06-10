@@ -65,3 +65,27 @@ events:
       level="alert" vd="root" logdesc="Admin login failed" user="{{oneOf "admin" "root" "administrator"}}"
       ui="ssh({{randIP "any"}})" method="ssh" srcip={{randIP "any"}} action="login"
       status="failed" reason="name_invalid" msg="Administrator login failed"
+  - weight: 4
+    severity: 2
+    template: >-
+      date={{now "2006-01-02"}} time={{now "15:04:05"}} devname="{{hostname}}"
+      devid="FGT60FTK2009012345" logid="0419016384" type="utm" subtype="ips"
+      eventtype="signature" level="critical" vd="root" severity="critical"
+      srcip={{randIP "any"}} srccountry="{{oneOf "Reserved" "United States" "Netherlands" "China"}}"
+      dstip={{randIP "rfc1918"}} srcintf="wan1" dstintf="internal" sessionid={{seq "session"}}
+      action="dropped" proto=6 service="{{oneOf "HTTP" "HTTPS" "SSH"}}"
+      attack="{{oneOf "Log4j.Error.Log.Remote.Code.Execution" "Apache.Struts.OGNL.Remote.Code.Execution" "MS.SMB.Server.SMB1.Trans2.Secondary.Handling.Code.Execution" "Backdoor.Cobalt.Strike.Beacon"}}"
+      srcport={{randPort}} dstport={{oneOf "443" "80" "22" "445"}} attackid={{randInt 10000 60000}}
+      msg="applications3: {{oneOf "Log4j" "Struts" "SMB" "CobaltStrike"}} attack detected" crscore=50 craction=4194304 crlevel="critical"
+  - weight: 3
+    severity: 3
+    template: >-
+      date={{now "2006-01-02"}} time={{now "15:04:05"}} devname="{{hostname}}"
+      devid="FGT60FTK2009012345" logid="0211008192" type="utm" subtype="virus"
+      eventtype="infected" level="high" vd="root" severity="high"
+      srcip={{randIP "rfc1918"}} dstip={{randIP "public"}} sessionid={{seq "session"}}
+      srcintf="internal" dstintf="wan1" proto=6 service="HTTP" action="blocked"
+      filename="{{oneOf "invoice_2026.pdf.exe" "setup_update.msi" "report-Q2.xlsm" "driver_pack.zip"}}"
+      virus="{{oneOf "EICAR_TEST_FILE" "W32/Agent.XYZ!tr" "JS/ScrInject.B!tr" "MSIL/Kryptik.AGB!tr"}}"
+      url="http://{{oneOf "cdn-fastpatch.example.com" "files.update-mirror.example.net"}}/dl"
+      profile="default" user="" msg="File is infected."

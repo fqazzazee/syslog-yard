@@ -6,7 +6,6 @@ import {
   addEdge,
   useNodesState,
   useEdgesState,
-  type Node,
   type Edge,
   type Connection,
 } from "@xyflow/react";
@@ -15,42 +14,34 @@ import {
   api,
   type Graph,
   type GraphNode,
+  type NodeType,
   type Status,
   type HistoryEntry,
 } from "./api";
+import { nodeTypes, rfType, type FlowNode } from "./FlowNodes";
 import { NodePanel } from "./NodePanel";
 
-type FlowData = { label: React.ReactNode; g: GraphNode };
-type FlowNode = Node<FlowData>;
-
-function nodeLabel(g: GraphNode): React.ReactNode {
-  const detail =
-    g.type === "source"
-      ? `${g.config.transport} :${g.config.port}`
-      : `${g.config.host}:${g.config.port} ${g.config.transport}`;
-  return (
-    <div className="nlabel">
-      <b>{g.name}</b>
-      <span>{detail}</span>
-    </div>
-  );
+function mkEdge(from: string, to: string, fromPort?: string | null): Edge {
+  return {
+    id: `${from}${fromPort ? ":" + fromPort : ""}->${to}`,
+    source: from,
+    target: to,
+    sourceHandle: fromPort || undefined,
+    animated: true,
+    className: fromPort === "else" ? "edge-else" : undefined,
+    label: fromPort === "else" ? "else" : undefined,
+  };
 }
 
 function toFlow(g: Graph): { nodes: FlowNode[]; edges: Edge[] } {
   return {
     nodes: g.nodes.map((n) => ({
       id: n.id,
-      type: n.type === "source" ? "input" : "output",
+      type: rfType(n.type),
       position: { x: n.x, y: n.y },
-      className: `valve-${n.type}`,
-      data: { label: nodeLabel(n), g: n },
+      data: { g: n },
     })),
-    edges: g.edges.map((e) => ({
-      id: `${e.from}->${e.to}`,
-      source: e.from,
-      target: e.to,
-      animated: true,
-    })),
+    edges: g.edges.map((e) => mkEdge(e.from, e.to, e.fromPort)),
   };
 }
 
@@ -61,9 +52,27 @@ function fromFlow(nodes: FlowNode[], edges: Edge[]): Graph {
       x: n.position.x,
       y: n.position.y,
     })),
-    edges: edges.map((e) => ({ from: e.source, to: e.target })),
+    edges: edges.map((e) => ({
+      from: e.source,
+      fromPort: e.sourceHandle ?? "",
+      to: e.target,
+    })),
   };
 }
+
+const DEFAULTS: Record<NodeType, GraphNode["config"]> = {
+  source: { transport: "udp", port: 514, bind: "0.0.0.0" },
+  filter: { severityMax: 3 },
+  forward: { transport: "udp", port: 514, host: "" },
+  cache: { dir: "", rotate: 7, maxSizeMB: 100, maxAgeDays: 14, compress: true },
+};
+
+const NEW_NAMES: Record<NodeType, string> = {
+  source: "syslog in",
+  filter: "severity filter",
+  forward: "forward",
+  cache: "cache",
+};
 
 export default function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
@@ -97,51 +106,37 @@ export default function App() {
   }, [refresh, setNodes, setEdges]);
 
   const onConnect = useCallback(
-    (c: Connection) => setEdges((es) => addEdge({ ...c, animated: true }, es)),
+    (c: Connection) =>
+      setEdges((es) => addEdge(mkEdge(c.source!, c.target!, c.sourceHandle), es)),
     [setEdges],
   );
 
-  const addNode = (type: "source" | "forward") => {
+  const addNode = (type: NodeType) => {
     const id = `${type}-${Date.now().toString(36)}`;
-    let g: GraphNode;
-    if (type === "source") {
-      g = {
-        id,
-        type,
-        name: "syslog in",
-        x: 80,
-        y: 80 + nodes.length * 60,
-        config: { transport: "udp", port: 514, bind: "0.0.0.0" },
-      };
-    } else {
-      // pre-fill the next hop in the yard if the deployment suggested one
-      const [h, p] = (hints.suggestedForward ?? ":").split(":");
-      g = {
-        id,
-        type,
-        name: h ? `to ${h}` : "forward",
-        x: 460,
-        y: 80 + nodes.length * 60,
-        config: { transport: "udp", port: Number(p) || 514, host: h || "" },
-      };
+    const col = { source: 60, filter: 320, forward: 620, cache: 620 }[type];
+    const g: GraphNode = {
+      id,
+      type,
+      name: NEW_NAMES[type],
+      x: col,
+      y: 80 + nodes.length * 70,
+      config: { ...DEFAULTS[type] },
+    };
+    if (type === "forward" && hints.suggestedForward) {
+      const [h, p] = hints.suggestedForward.split(":");
+      g.name = `to ${h}`;
+      g.config.host = h;
+      g.config.port = Number(p) || 514;
     }
     setNodes((ns) => [
       ...ns,
-      {
-        id,
-        type: type === "source" ? "input" : "output",
-        position: { x: g.x, y: g.y },
-        className: `valve-${type}`,
-        data: { label: nodeLabel(g), g },
-      },
+      { id, type: rfType(type), position: { x: g.x, y: g.y }, data: { g } },
     ]);
     setSelected(id);
   };
 
   const updateSelected = (g: GraphNode) => {
-    setNodes((ns) =>
-      ns.map((n) => (n.id === g.id ? { ...n, data: { label: nodeLabel(g), g } } : n)),
-    );
+    setNodes((ns) => (ns.map((n) => (n.id === g.id ? { ...n, data: { g } } : n))));
   };
 
   const save = async (): Promise<boolean> => {
@@ -180,6 +175,7 @@ export default function App() {
   };
 
   const sel = nodes.find((n) => n.id === selected)?.data.g ?? null;
+  const shares = (hints.shares ?? "").split(",").filter(Boolean);
 
   return (
     <div className="app">
@@ -187,7 +183,9 @@ export default function App() {
         <span className="logo">⊶</span> syslog-valve
         <div className="toolbar">
           <button onClick={() => addNode("source")}>+ IN port</button>
+          <button onClick={() => addNode("filter")}>+ Filter</button>
           <button onClick={() => addNode("forward")}>+ OUT port</button>
+          <button onClick={() => addNode("cache")}>+ Cache</button>
           <button className="primary" onClick={apply}>
             Apply
           </button>
@@ -203,6 +201,7 @@ export default function App() {
           <ReactFlow
             nodes={nodes}
             edges={edges}
+            nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
@@ -216,13 +215,14 @@ export default function App() {
           </ReactFlow>
           {nodes.length === 0 && (
             <div className="empty-hint">
-              Add an <b>IN port</b> and an <b>OUT port</b>, wire them together, then <b>Apply</b>.
+              Add an <b>IN port</b>, a <b>Filter</b>, and an <b>OUT port</b> or{" "}
+              <b>Cache</b>; wire them, then <b>Apply</b>.
             </div>
           )}
         </div>
         <aside>
           {sel ? (
-            <NodePanel node={sel} onChange={updateSelected} />
+            <NodePanel node={sel} shares={shares} onChange={updateSelected} />
           ) : (
             <div className="muted">Select a node to edit it.</div>
           )}

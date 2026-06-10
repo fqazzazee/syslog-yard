@@ -1,10 +1,19 @@
-import type { GraphNode } from "./api";
+import { SEVERITIES, type GraphNode } from "./api";
+
+const TITLES: Record<GraphNode["type"], string> = {
+  source: "IN port",
+  filter: "Filter",
+  forward: "OUT port",
+  cache: "Cache to disk",
+};
 
 export function NodePanel({
   node,
+  shares,
   onChange,
 }: {
   node: GraphNode;
+  shares: string[];
   onChange: (g: GraphNode) => void;
 }) {
   const set = (patch: Partial<GraphNode["config"]>) =>
@@ -12,7 +21,7 @@ export function NodePanel({
 
   return (
     <div className="panel">
-      <h3>{node.type === "source" ? "IN port" : "OUT port"}</h3>
+      <h3>{TITLES[node.type]}</h3>
       <label>
         Name
         <input
@@ -20,45 +29,155 @@ export function NodePanel({
           onChange={(e) => onChange({ ...node, name: e.target.value })}
         />
       </label>
-      <label>
-        Transport
-        <select
-          value={node.config.transport}
-          onChange={(e) => set({ transport: e.target.value as "udp" | "tcp" })}
-        >
-          <option value="udp">udp</option>
-          <option value="tcp">tcp</option>
-        </select>
-      </label>
-      {node.type === "source" ? (
-        <label>
-          Bind address
-          <input
-            value={node.config.bind ?? ""}
-            placeholder="0.0.0.0"
-            onChange={(e) => set({ bind: e.target.value })}
-          />
-        </label>
-      ) : (
-        <label>
-          Destination host
-          <input
-            value={node.config.host ?? ""}
-            placeholder="host or IP"
-            onChange={(e) => set({ host: e.target.value })}
-          />
-        </label>
+
+      {(node.type === "source" || node.type === "forward") && (
+        <>
+          <label>
+            Transport
+            <select
+              value={node.config.transport}
+              onChange={(e) => set({ transport: e.target.value as "udp" | "tcp" })}
+            >
+              <option value="udp">udp</option>
+              <option value="tcp">tcp</option>
+            </select>
+          </label>
+          {node.type === "source" ? (
+            <label>
+              Bind address
+              <input
+                value={node.config.bind ?? ""}
+                placeholder="0.0.0.0"
+                onChange={(e) => set({ bind: e.target.value })}
+              />
+            </label>
+          ) : (
+            <label>
+              Destination host
+              <input
+                value={node.config.host ?? ""}
+                placeholder="host or IP"
+                onChange={(e) => set({ host: e.target.value })}
+              />
+            </label>
+          )}
+          <label>
+            Port
+            <input
+              type="number"
+              min={1}
+              max={65535}
+              value={node.config.port ?? 514}
+              onChange={(e) => set({ port: Number(e.target.value) })}
+            />
+          </label>
+        </>
       )}
-      <label>
-        Port
-        <input
-          type="number"
-          min={1}
-          max={65535}
-          value={node.config.port}
-          onChange={(e) => set({ port: Number(e.target.value) })}
-        />
-      </label>
+
+      {node.type === "filter" && (
+        <>
+          <label>
+            Severity at least
+            <select
+              value={node.config.severityMax ?? -1}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                set({ severityMax: v < 0 ? undefined : v });
+              }}
+            >
+              <option value={-1}>— any severity —</option>
+              {SEVERITIES.map((s, i) => (
+                <option key={s} value={i}>
+                  {s} or worse (≤ {i})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Program equals
+            <input
+              value={node.config.program ?? ""}
+              placeholder="e.g. sshd (optional)"
+              onChange={(e) => set({ program: e.target.value })}
+            />
+          </label>
+          <label>
+            Message matches (regex)
+            <input
+              value={node.config.match ?? ""}
+              placeholder={'e.g. subtype="ips" (optional)'}
+              onChange={(e) => set({ match: e.target.value })}
+            />
+          </label>
+          <p className="muted">
+            Conditions are ANDed. Matching messages leave via <b>match</b>, the
+            rest via <b>else</b>.
+          </p>
+        </>
+      )}
+
+      {node.type === "cache" && (
+        <>
+          <label>
+            Location
+            <select
+              value={node.config.location ?? ""}
+              onChange={(e) => set({ location: e.target.value })}
+            >
+              <option value="">local (/data/cache)</option>
+              {shares.map((s) => (
+                <option key={s} value={s}>
+                  share: {s} (/shares/{s})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Folder
+            <input
+              value={node.config.dir ?? ""}
+              placeholder="subfolder name"
+              onChange={(e) => set({ dir: e.target.value })}
+            />
+          </label>
+          <label>
+            Rotate when size reaches (MB, 0 = daily)
+            <input
+              type="number"
+              min={0}
+              value={node.config.maxSizeMB ?? 0}
+              onChange={(e) => set({ maxSizeMB: Number(e.target.value) })}
+            />
+          </label>
+          <label>
+            Rotations kept
+            <input
+              type="number"
+              min={1}
+              value={node.config.rotate ?? 7}
+              onChange={(e) => set({ rotate: Number(e.target.value) })}
+            />
+          </label>
+          <label>
+            Delete rotated logs older than (days, 0 = never)
+            <input
+              type="number"
+              min={0}
+              value={node.config.maxAgeDays ?? 0}
+              onChange={(e) => set({ maxAgeDays: Number(e.target.value) })}
+            />
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={node.config.compress ?? false}
+              onChange={(e) => set({ compress: e.target.checked })}
+            />
+            compress rotated logs
+          </label>
+        </>
+      )}
+
       <p className="muted">Changes take effect on Apply.</p>
     </div>
   );

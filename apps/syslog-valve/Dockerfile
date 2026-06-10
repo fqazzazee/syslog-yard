@@ -17,7 +17,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /syslog-valve ./cmd/sys
 
 # --- Runtime: alpine because we ship syslog-ng as the data plane ---
 FROM alpine:3.22
-RUN apk add --no-cache syslog-ng ca-certificates tzdata
+RUN apk add --no-cache syslog-ng logrotate ca-certificates tzdata
 COPY --from=build /syslog-valve /usr/local/bin/syslog-valve
 
 # Runs as root so listeners on ports <1024 work inside the container
