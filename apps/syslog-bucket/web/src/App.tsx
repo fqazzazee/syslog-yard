@@ -70,10 +70,28 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [hints, setHints] = useState<Record<string, string>>({});
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const entriesRef = useRef<Entry[]>([]);
   entriesRef.current = entries;
 
   const readOnly = me.role === "viewer";
+
+  // The account menu closes like a menu should: outside click or Escape.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     fetchHints().then(setHints).catch(() => {});
@@ -175,15 +193,20 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
             ~{stats.approx_total.toLocaleString()} entries · {stats.last_minute}/min
           </span>
         )}
-        <div className="user-menu">
-          <button className="user-btn" onClick={() => setMenuOpen(!menuOpen)}>
-            👤 {me.display_name || me.username} <span className={`role-badge role-${me.role}`}>{me.role}</span>
+        <div className="user-menu" ref={menuRef}>
+          <button
+            className={`user-btn${menuOpen ? " open" : ""}`}
+            title="Account menu"
+            onClick={() => setMenuOpen(!menuOpen)}
+          >
+            👤 {me.display_name || me.username} <span className={`role-badge role-${me.role}`}>{me.role}</span>{" "}
+            <span className="caret">▾</span>
           </button>
           {menuOpen && (
             <div className="user-dropdown" onClick={() => setMenuOpen(false)}>
               {me.role === "admin" && <button onClick={() => setModal({ kind: "users" })}>Users…</button>}
               <button onClick={() => setModal({ kind: "account" })}>Account…</button>
-              <button onClick={onSignOut}>Sign out</button>
+              <button onClick={onSignOut}>⏻ Sign out</button>
             </div>
           )}
         </div>

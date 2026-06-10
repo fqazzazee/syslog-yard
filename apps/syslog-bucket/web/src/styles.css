@@ -161,17 +161,31 @@ body {
 }
 
 .user-btn {
-  background: none;
-  border: 1px solid transparent;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--fg);
   padding: 5px 10px;
   cursor: pointer;
   font-size: 13px;
+  white-space: nowrap;
 }
 
-.user-btn:hover {
-  border-color: var(--border);
+.user-btn:hover,
+.user-btn.open {
+  border-color: var(--accent);
+}
+
+.user-btn .caret {
+  color: var(--fg-dim);
+  font-size: 10px;
+}
+
+/* keep the account menu reachable on narrow windows */
+@media (max-width: 1100px) {
+  .topbar .stats {
+    display: none;
+  }
 }
 
 .role-badge {
