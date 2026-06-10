@@ -19,6 +19,7 @@ import (
 	"github.com/syslog-yard/syslog-valve/internal/rotate"
 	"github.com/syslog-yard/syslog-valve/internal/server"
 	"github.com/syslog-yard/syslog-valve/internal/supervisor"
+	"github.com/syslog-yard/syslog-valve/internal/tap"
 	"github.com/syslog-yard/syslog-valve/web"
 )
 
@@ -43,6 +44,15 @@ func main() {
 	sup := supervisor.New(bin, ngDir)
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+
+	// The live-tail tap must be listening before syslog-ng starts, or its
+	// tap destinations error until the first time-reopen retry.
+	tp := tap.New()
+	if err := tp.Listen(ctx, codegen.TapSocket); err != nil {
+		fmt.Fprintf(os.Stderr, "syslog-valve: live-tail tap: %v\n", err)
+		os.Exit(1)
+	}
+
 	if err := sup.Start(ctx, codegen.Minimal(sup.Version())); err != nil {
 		fmt.Fprintf(os.Stderr, "syslog-valve: starting syslog-ng: %v\n", err)
 		os.Exit(1)
@@ -98,7 +108,7 @@ func main() {
 	}
 	go rotator.Loop(ctx, time.Hour)
 
-	srv := &http.Server{Addr: addr, Handler: server.New(sup, dataDir, ui, hints, shares, rotator)}
+	srv := &http.Server{Addr: addr, Handler: server.New(sup, dataDir, ui, hints, shares, rotator, tp)}
 	go func() {
 		fmt.Printf("syslog-valve listening on %s (data dir %s, syslog-ng %s)\n",
 			addr, dataDir, sup.Version())

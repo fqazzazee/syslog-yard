@@ -1,0 +1,21 @@
+[Unit]
+Description=syslog-hose — syslog traffic generator
+
+[Container]
+Image=ghcr.io/syslog-yard/syslog-hose:latest
+ContainerName=syslog-hose
+Network=yard.network
+PublishPort=8080:8080
+Volume=hose-data.volume:/data
+Environment=HOSE_ADDR=:8080
+Environment=HOSE_DATA=/data
+Environment=HOSE_SUGGESTED_DEST=syslog-valve:514
+Environment=YARD_LINK_HOSE=8080
+Environment=YARD_LINK_VALVE=8081
+Environment=YARD_LINK_BUCKET=8082
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

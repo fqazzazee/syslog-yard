@@ -1,0 +1,3 @@
+# Internal bridge for the yard; services reach each other by container name.
+[Network]
+NetworkName=yard

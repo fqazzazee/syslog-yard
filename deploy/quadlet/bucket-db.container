@@ -1,0 +1,23 @@
+[Unit]
+Description=syslog-bucket Postgres store (internal only)
+
+[Container]
+Image=docker.io/library/postgres:17-alpine
+ContainerName=bucket-db
+Network=yard.network
+Volume=bucket-dbdata.volume:/var/lib/postgresql/data
+Environment=POSTGRES_USER=syslog_bucket
+Environment=POSTGRES_PASSWORD=syslog_bucket
+Environment=POSTGRES_DB=syslog_bucket
+HealthCmd=pg_isready -U syslog_bucket
+HealthInterval=3s
+HealthRetries=20
+# Flip the unit to "started" only once Postgres answers, so dependents
+# can simply order After= this service.
+Notify=healthy
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

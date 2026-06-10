@@ -98,8 +98,10 @@ Node-graph canvas (React Flow); the backend compiles the graph into
 **Apply pipeline:** graph JSON → generated config → `syslog-ng --syntax-only`
 → atomic swap + `syslog-ng-ctl reload` → last-known-good kept for one-click rollback.
 
-**Observability:** poll `syslog-ng-ctl stats` for msgs/sec per edge rendered on the
-wires; live-tail tap on any wire; config errors surfaced in the UI.
+**Observability:** live tail of everything entering the valve, labeled per IN
+port (S5: every source duplicates to a unix-dgram tap socket the app streams
+over SSE); config errors surfaced in the UI. Still open: per-edge msgs/sec
+rendered on the wires from `syslog-ng-ctl stats`.
 
 **Container:** Alpine or Debian-slim bundling syslog-ng, supervised by the Go app.
 Graph JSON, generated configs, and version history as flat files in `/data`.

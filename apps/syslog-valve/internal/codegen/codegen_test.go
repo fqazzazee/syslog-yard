@@ -155,3 +155,49 @@ func TestMinimalIsNonEmpty(t *testing.T) {
 		t.Fatal("minimal config malformed")
 	}
 }
+
+func TestGenerateTLS(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: []graph.Node{
+			{ID: "src-1", Type: graph.TypeSource, Name: "tls-in",
+				Config: graph.Config{Transport: "tls", Port: 6514}},
+			{ID: "fwd-1", Type: graph.TypeForward, Name: "to-siem",
+				Config: graph.Config{Transport: "tls", Port: 6514, Host: "siem", TLSVerify: true}},
+			{ID: "fwd-2", Type: graph.TypeForward, Name: "to-lab",
+				Config: graph.Config{Transport: "tls", Port: 6514, Host: "lab"}},
+		},
+		Edges: []graph.Edge{
+			{From: "src-1", To: "fwd-1"},
+			{From: "src-1", To: "fwd-2"},
+		},
+	}
+	conf, err := Generate(g, "4.8", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`transport("tls") port(6514) tls(key-file("/data/certs/valve.key") cert-file("/data/certs/valve.crt") peer-verify(optional-untrusted))`,
+		`network("siem" port(6514) transport("tls") tls(peer-verify(required-trusted) ca-dir("/etc/ssl/certs")))`,
+		`network("lab" port(6514) transport("tls") tls(peer-verify(optional-untrusted)))`,
+	} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("generated config missing %q:\n%s", want, conf)
+		}
+	}
+}
+
+func TestGenerateTap(t *testing.T) {
+	conf, err := Generate(testGraph(), "4.8", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`destination d_tap_src_1 {`,
+		`unix-dgram("/data/syslog-ng/tap.sock" persist-name("tap_src_1") template("src_1\t${ISODATE}\t${HOST}\t${PROGRAM}\t${MSG}\n"));`,
+		"log {\n    source(s_src_1);\n    destination(d_tap_src_1);\n};",
+	} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("generated config missing %q:\n%s", want, conf)
+		}
+	}
+}

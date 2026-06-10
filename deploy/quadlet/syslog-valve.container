@@ -1,0 +1,28 @@
+[Unit]
+Description=syslog-valve — visual syslog router/filter
+
+[Container]
+Image=ghcr.io/syslog-yard/syslog-valve:latest
+ContainerName=syslog-valve
+Network=yard.network
+PublishPort=8081:8081
+# Host entry into the valve's IN ports; add pairs per extra listener.
+PublishPort=6514:514/udp
+PublishPort=6514:514/tcp
+Volume=valve-data.volume:/data
+Environment=VALVE_ADDR=:8081
+Environment=VALVE_DATA=/data
+Environment=VALVE_SUGGESTED_FORWARD=bucket-syslog:514
+Environment=YARD_LINK_HOSE=8080
+Environment=YARD_LINK_VALVE=8081
+Environment=YARD_LINK_BUCKET=8082
+# External shares (see docs/SHARES.md): bind a host-mounted share and
+# list its name so the UI offers it.
+# Volume=/mnt/nas/syslog:/shares/archive:z
+# Environment=YARD_SHARES=archive
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

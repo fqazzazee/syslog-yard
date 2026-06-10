@@ -1,0 +1,22 @@
+[Unit]
+Description=syslog-bucket — syslog triage UI
+Requires=bucket-db.service
+After=bucket-db.service
+
+[Container]
+Image=ghcr.io/syslog-yard/syslog-bucket:latest
+ContainerName=syslog-bucket
+Network=yard.network
+PublishPort=8082:8080
+Environment=BUCKET_DB_URL=postgres://syslog_bucket:syslog_bucket@bucket-db:5432/syslog_bucket?sslmode=disable
+Environment=BUCKET_API_ADDR=:8080
+Environment=BUCKET_INGEST_ADDR=:6601
+Environment=YARD_LINK_HOSE=8080
+Environment=YARD_LINK_VALVE=8081
+Environment=YARD_LINK_BUCKET=8082
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

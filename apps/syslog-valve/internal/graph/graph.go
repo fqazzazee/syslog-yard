@@ -29,10 +29,11 @@ var SeverityNames = []string{"emerg", "alert", "crit", "err", "warning", "notice
 // Config carries the union of per-type settings; codegen reads only the
 // fields relevant to the node's type.
 type Config struct {
-	Transport string `json:"transport,omitempty"` // source/forward: udp | tcp
+	Transport string `json:"transport,omitempty"` // source/forward: udp | tcp | tls
 	Port      int    `json:"port,omitempty"`
-	Bind      string `json:"bind,omitempty"` // source: listen address
-	Host      string `json:"host,omitempty"` // forward: destination host
+	Bind      string `json:"bind,omitempty"`      // source: listen address
+	Host      string `json:"host,omitempty"`      // forward: destination host
+	TLSVerify bool   `json:"tlsVerify,omitempty"` // forward+tls: verify peer against system CAs
 
 	// filter: conditions are ANDed; at least one must be set
 	SeverityMax *int   `json:"severityMax,omitempty"` // pass if severity <= this
@@ -213,10 +214,10 @@ func (g *Graph) checkCycles() error {
 
 func checkTransport(n Node) error {
 	switch n.Config.Transport {
-	case "udp", "tcp":
+	case "udp", "tcp", "tls":
 		return nil
 	default:
-		return fmt.Errorf("node %q: transport must be udp or tcp, got %q", label(n), n.Config.Transport)
+		return fmt.Errorf("node %q: transport must be udp, tcp or tls, got %q", label(n), n.Config.Transport)
 	}
 }
 

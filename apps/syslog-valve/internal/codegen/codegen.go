@@ -14,6 +14,19 @@ import (
 // Shares maps a share name to its mount point (e.g. archive -> /shares/archive).
 type Shares map[string]string
 
+// The valve's TLS identity for IN ports: generated self-signed from the UI
+// or mounted by the deployment. Forward verification uses the system CA
+// bundle (mount extra CAs into /etc/ssl/certs).
+const (
+	CertFile = "/data/certs/valve.crt"
+	KeyFile  = "/data/certs/valve.key"
+	CADir    = "/etc/ssl/certs"
+)
+
+// TapSocket is the unix datagram socket the Go app listens on; every
+// source duplicates its stream there for the UI's live tail.
+const TapSocket = "/data/syslog-ng/tap.sock"
+
 // Generate renders the full syslog-ng.conf for g. version is the
 // "@version" directive value and should match the running syslog-ng
 // (it tolerates older config versions with a warning, not the reverse).
@@ -34,11 +47,23 @@ func Generate(g *graph.Graph, version string, shares Shares) (string, error) {
 			if bind == "" {
 				bind = "0.0.0.0"
 			}
-			fmt.Fprintf(&b, "\n# source %s\nsource s_%s {\n    network(ip(%q) transport(%q) port(%d));\n};\n",
-				name(n), graph.Ident(n.ID), bind, n.Config.Transport, n.Config.Port)
+			tls := ""
+			if n.Config.Transport == "tls" {
+				tls = fmt.Sprintf(" tls(key-file(%q) cert-file(%q) peer-verify(optional-untrusted))", KeyFile, CertFile)
+			}
+			fmt.Fprintf(&b, "\n# source %s\nsource s_%s {\n    network(ip(%q) transport(%q) port(%d)%s);\n};\n",
+				name(n), graph.Ident(n.ID), bind, n.Config.Transport, n.Config.Port, tls)
 		case graph.TypeForward:
-			fmt.Fprintf(&b, "\n# forward %s\ndestination d_%s {\n    network(%q port(%d) transport(%q));\n};\n",
-				name(n), graph.Ident(n.ID), n.Config.Host, n.Config.Port, n.Config.Transport)
+			tls := ""
+			if n.Config.Transport == "tls" {
+				if n.Config.TLSVerify {
+					tls = fmt.Sprintf(" tls(peer-verify(required-trusted) ca-dir(%q))", CADir)
+				} else {
+					tls = " tls(peer-verify(optional-untrusted))"
+				}
+			}
+			fmt.Fprintf(&b, "\n# forward %s\ndestination d_%s {\n    network(%q port(%d) transport(%q)%s);\n};\n",
+				name(n), graph.Ident(n.ID), n.Config.Host, n.Config.Port, n.Config.Transport, tls)
 		case graph.TypeCache:
 			p, err := CachePath(n, shares)
 			if err != nil {
@@ -74,6 +99,21 @@ func Generate(g *graph.Graph, version string, shares Shares) (string, error) {
 			fmt.Fprintf(&b, "    filter(f_%s%s);\n", graph.Ident(st.filterID), suffix)
 		}
 		fmt.Fprintf(&b, "    destination(d_%s);\n};\n", graph.Ident(p.sink))
+	}
+
+	// Live tail: every source also feeds the app's tap socket; the
+	// template ident lets the UI label messages with their IN port.
+	for _, n := range g.Nodes {
+		if n.Type != graph.TypeSource {
+			continue
+		}
+		id := graph.Ident(n.ID)
+		// Explicit persist-name: multiple destinations on one socket path
+		// otherwise collide at startup (a runtime error --syntax-only
+		// doesn't catch).
+		fmt.Fprintf(&b, "\n# live tail tap for %s\ndestination d_tap_%s {\n    unix-dgram(%q persist-name(\"tap_%s\") template(\"%s\\t${ISODATE}\\t${HOST}\\t${PROGRAM}\\t${MSG}\\n\"));\n};\n",
+			name(n), id, TapSocket, id, id)
+		fmt.Fprintf(&b, "log {\n    source(s_%s);\n    destination(d_tap_%s);\n};\n", id, id)
 	}
 	return b.String(), nil
 }

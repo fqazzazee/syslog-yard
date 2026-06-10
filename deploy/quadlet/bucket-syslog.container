@@ -1,0 +1,18 @@
+[Unit]
+Description=syslog-bucket front-end receiver (syslog-ng)
+Requires=syslog-bucket.service
+After=syslog-bucket.service
+
+[Container]
+Image=docker.io/balabit/syslog-ng:4.8.3
+ContainerName=bucket-syslog
+Network=yard.network
+Exec=--no-caps -F
+# Copy deploy/syslog-ng/bucket.conf to this path first (see README.md).
+Volume=%h/.config/syslog-yard/bucket.conf:/etc/syslog-ng/syslog-ng.conf:ro,z
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

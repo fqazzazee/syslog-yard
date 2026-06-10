@@ -255,6 +255,15 @@ func (s *Supervisor) Rollback(id string) ([]byte, error) {
 	return graphJSON, s.Reload()
 }
 
+// HistoryConfig returns the archived config text for one history entry.
+func (s *Supervisor) HistoryConfig(id string) ([]byte, error) {
+	data, err := os.ReadFile(s.confFor(id))
+	if err != nil {
+		return nil, fmt.Errorf("history entry %s: %w", id, err)
+	}
+	return data, nil
+}
+
 func (s *Supervisor) History() []HistoryEntry {
 	entries, _ := os.ReadDir(s.historyDir())
 	var out []HistoryEntry

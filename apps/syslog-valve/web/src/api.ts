@@ -1,10 +1,11 @@
 export type NodeType = "source" | "filter" | "forward" | "cache";
 
 export interface NodeConfig {
-  transport?: "udp" | "tcp";
+  transport?: "udp" | "tcp" | "tls";
   port?: number;
   bind?: string;
   host?: string;
+  tlsVerify?: boolean; // forward+tls: verify peer against system CAs
   // filter
   severityMax?: number; // pass if syslog severity <= this (0 emerg .. 7 debug)
   program?: string;
@@ -64,6 +65,23 @@ export interface HistoryEntry {
   time: string;
 }
 
+export interface CertStatus {
+  exists: boolean;
+  subject?: string;
+  notAfter?: string;
+  sans?: string[];
+  error?: string;
+}
+
+export interface TailEvent {
+  seq: number;
+  src: string;
+  time: string;
+  host: string;
+  program: string;
+  message: string;
+}
+
 async function check(res: Response): Promise<Response> {
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
@@ -95,4 +113,10 @@ export const api = {
     fetch("/api/config").then(check).then((r) => r.text()),
   hints: (): Promise<Record<string, string>> =>
     fetch("/api/hints").then(check).then((r) => r.json()),
+  historyConfig: (id: string): Promise<string> =>
+    fetch(`/api/history/${id}/config`).then(check).then((r) => r.text()),
+  certs: (): Promise<CertStatus> =>
+    fetch("/api/certs").then(check).then((r) => r.json()),
+  generateCert: (): Promise<CertStatus> =>
+    fetch("/api/certs/selfsigned", { method: "POST" }).then(check).then((r) => r.json()),
 };

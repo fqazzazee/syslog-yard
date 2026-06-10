@@ -1,4 +1,5 @@
-import { SEVERITIES, type GraphNode } from "./api";
+import { useEffect, useState } from "react";
+import { api, SEVERITIES, type CertStatus, type GraphNode } from "./api";
 
 const TITLES: Record<GraphNode["type"], string> = {
   source: "IN port",
@@ -36,10 +37,11 @@ export function NodePanel({
             Transport
             <select
               value={node.config.transport}
-              onChange={(e) => set({ transport: e.target.value as "udp" | "tcp" })}
+              onChange={(e) => set({ transport: e.target.value as "udp" | "tcp" | "tls" })}
             >
               <option value="udp">udp</option>
               <option value="tcp">tcp</option>
+              <option value="tls">tls (RFC 5425)</option>
             </select>
           </label>
           {node.type === "source" ? (
@@ -71,6 +73,17 @@ export function NodePanel({
               onChange={(e) => set({ port: Number(e.target.value) })}
             />
           </label>
+          {node.config.transport === "tls" && node.type === "source" && <CertPanel />}
+          {node.config.transport === "tls" && node.type === "forward" && (
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={node.config.tlsVerify ?? false}
+                onChange={(e) => set({ tlsVerify: e.target.checked })}
+              />
+              verify server certificate (system CAs)
+            </label>
+          )}
         </>
       )}
 
@@ -179,6 +192,49 @@ export function NodePanel({
       )}
 
       <p className="muted">Changes take effect on Apply.</p>
+    </div>
+  );
+}
+
+// CertPanel shows the valve's TLS identity (shared by every TLS IN port)
+// and lets the user (re)generate a self-signed pair for lab use.
+function CertPanel() {
+  const [cert, setCert] = useState<CertStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    api.certs().then(setCert).catch((e) => setErr(String(e)));
+  }, []);
+
+  const generate = () => {
+    if (cert?.exists && !confirm("Replace the existing certificate? Peers pinned to the old one will stop trusting the valve.")) return;
+    setBusy(true);
+    setErr("");
+    api
+      .generateCert()
+      .then(setCert)
+      .catch((e) => setErr(String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="cert-panel">
+      {cert?.exists ? (
+        <p className="muted">
+          Certificate: {cert.subject} — expires {cert.notAfter?.slice(0, 10)}
+          {cert.sans && cert.sans.length > 0 && <> · SANs: {cert.sans.join(", ")}</>}
+          {cert.error && <span className="err"> ({cert.error})</span>}
+        </p>
+      ) : (
+        <p className="muted">
+          No certificate yet — TLS IN ports need one (served from /data/certs).
+        </p>
+      )}
+      <button onClick={generate} disabled={busy}>
+        {cert?.exists ? "Regenerate self-signed cert" : "Generate self-signed cert"}
+      </button>
+      {err && <p className="err">{err}</p>}
     </div>
   );
 }

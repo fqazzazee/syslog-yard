@@ -53,9 +53,10 @@ through, auto-tagged by rules:
 
 ## Status
 
-See [docs/PLAN.md](docs/PLAN.md) for the build plan. S4 complete — the
-suite is cohesive: cross-UI yard nav (env-injected links, hidden when
-standalone), neighbor-hint defaults (new hose jobs aim at the valve, new
-valve OUT ports aim at the bucket), NFS/CIFS share docs, README
-screenshots. Next: S5 ops polish (TLS, live tail on wires, import/export,
-GHCR publish, quadlet docs).
+See [docs/PLAN.md](docs/PLAN.md) for the build plan. S5 complete — ops
+polish: TLS in/out on the valve (RFC 5425 listeners with one-click
+self-signed certs, verified or lab-mode TLS forwarding), live tail of
+every message entering the valve, config history with timestamped
+previews before rollback, graph import/export, a GHCR publish workflow,
+and rootless-podman quadlet units ([deploy/quadlet](deploy/quadlet)).
+Next: S6 auth & collaboration.

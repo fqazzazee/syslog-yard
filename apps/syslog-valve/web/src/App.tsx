@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -17,6 +17,7 @@ import {
   type NodeType,
   type Status,
   type HistoryEntry,
+  type TailEvent,
 } from "./api";
 import { nodeTypes, rfType, type FlowNode } from "./FlowNodes";
 import { NodePanel } from "./NodePanel";
@@ -84,6 +85,9 @@ export default function App() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [hints, setHints] = useState<Record<string, string>>({});
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [preview, setPreview] = useState<{ id: string; conf: string } | null>(null);
+  const [tailOn, setTailOn] = useState(false);
+  const importInput = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(() => {
     api.status().then(setStatus).catch(() => setStatus(null));
@@ -175,6 +179,44 @@ export default function App() {
     }
   };
 
+  // Export the canvas as it stands; import validates server-side first so
+  // a bad file can't clobber the saved graph.
+  const exportGraph = () => {
+    const blob = new Blob([JSON.stringify(fromFlow(nodes, edges), null, 2)], {
+      type: "application/json",
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "syslog-valve-graph.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const importGraph = async (file: File) => {
+    try {
+      const g = JSON.parse(await file.text()) as Graph;
+      await api.saveGraph(g);
+      const f = toFlow(g);
+      setNodes(f.nodes);
+      setEdges(f.edges);
+      setSelected(null);
+      setBanner({ kind: "ok", text: `Imported ${file.name} — Apply to activate` });
+    } catch (e) {
+      setBanner({ kind: "err", text: `Import failed: ${String(e)}` });
+    }
+  };
+
+  const togglePreview = (id: string) => {
+    if (preview?.id === id) {
+      setPreview(null);
+      return;
+    }
+    api
+      .historyConfig(id)
+      .then((conf) => setPreview({ id, conf }))
+      .catch((e) => setBanner({ kind: "err", text: String(e) }));
+  };
+
   const sel = nodes.find((n) => n.id === selected)?.data.g ?? null;
   const shares = (hints.shares ?? "").split(",").filter(Boolean);
 
@@ -188,6 +230,23 @@ export default function App() {
           <button onClick={() => addNode("filter")}>+ Filter</button>
           <button onClick={() => addNode("forward")}>+ OUT port</button>
           <button onClick={() => addNode("cache")}>+ Cache</button>
+          <button onClick={exportGraph} title="Download the graph as JSON">
+            ⤓ Export
+          </button>
+          <button onClick={() => importInput.current?.click()} title="Load a graph JSON file">
+            ⤒ Import
+          </button>
+          <input
+            ref={importInput}
+            type="file"
+            accept=".json,application/json"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) importGraph(f);
+              e.target.value = "";
+            }}
+          />
           <button className="primary" onClick={apply}>
             Apply
           </button>
@@ -235,21 +294,79 @@ export default function App() {
           <details>
             <summary>History ({history.length})</summary>
             {history.map((h) => (
-              <div className="hist" key={h.id}>
-                <code>{h.id}</code>
-                <button onClick={() => rollback(h.id)}>roll back</button>
+              <div key={h.id}>
+                <div className="hist">
+                  <code title={h.id}>{new Date(h.time).toLocaleString()}</code>
+                  <button onClick={() => togglePreview(h.id)}>
+                    {preview?.id === h.id ? "hide" : "view"}
+                  </button>
+                  <button onClick={() => rollback(h.id)}>roll back</button>
+                </div>
+                {preview?.id === h.id && <pre>{preview.conf}</pre>}
               </div>
             ))}
           </details>
         </aside>
       </div>
+      {tailOn && <TailDrawer />}
       <footer>
         <span className={`dot ${status?.running ? "on" : "off"}`} />
         {status?.running
           ? `syslog-ng ${status.version} running (pid ${status.pid}, ${status.restarts} restarts)`
           : "syslog-ng not running"}
         {status?.lastError && <span className="err"> — {status.lastError}</span>}
+        <span className="spacer" />
+        <button className={tailOn ? "tail-toggle on" : "tail-toggle"} onClick={() => setTailOn(!tailOn)}>
+          {tailOn ? "▾ Live tail" : "▸ Live tail"}
+        </button>
       </footer>
+    </div>
+  );
+}
+
+// TailDrawer streams every message entering the valve (SSE from the tap
+// socket), labeled with the IN port it arrived on.
+function TailDrawer() {
+  const [events, setEvents] = useState<TailEvent[]>([]);
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  pausedRef.current = paused;
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bodyRef.current?.scrollTo(0, bodyRef.current.scrollHeight);
+  }, [events]);
+
+  useEffect(() => {
+    const es = new EventSource("/api/tail");
+    es.onmessage = (m) => {
+      if (pausedRef.current) return;
+      const ev = JSON.parse(m.data) as TailEvent;
+      setEvents((prev) => [...prev, ev].slice(-300));
+    };
+    return () => es.close();
+  }, []);
+
+  return (
+    <div className="tail-drawer">
+      <div className="tail-bar">
+        <span className="muted">in-flight messages, newest last</span>
+        <span className="spacer" />
+        <button onClick={() => setPaused(!paused)}>{paused ? "▶ resume" : "‖ pause"}</button>
+        <button onClick={() => setEvents([])}>clear</button>
+      </div>
+      <div className="tail-body" ref={bodyRef}>
+        {events.length === 0 && <div className="muted">Waiting for traffic…</div>}
+        {events.map((e) => (
+          <div className="tail-line" key={e.seq}>
+            <span className="tail-src">{e.src}</span>
+            <span className="tail-meta">
+              {e.time.slice(11, 19)} {e.host} {e.program}:
+            </span>{" "}
+            {e.message}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
