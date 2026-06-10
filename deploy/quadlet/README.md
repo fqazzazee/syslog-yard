@@ -18,7 +18,10 @@ systemctl --user start syslog-hose syslog-valve bucket-syslog
 the db unit only reports started once Postgres answers `pg_isready`.
 
 Check: `systemctl --user status 'syslog-*' 'bucket-*'` and the UIs on
-8080/8081/8082. To start the yard at boot without logging in:
+8080/8081/8082. The bucket's initial admin password comes from
+`BUCKET_ADMIN_PASSWORD` in `syslog-bucket.container` (see
+[docs/AUTH.md](../../docs/AUTH.md)). To start the yard at boot without
+logging in:
 
 ```sh
 loginctl enable-linger $USER

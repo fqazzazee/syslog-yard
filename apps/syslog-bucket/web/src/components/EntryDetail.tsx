@@ -7,11 +7,12 @@ interface Props {
   entry: Entry;
   tags: Tag[];
   tagsById: Map<number, Tag>;
+  readOnly: boolean; // viewer role: triage controls hidden
   onClose: () => void;
   onUpdated: (e: Entry) => void;
 }
 
-export default function EntryDetail({ entry, tags, tagsById, onClose, onUpdated }: Props) {
+export default function EntryDetail({ entry, tags, tagsById, readOnly, onClose, onUpdated }: Props) {
   const structured = entry.structured ?? {};
   const structuredKeys = Object.keys(structured);
 
@@ -32,7 +33,11 @@ export default function EntryDetail({ entry, tags, tagsById, onClose, onUpdated 
       <div className="triage">
         <label>
           Status
-          <select value={entry.status} onChange={(e) => update(patchEntry(entry.id, { status: e.target.value }))}>
+          <select
+            value={entry.status}
+            disabled={readOnly}
+            onChange={(e) => update(patchEntry(entry.id, { status: e.target.value }))}
+          >
             {STATUS_NAMES.map((s) => (
               <option key={s} value={s}>
                 {s}
@@ -44,6 +49,7 @@ export default function EntryDetail({ entry, tags, tagsById, onClose, onUpdated 
           Priority
           <select
             value={entry.priority}
+            disabled={readOnly}
             onChange={(e) => update(patchEntry(entry.id, { priority: Number(e.target.value) }))}
           >
             {PRIORITY_NAMES.map((p, n) => (
@@ -58,9 +64,13 @@ export default function EntryDetail({ entry, tags, tagsById, onClose, onUpdated 
       <div className="detail-tags">
         {(entry.tag_ids ?? []).map((id) => {
           const tag = tagsById.get(id);
-          return tag ? <TagChip key={id} tag={tag} onRemove={() => update(untagEntry(entry.id, id))} /> : null;
+          return tag ? (
+            <TagChip key={id} tag={tag} onRemove={readOnly ? undefined : () => update(untagEntry(entry.id, id))} />
+          ) : null;
         })}
-        <TagPicker tags={tags} exclude={entry.tag_ids ?? []} onPick={(id) => update(tagEntry(entry.id, id))} />
+        {!readOnly && (
+          <TagPicker tags={tags} exclude={entry.tag_ids ?? []} onPick={(id) => update(tagEntry(entry.id, id))} />
+        )}
       </div>
 
       <dl>

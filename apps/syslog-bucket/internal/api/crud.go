@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/rules"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
@@ -76,9 +77,12 @@ func validTag(w http.ResponseWriter, t store.Tag) bool {
 }
 
 // --- buckets ---
+//
+// Visibility and edit rights follow PLAN §7: owners and admins manage a
+// bucket, shares grant view or edit, ownerless buckets belong to the yard.
 
 func (s *server) listBuckets(w http.ResponseWriter, r *http.Request) {
-	buckets, err := s.store.ListBuckets(r.Context())
+	buckets, err := s.store.ListBuckets(r.Context(), auth.UserFrom(r.Context()))
 	if err != nil {
 		s.internalError(w, "list buckets", err)
 		return
@@ -91,6 +95,9 @@ func (s *server) createBucket(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &b) || !validBucket(w, b) {
 		return
 	}
+	u := auth.UserFrom(r.Context())
+	b.OwnerID = &u.ID
+	b.OwnerName = u.Username
 	created, err := s.store.CreateBucket(r.Context(), b)
 	if err != nil {
 		s.writeError(w, "create bucket", err)
@@ -99,38 +106,74 @@ func (s *server) createBucket(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, created)
 }
 
-func (s *server) updateBucket(w http.ResponseWriter, r *http.Request) {
+// visibleBucket loads a bucket as the requesting user sees it, answering
+// 404 for both "absent" and "not yours to see".
+func (s *server) visibleBucket(w http.ResponseWriter, r *http.Request) *store.Bucket {
 	id, ok := pathID(w, r, "id")
 	if !ok {
+		return nil
+	}
+	b, err := s.store.GetBucket(r.Context(), id, auth.UserFrom(r.Context()))
+	if err != nil {
+		s.internalError(w, "get bucket", err)
+		return nil
+	}
+	if b == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return nil
+	}
+	return b
+}
+
+func (s *server) updateBucket(w http.ResponseWriter, r *http.Request) {
+	existing := s.visibleBucket(w, r)
+	if existing == nil {
+		return
+	}
+	if !existing.CanEdit {
+		http.Error(w, "you cannot edit this bucket", http.StatusForbidden)
 		return
 	}
 	var b store.Bucket
 	if !decodeJSON(w, r, &b) || !validBucket(w, b) {
 		return
 	}
-	b.ID = id
-	found, err := s.store.UpdateBucket(r.Context(), b)
-	if err != nil {
+	b.ID = existing.ID
+	if _, err := s.store.UpdateBucket(r.Context(), b); err != nil {
 		s.writeError(w, "update bucket", err)
 		return
 	}
-	if !found {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
+	b.OwnerID, b.OwnerName, b.CanEdit, b.Shared = existing.OwnerID, existing.OwnerName, true, existing.Shared
 	writeJSON(w, b)
 }
 
 func (s *server) deleteBucket(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "id")
-	if !ok {
+	b := s.visibleBucket(w, r)
+	if b == nil {
 		return
 	}
-	if err := s.store.DeleteBucket(r.Context(), id); err != nil {
+	if !canManageBucket(auth.UserFrom(r.Context()), b) {
+		http.Error(w, "only the owner or an admin can delete this bucket", http.StatusForbidden)
+		return
+	}
+	if err := s.store.DeleteBucket(r.Context(), b.ID); err != nil {
 		s.internalError(w, "delete bucket", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// canManageBucket gates delete and sharing: admins, the owner, or any
+// analyst for ownerless yard buckets. Edit-shares deliberately do not
+// qualify — sharing doesn't transfer control.
+func canManageBucket(u *store.User, b *store.Bucket) bool {
+	if u.Role == store.RoleAdmin {
+		return true
+	}
+	if b.OwnerID == nil {
+		return u.Role == store.RoleAnalyst
+	}
+	return *b.OwnerID == u.ID
 }
 
 func validBucket(w http.ResponseWriter, b store.Bucket) bool {

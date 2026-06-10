@@ -2,7 +2,7 @@
 
 Any yard tool that writes log files can target a named **external share** in
 addition to its local `/data` volume. Today that means **syslog-valve cache
-nodes**; syslog-bucket retention exports will join later (PLAN, S5+).
+nodes**; syslog-bucket retention exports will join later.
 
 The contract is deliberately small:
 

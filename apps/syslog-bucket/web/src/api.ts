@@ -1,4 +1,4 @@
-import type { Bucket, Entry, Filters, Rule, Selection, Stats, Tag } from "./types";
+import type { AuthInfo, Bucket, BucketShare, Entry, Filters, Rule, Selection, Stats, Tag, User } from "./types";
 
 export function filterParams(f: Filters, sel: Selection): URLSearchParams {
   const params = new URLSearchParams();
@@ -19,6 +19,11 @@ export function filterParams(f: Filters, sel: Selection): URLSearchParams {
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) {
+    // A 401 outside the auth endpoints means the session died mid-use;
+    // tell the app shell to fall back to the login screen.
+    if (res.status === 401 && !url.startsWith("/api/auth/")) {
+      window.dispatchEvent(new Event("auth-expired"));
+    }
     const body = await res.text();
     throw new Error(body.trim() || `HTTP ${res.status}`);
   }
@@ -77,6 +82,30 @@ export const createBucket = (b: Omit<Bucket, "id">) => send<Bucket>("POST", "/ap
 export const updateBucket = (b: Bucket) => send<Bucket>("PUT", `/api/buckets/${b.id}`, b);
 export const deleteBucket = (id: number) =>
   request<void>(`/api/buckets/${id}`, { method: "DELETE" });
+
+// --- auth & users (S6) ---
+
+export const fetchAuthInfo = () => request<AuthInfo>("/api/auth/info");
+export const fetchMe = () => request<User>("/api/auth/me");
+export const login = (username: string, password: string) =>
+  send<User>("POST", "/api/auth/login", { username, password });
+export const logout = () => request<void>("/api/auth/logout", { method: "POST" });
+export const changePassword = (oldPw: string, newPw: string) =>
+  send<void>("PUT", "/api/auth/password", { old: oldPw, new: newPw });
+
+export const fetchUsers = () => request<{ users: User[] }>("/api/users").then((b) => b.users);
+export const createUser = (u: { username: string; display_name: string; email: string; role: string; password: string }) =>
+  send<User>("POST", "/api/users", u);
+export const updateUser = (
+  id: number,
+  u: { display_name: string; email: string; role: string; disabled: boolean; password?: string },
+) => send<User>("PUT", `/api/users/${id}`, u);
+export const deleteUser = (id: number) => request<void>(`/api/users/${id}`, { method: "DELETE" });
+
+export const fetchBucketShares = (bucketId: number) =>
+  request<{ shares: BucketShare[] }>(`/api/buckets/${bucketId}/shares`).then((b) => b.shares);
+export const putBucketShares = (bucketId: number, shares: BucketShare[]) =>
+  send<{ shares: BucketShare[] }>("PUT", `/api/buckets/${bucketId}/shares`, { shares });
 
 export const fetchRules = () => request<{ rules: Rule[] }>("/api/rules").then((b) => b.rules);
 export const createRule = (r: Omit<Rule, "id">) => send<Rule>("POST", "/api/rules", r);

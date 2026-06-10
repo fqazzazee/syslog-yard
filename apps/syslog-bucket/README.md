@@ -1,15 +1,18 @@
 # syslog-bucket
 
-An open-source, self-hosted **syslog server + web app modeled on an email client**.
-Receive syslog from anything, then sort, filter, tag, and assign entries the way you
-triage email. See [docs/PLAN.md](docs/PLAN.md) for the full design.
+An open-source, self-hosted **syslog server + web app modeled on an email
+client**. Receive syslog from anything, then sort, filter, tag, and triage
+entries the way you triage email. Part of
+[syslog-yard](../../README.md); runs standalone too.
 
-**Status: M2 (email UX)** — everything from M1 (syslog-ng → Go → Postgres
-pipeline, generic parser, field + full-text search) plus the email-client
-core: virtual **buckets** (saved searches), color-coded **tags**, a **rules
-engine** (auto-tag / set-priority / suppress, at ingest and retroactively),
-per-entry triage (status + priority), and **live tail over WebSocket** in a
-3-pane UI.
+**Status: M3 (team)** — everything from M1 (syslog-ng → Go → Postgres
+pipeline, generic parser, field + full-text search) and M2 (virtual
+**buckets**, color-coded **tags**, a **rules engine** that auto-tags /
+sets priority / suppresses at ingest and retroactively, per-entry triage,
+**live tail over WebSocket**, 3-pane UI), plus the multi-user layer:
+**local accounts + OIDC sign-in**, admin/analyst/viewer roles, and
+**bucket sharing** (view-only or can-edit, per user). See
+[docs/AUTH.md](../../docs/AUTH.md).
 
 ## Quick start
 
@@ -17,7 +20,9 @@ per-entry triage (status + priority), and **live tail over WebSocket** in a
 docker compose -f deploy/docker-compose.yml up --build
 ```
 
-Then open <http://localhost:8080> and send a test message:
+Open <http://localhost:8080> and sign in (`admin` / the
+`BUCKET_ADMIN_PASSWORD` you set, or grab the generated one from the
+container log). Then send a test message:
 
 ```sh
 logger -n 127.0.0.1 -P 5514 -T --rfc3164 "hello syslog-bucket"   # TCP (-d for UDP)
@@ -40,12 +45,23 @@ Ports (host side, remap in `deploy/docker-compose.yml` as needed):
 > -P 5514 -T …`), or run the stack on a native engine (`podman compose`,
 > rootful dockerd) when you need UDP.
 
+## Environment
+
+| Variable                | Default       | Purpose                                  |
+|-------------------------|---------------|------------------------------------------|
+| `BUCKET_DB_URL`         | local default | Postgres connection string               |
+| `BUCKET_API_ADDR`       | `:8080`       | Web UI / API listen address              |
+| `BUCKET_INGEST_ADDR`    | `:6601`       | syslog-ng JSON ingest listener (internal) |
+| `BUCKET_ADMIN_PASSWORD` | _(generated)_ | initial admin password, first start only |
+| `BUCKET_COOKIE_SECURE`  | `false`       | mark session cookies `Secure` (HTTPS)    |
+| `BUCKET_OIDC_*`         | _(unset)_     | OIDC SSO — see [docs/AUTH.md](../../docs/AUTH.md) |
+
 ## Development
 
-Backend (needs Go 1.24+ and a Postgres):
+Backend (needs Go 1.25+ and a Postgres):
 
 ```sh
-go run ./cmd/syslog-bucket    # env: BUCKET_DB_URL, BUCKET_API_ADDR, BUCKET_INGEST_ADDR
+go run ./cmd/syslog-bucket
 ```
 
 Frontend (needs Node 22+; proxies `/api` to `localhost:8080`):
@@ -56,6 +72,6 @@ cd web && npm install && npm run dev
 
 ## Layout
 
-See [docs/PLAN.md §10](docs/PLAN.md) — `cmd/` entrypoint, `internal/`
-(ingest, parsers, store, api), `web/` React SPA, `deploy/` compose + syslog-ng
-config, `migrations/` SQL.
+`cmd/` entrypoint · `internal/` (ingest, parsers, rules, store, auth, api,
+ws) · `web/` React SPA · `migrations/` SQL applied at startup · `deploy/`
+standalone compose + syslog-ng config.

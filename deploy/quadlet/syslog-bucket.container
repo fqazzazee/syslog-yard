@@ -14,6 +14,13 @@ Environment=BUCKET_INGEST_ADDR=:6601
 Environment=YARD_LINK_HOSE=8080
 Environment=YARD_LINK_VALVE=8081
 Environment=YARD_LINK_BUCKET=8082
+# Initial admin password (first start only; unset = generated and logged).
+Environment=BUCKET_ADMIN_PASSWORD=yardadmin
+# Optional OIDC sign-in — see deploy/compose.yaml for the full list.
+# Environment=BUCKET_OIDC_ISSUER=https://idp.example.com/realms/yard
+# Environment=BUCKET_OIDC_CLIENT_ID=syslog-bucket
+# Environment=BUCKET_OIDC_CLIENT_SECRET=…
+# Environment=BUCKET_OIDC_REDIRECT_URL=http://localhost:8082/api/auth/oidc/callback
 
 [Service]
 Restart=always

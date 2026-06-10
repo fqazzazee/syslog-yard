@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
 	"github.com/syslog-yard/syslog-bucket/internal/rules"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
@@ -30,7 +31,7 @@ type server struct {
 	hints  map[string]string
 }
 
-func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, web fs.FS, hints map[string]string) http.Handler {
+func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, web fs.FS, hints map[string]string, authSvc *auth.Service) http.Handler {
 	if hints == nil {
 		hints = map[string]string{}
 	}
@@ -38,6 +39,19 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, web fs.FS, hints map[
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/healthz", s.healthz)
 	mux.HandleFunc("GET /api/hints", s.getHints)
+	mux.HandleFunc("POST /api/auth/login", authSvc.HandleLogin)
+	mux.HandleFunc("POST /api/auth/logout", authSvc.HandleLogout)
+	mux.HandleFunc("GET /api/auth/me", authSvc.HandleMe)
+	mux.HandleFunc("GET /api/auth/info", authSvc.HandleInfo)
+	mux.HandleFunc("PUT /api/auth/password", authSvc.HandlePassword)
+	mux.HandleFunc("GET /api/auth/oidc/login", authSvc.HandleOIDCLogin)
+	mux.HandleFunc("GET /api/auth/oidc/callback", authSvc.HandleOIDCCallback)
+	mux.HandleFunc("GET /api/users", s.listUsers)
+	mux.HandleFunc("POST /api/users", s.createUser)
+	mux.HandleFunc("PUT /api/users/{id}", s.updateUser)
+	mux.HandleFunc("DELETE /api/users/{id}", s.deleteUser)
+	mux.HandleFunc("GET /api/buckets/{id}/shares", s.listBucketShares)
+	mux.HandleFunc("PUT /api/buckets/{id}/shares", s.putBucketShares)
 	mux.HandleFunc("GET /api/entries", s.listEntries)
 	mux.HandleFunc("GET /api/entries/{id}", s.getEntry)
 	mux.HandleFunc("PATCH /api/entries/{id}", s.patchEntry)
@@ -60,7 +74,7 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, web fs.FS, hints map[
 	mux.HandleFunc("POST /api/rules/{id}/apply", s.applyRule)
 	mux.HandleFunc("GET /api/ws", s.liveTail)
 	mux.HandleFunc("GET /", s.spa)
-	return mux
+	return authSvc.Middleware(mux)
 }
 
 func (s *server) healthz(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +103,7 @@ func (s *server) condFromRequest(r *http.Request) (rules.Cond, error) {
 		if err != nil {
 			return rules.Cond{}, errors.New("bucket_id must be numeric")
 		}
-		b, err := s.store.GetBucket(r.Context(), id)
+		b, err := s.store.GetBucket(r.Context(), id, auth.UserFrom(r.Context()))
 		if err != nil {
 			return rules.Cond{}, err
 		}

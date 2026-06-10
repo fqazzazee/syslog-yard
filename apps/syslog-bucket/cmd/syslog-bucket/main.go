@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/syslog-yard/syslog-bucket/internal/api"
+	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/config"
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
 	"github.com/syslog-yard/syslog-bucket/internal/ingest"
@@ -43,6 +44,18 @@ func run() error {
 	if err := st.Migrate(ctx); err != nil {
 		return err
 	}
+
+	if err := auth.Bootstrap(ctx, st, cfg.AdminPassword); err != nil {
+		return err
+	}
+	var oidc *auth.OIDC
+	if cfg.OIDCIssuer != "" {
+		oidc = &auth.OIDC{
+			Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCClientSecret,
+			RedirectURL: cfg.OIDCRedirectURL, Name: cfg.OIDCName, DefaultRole: cfg.OIDCDefaultRole,
+		}
+	}
+	authSvc := auth.New(st, oidc, cfg.CookieSecure)
 
 	eng := engine.New(st)
 	if err := eng.Reload(ctx); err != nil {
@@ -76,7 +89,7 @@ func run() error {
 	}
 	httpSrv := &http.Server{
 		Addr:    cfg.APIAddr,
-		Handler: api.New(st, eng, hub, dist, hints),
+		Handler: api.New(st, eng, hub, dist, hints, authSvc),
 	}
 	httpErr := make(chan error, 1)
 	go func() {

@@ -113,6 +113,17 @@ services:
       YARD_LINK_HOSE: "8080"
       YARD_LINK_VALVE: "8081"
       YARD_LINK_BUCKET: "8082"
+      # Initial admin password (first start only — change it in the UI, or
+      # leave unset to get a generated one printed in the container log).
+      BUCKET_ADMIN_PASSWORD: "yardadmin"
+      # Optional OIDC sign-in (Keycloak / Authentik / Entra ID / Google):
+      # BUCKET_OIDC_ISSUER: "https://idp.example.com/realms/yard"
+      # BUCKET_OIDC_CLIENT_ID: "syslog-bucket"
+      # BUCKET_OIDC_CLIENT_SECRET: "…"
+      # BUCKET_OIDC_REDIRECT_URL: "http://localhost:8082/api/auth/oidc/callback"
+      # BUCKET_OIDC_NAME: "Company SSO"      # login-button label
+      # BUCKET_OIDC_DEFAULT_ROLE: "analyst"  # role for first-time OIDC users
+      # BUCKET_COOKIE_SECURE: "true"         # set when serving over HTTPS
     depends_on:
       bucket-db:
         condition: service_healthy

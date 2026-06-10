@@ -7,9 +7,11 @@ canvas, hit **Apply**, and the app compiles the graph to syslog-ng config,
 validates it with `--syntax-only`, swaps it atomically and reloads via SIGHUP.
 Every applied version is kept for one-click rollback.
 
-Status: S1 spine — sources (udp/tcp listeners) and forwards. Filters, disk
-caching with logrotate retention, and TLS land in S3/S5 (see
-[suite plan](../../docs/PLAN.md)).
+Beyond the spine: facility/severity/host/program/regex **filters** with
+if/else routing, **drop** sinks, **cache** nodes writing to `/data` or an
+external share with logrotate-compiled retention, **TLS** in and out
+(one-click self-signed certs), **live tail** of everything entering the
+valve, config **version history** with previews, and graph import/export.
 
 ## Run (standalone)
 

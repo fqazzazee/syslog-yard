@@ -48,6 +48,35 @@ export interface Bucket {
   description: string;
   condition: Cond;
   position: number;
+  owner_id?: number;
+  owner_name?: string;
+  can_edit: boolean;
+  shared: boolean;
+}
+
+export type Role = "admin" | "analyst" | "viewer";
+
+export interface User {
+  id: number;
+  username: string;
+  display_name: string;
+  email: string;
+  role: Role;
+  disabled: boolean;
+  has_password: boolean;
+  oidc: boolean;
+}
+
+// AuthInfo is public (pre-login): which sign-in methods the server offers.
+export interface AuthInfo {
+  oidc: { enabled: boolean; name?: string };
+}
+
+export interface BucketShare {
+  user_id: number;
+  username: string;
+  display_name?: string;
+  can_edit: boolean;
 }
 
 export interface Action {

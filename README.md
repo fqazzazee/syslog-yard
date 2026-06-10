@@ -5,12 +5,12 @@ simple containers under a single compose file:
 
 - **syslog-hose** — generates random-but-realistic syslog traffic at a configurable rate
 - **syslog-valve** — visual router/filter built on syslog-ng: graphical IN/OUT ports,
-  filtering in between, disk caching with logrotate-managed retention
-- **syslog-bucket** — syslog server and triage UI modeled on an email client
+  filtering in between, TLS, disk caching with logrotate-managed retention
+- **syslog-bucket** — multi-user syslog server and triage UI modeled on an email client
 
 Each tool runs standalone; together they form a complete loop —
 generate → route/filter → store — on one internal bridge network, with UIs on
-ports 8080 / 8081 / 8082 and optional external NAS shares for log storage.
+ports 8080 / 8081 / 8082.
 
 ## Quick start
 
@@ -23,13 +23,16 @@ scripts/yardctl status     # health check; also: down / restart / logs / smoke
 
 UIs: hose http://localhost:8080 · valve http://localhost:8081 · bucket
 http://localhost:8082 — each UI carries a small **yard** nav linking to the
-other two. External syslog entry: host port **6514** (udp/tcp) into the
-valve's IN ports. Note: VM-based runtimes (Rancher/Docker Desktop, Colima)
-forward TCP but not UDP across the VM boundary — `yardctl smoke` probes
-both and tells you which arrived.
+other two. The bucket asks you to sign in: the default compose ships an
+`admin` account with the password from `BUCKET_ADMIN_PASSWORD`
+(`yardadmin` in `deploy/compose.yaml` — change it after first login). See
+[docs/AUTH.md](docs/AUTH.md) for users, roles, OIDC single sign-on, and
+bucket sharing.
 
-Log storage can target external NAS shares (NFS/CIFS) — see
-[docs/SHARES.md](docs/SHARES.md).
+External syslog entry: host port **6514** (udp/tcp) into the valve's IN
+ports. Note: VM-based runtimes (Rancher/Docker Desktop, Colima) forward TCP
+but not UDP across the VM boundary — `yardctl smoke` probes both and tells
+you which arrived.
 
 ## The demo loop
 
@@ -51,12 +54,34 @@ through, auto-tagged by rules:
 
 ![syslog-bucket](docs/img/syslog-bucket.png)
 
+## Documentation
+
+| Doc | Covers |
+|-----|--------|
+| [docs/AUTH.md](docs/AUTH.md) | bucket sign-in, roles, OIDC, sharing buckets |
+| [docs/SHARES.md](docs/SHARES.md) | external NAS shares (NFS/CIFS) for log storage |
+| [deploy/quadlet](deploy/quadlet) | rootless podman systemd units |
+| per-app READMEs | standalone use, env vars, development |
+
+## Features by tool
+
+- **syslog-hose**: vendor presets (FortiGate, Cisco, Linux, …), rate control,
+  multiple concurrent jobs, live tail of what it sends.
+- **syslog-valve**: node-graph canvas compiled to syslog-ng config with
+  syntax check, atomic swap, and one-click rollback; UDP/TCP/TLS listeners
+  (one-click self-signed certs); facility/severity/host/program/regex
+  filters with if/else routing; disk cache nodes with retention compiled to
+  logrotate; live tail of everything entering the valve; config version
+  history with previews; graph import/export.
+- **syslog-bucket**: syslog-ng-fronted ingest into Postgres; email-style
+  3-pane triage; virtual buckets (saved searches), color-coded tags, a rules
+  engine that tags/prioritizes/suppresses at ingest and retroactively; live
+  tail over WebSocket; local accounts + OIDC sign-in with admin/analyst/viewer
+  roles; buckets shareable per-user, view-only or editable.
+
 ## Status
 
-See [docs/PLAN.md](docs/PLAN.md) for the build plan. S5 complete — ops
-polish: TLS in/out on the valve (RFC 5425 listeners with one-click
-self-signed certs, verified or lab-mode TLS forwarding), live tail of
-every message entering the valve, config history with timestamped
-previews before rollback, graph import/export, a GHCR publish workflow,
-and rootless-podman quadlet units ([deploy/quadlet](deploy/quadlet)).
-Next: S6 auth & collaboration.
+S6 complete — auth & collaboration: the bucket now fronts everything with
+sign-in (local accounts and optional OIDC), role-based access
+(admin / analyst / read-only viewer), per-user bucket ownership, and
+sharing with view or edit rights. Next: security review across the suite.

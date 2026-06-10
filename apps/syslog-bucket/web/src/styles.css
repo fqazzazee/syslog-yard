@@ -64,8 +64,204 @@ body {
 .yard-link:hover { color: var(--fg); border-color: var(--border); }
 .yard-link.current { color: var(--accent); }
 
-.live {
+/* --- auth (S6) --- */
+
+.login-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+}
+
+.login-card {
+  width: 340px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px 28px 28px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+
+.login-card h1 {
+  margin: 0 0 2px;
+  font-size: 20px;
+}
+
+.login-card .hint {
+  color: var(--fg-dim);
+  font-size: 12.5px;
+  margin: 0 0 14px;
+}
+
+.login-card label {
+  display: block;
+  margin: 10px 0 4px;
+  color: var(--fg-dim);
+  font-size: 12.5px;
+}
+
+.login-card input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.login-card input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.login-card .primary {
+  width: 100%;
+  margin-top: 16px;
+  background: #1d4ed8;
+  color: var(--fg);
+  border: 1px solid #1d4ed8;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.login-card .primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.login-card .error {
+  margin-top: 10px;
+  border-radius: 6px;
+}
+
+.oidc-btn {
+  display: block;
+  margin-top: 10px;
+  text-align: center;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px;
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.oidc-btn:hover {
+  border-color: var(--accent);
+}
+
+.user-menu {
+  position: relative;
   margin-left: auto;
+}
+
+.user-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.user-btn:hover {
+  border-color: var(--border);
+}
+
+.role-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-radius: 8px;
+  padding: 1px 7px;
+  margin-left: 4px;
+  background: var(--bg-hover);
+  color: var(--fg-dim);
+}
+
+.role-badge.role-admin {
+  color: var(--sev-warn);
+}
+
+.user-dropdown {
+  position: absolute;
+  right: 0;
+  top: 110%;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+.user-dropdown button {
+  background: none;
+  border: none;
+  color: var(--fg);
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.user-dropdown button:hover {
+  background: var(--bg-hover);
+}
+
+.owner-mark {
+  color: var(--fg-dim);
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.share-mark {
+  color: var(--accent);
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.share-list {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg);
+}
+
+.share-list .check {
+  flex: 1;
+}
+
+.share-list .share-edit {
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+}
+
+.hint-inline {
+  color: var(--fg-dim);
+  margin-left: 4px;
+}
+
+.user-row .user-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live {
+  margin-left: 0;
   background: var(--bg-hover);
   color: var(--fg-dim);
   border: 1px solid var(--border);

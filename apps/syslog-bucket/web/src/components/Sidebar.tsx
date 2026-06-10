@@ -1,4 +1,4 @@
-import type { Bucket, Rule, Selection, Tag } from "./../types";
+import type { Bucket, Rule, Selection, Tag, User } from "./../types";
 import { TagChip } from "./Tags";
 
 interface Props {
@@ -6,6 +6,8 @@ interface Props {
   tags: Tag[];
   rules: Rule[];
   selection: Selection;
+  me: User;
+  readOnly: boolean; // viewer role: no create/edit affordances
   onSelect: (sel: Selection) => void;
   onEditBucket: (b: Bucket | null) => void; // null = new
   onEditRule: (r: Rule | null) => void;
@@ -17,6 +19,8 @@ export default function Sidebar({
   tags,
   rules,
   selection,
+  me,
+  readOnly,
   onSelect,
   onEditBucket,
   onEditRule,
@@ -31,20 +35,35 @@ export default function Sidebar({
 
       <div className="nav-section">
         <span>Buckets</span>
-        <button className="linkish" title="New bucket" onClick={() => onEditBucket(null)}>
-          ＋
-        </button>
+        {!readOnly && (
+          <button className="linkish" title="New bucket" onClick={() => onEditBucket(null)}>
+            ＋
+          </button>
+        )}
       </div>
       {buckets.map((b) => {
         const active = selection.kind === "bucket" && selection.id === b.id;
+        const foreign = b.owner_id !== undefined && b.owner_id !== me.id;
         return (
           <div key={b.id} className={`nav-item${active ? " active" : ""}`}>
-            <button className="nav-label" onClick={() => onSelect({ kind: "bucket", id: b.id })}>
+            <button
+              className="nav-label"
+              title={foreign && b.owner_name ? `Shared by ${b.owner_name}` : b.description || undefined}
+              onClick={() => onSelect({ kind: "bucket", id: b.id })}
+            >
               🗂 {b.name}
+              {b.shared && b.owner_id === me.id && (
+                <span className="share-mark" title="Shared with others">
+                  ⇄
+                </span>
+              )}
+              {foreign && b.owner_name && <span className="owner-mark">· {b.owner_name}</span>}
             </button>
-            <button className="nav-edit" title="Edit bucket" onClick={() => onEditBucket(b)}>
-              ✎
-            </button>
+            {b.can_edit && (
+              <button className="nav-edit" title="Edit bucket" onClick={() => onEditBucket(b)}>
+                ✎
+              </button>
+            )}
           </div>
         );
       })}
@@ -52,9 +71,11 @@ export default function Sidebar({
 
       <div className="nav-section">
         <span>Tags</span>
-        <button className="linkish" title="Manage tags" onClick={onManageTags}>
-          ＋
-        </button>
+        {!readOnly && (
+          <button className="linkish" title="Manage tags" onClick={onManageTags}>
+            ＋
+          </button>
+        )}
       </div>
       <div className="nav-tags">
         {tags.map((t) => {
@@ -73,13 +94,19 @@ export default function Sidebar({
 
       <div className="nav-section">
         <span>Rules</span>
-        <button className="linkish" title="New rule" onClick={() => onEditRule(null)}>
-          ＋
-        </button>
+        {!readOnly && (
+          <button className="linkish" title="New rule" onClick={() => onEditRule(null)}>
+            ＋
+          </button>
+        )}
       </div>
       {rules.map((r) => (
         <div key={r.id} className="nav-item">
-          <button className={`nav-label${r.enabled ? "" : " disabled"}`} onClick={() => onEditRule(r)}>
+          <button
+            className={`nav-label${r.enabled ? "" : " disabled"}`}
+            disabled={readOnly}
+            onClick={() => !readOnly && onEditRule(r)}
+          >
             ⚙ {r.name}
           </button>
         </div>

@@ -3,3 +3,6 @@ node_modules/
 .env
 /data/
 *.tsbuildinfo
+
+# internal build plans — kept local, not published
+PLAN.md
