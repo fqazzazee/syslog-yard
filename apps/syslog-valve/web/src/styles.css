@@ -202,3 +202,29 @@ footer .err { color: var(--err); }
   color: var(--accent);
 }
 .tail-meta { color: var(--muted); }
+
+/* --- yard auth (login gate + user chip) --- */
+.login-wrap { display: flex; align-items: center; justify-content: center; height: 100vh; }
+.login-card {
+  width: 330px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 24px 28px 28px; font-weight: 400;
+}
+.login-card h1 { font-size: 20px; margin: 0 0 4px; font-weight: 600; }
+.login-hint { color: var(--muted); font-size: 12.5px; margin: 0 0 14px; }
+.login-card label { display: block; color: var(--muted); font-size: 12.5px; margin: 10px 0 4px; }
+.login-card input {
+  display: block; width: 100%; margin-top: 4px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px;
+}
+.login-card input:focus { outline: none; border-color: var(--accent); }
+.login-card .primary { width: 100%; margin-top: 16px; padding: 8px; }
+.login-error {
+  margin-top: 10px; padding: 8px 10px; border-radius: 6px;
+  background: #3d1513; color: var(--err); font-size: 13px;
+}
+.user-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 400; margin-left: 8px; }
+.role-tag {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  background: var(--panel); color: var(--muted); border-radius: 8px; padding: 1px 7px;
+}

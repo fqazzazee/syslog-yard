@@ -82,14 +82,29 @@ export interface TailEvent {
   message: string;
 }
 
+// AuthUser comes from syslog-bucket, the yard's identity provider; auth is
+// active only when the deployment sets YARD_AUTH_URL.
+export interface AuthUser {
+  id: number;
+  username: string;
+  display_name: string;
+  role: string;
+}
+
 async function check(res: Response): Promise<Response> {
   if (!res.ok) {
+    // A 401 outside the auth endpoints means the session died mid-use;
+    // tell the app shell to fall back to the login screen.
+    if (res.status === 401 && !res.url.includes("/api/auth/")) {
+      window.dispatchEvent(new Event("auth-expired"));
+    }
     let msg = `${res.status} ${res.statusText}`;
+    const raw = (await res.text().catch(() => "")).trim();
     try {
-      const body = await res.json();
+      const body = JSON.parse(raw);
       if (body.error) msg = body.error;
     } catch {
-      /* not JSON */
+      msg = raw || msg;
     }
     throw new Error(msg);
   }
@@ -119,4 +134,14 @@ export const api = {
     fetch("/api/certs").then(check).then((r) => r.json()),
   generateCert: (): Promise<CertStatus> =>
     fetch("/api/certs/selfsigned", { method: "POST" }).then(check).then((r) => r.json()),
+  authInfo: (): Promise<{ enabled: boolean }> =>
+    fetch("/api/auth/info").then(check).then((r) => r.json()),
+  me: (): Promise<AuthUser> =>
+    fetch("/api/auth/me").then(check).then((r) => r.json()),
+  login: (username: string, password: string): Promise<AuthUser> =>
+    fetch("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) })
+      .then(check)
+      .then((r) => r.json()),
+  logout: (): Promise<Response> =>
+    fetch("/api/auth/logout", { method: "POST" }).then(check),
 };

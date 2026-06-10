@@ -12,6 +12,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   api,
+  type AuthUser,
   type Graph,
   type GraphNode,
   type NodeType,
@@ -20,6 +21,7 @@ import {
   type TailEvent,
 } from "./api";
 import { nodeTypes, rfType, type FlowNode } from "./FlowNodes";
+import { Login } from "./Login";
 import { NodePanel } from "./NodePanel";
 import { YardNav } from "./YardNav";
 
@@ -76,7 +78,43 @@ const NEW_NAMES: Record<NodeType, string> = {
   cache: "cache",
 };
 
+type AuthState = { enabled: boolean; user: AuthUser | null };
+
+// App gates the workspace behind yard auth when the deployment enables it
+// (YARD_AUTH_URL); standalone runs stay open.
 export default function App() {
+  const [auth, setAuth] = useState<AuthState | undefined>(undefined);
+
+  useEffect(() => {
+    api
+      .authInfo()
+      .then(async (info) => {
+        if (!info.enabled) return setAuth({ enabled: false, user: null });
+        try {
+          setAuth({ enabled: true, user: await api.me() });
+        } catch {
+          setAuth({ enabled: true, user: null });
+        }
+      })
+      .catch(() => setAuth({ enabled: false, user: null }));
+    const expired = () => setAuth((a) => (a?.enabled ? { enabled: true, user: null } : a));
+    window.addEventListener("auth-expired", expired);
+    return () => window.removeEventListener("auth-expired", expired);
+  }, []);
+
+  if (auth === undefined) return null;
+  if (auth.enabled && !auth.user) {
+    return <Login onLogin={(user) => setAuth({ enabled: true, user })} />;
+  }
+  return (
+    <Workspace
+      user={auth.user}
+      onSignOut={() => api.logout().finally(() => setAuth({ enabled: true, user: null }))}
+    />
+  );
+}
+
+function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () => void }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -88,6 +126,7 @@ export default function App() {
   const [preview, setPreview] = useState<{ id: string; conf: string } | null>(null);
   const [tailOn, setTailOn] = useState(false);
   const importInput = useRef<HTMLInputElement>(null);
+  const readOnly = user?.role === "viewer";
 
   const refresh = useCallback(() => {
     api.status().then(setStatus).catch(() => setStatus(null));
@@ -226,30 +265,45 @@ export default function App() {
         <span className="logo">⊶</span> syslog-valve
         <YardNav links={hints} current="valve" />
         <div className="toolbar">
-          <button onClick={() => addNode("source")}>+ IN port</button>
-          <button onClick={() => addNode("filter")}>+ Filter</button>
-          <button onClick={() => addNode("forward")}>+ OUT port</button>
-          <button onClick={() => addNode("cache")}>+ Cache</button>
+          {!readOnly && (
+            <>
+              <button onClick={() => addNode("source")}>+ IN port</button>
+              <button onClick={() => addNode("filter")}>+ Filter</button>
+              <button onClick={() => addNode("forward")}>+ OUT port</button>
+              <button onClick={() => addNode("cache")}>+ Cache</button>
+            </>
+          )}
           <button onClick={exportGraph} title="Download the graph as JSON">
             ⤓ Export
           </button>
-          <button onClick={() => importInput.current?.click()} title="Load a graph JSON file">
-            ⤒ Import
-          </button>
-          <input
-            ref={importInput}
-            type="file"
-            accept=".json,application/json"
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) importGraph(f);
-              e.target.value = "";
-            }}
-          />
-          <button className="primary" onClick={apply}>
-            Apply
-          </button>
+          {!readOnly && (
+            <>
+              <button onClick={() => importInput.current?.click()} title="Load a graph JSON file">
+                ⤒ Import
+              </button>
+              <input
+                ref={importInput}
+                type="file"
+                accept=".json,application/json"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) importGraph(f);
+                  e.target.value = "";
+                }}
+              />
+              <button className="primary" onClick={apply}>
+                Apply
+              </button>
+            </>
+          )}
+          {user && (
+            <span className="user-chip">
+              👤 {user.display_name || user.username}
+              <span className="role-tag">{user.role}</span>
+              <button onClick={onSignOut}>Sign out</button>
+            </span>
+          )}
         </div>
       </header>
       {banner && (
@@ -300,7 +354,7 @@ export default function App() {
                   <button onClick={() => togglePreview(h.id)}>
                     {preview?.id === h.id ? "hide" : "view"}
                   </button>
-                  <button onClick={() => rollback(h.id)}>roll back</button>
+                  {!readOnly && <button onClick={() => rollback(h.id)}>roll back</button>}
                 </div>
                 {preview?.id === h.id && <pre>{preview.conf}</pre>}
               </div>

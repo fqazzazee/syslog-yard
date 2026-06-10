@@ -1,10 +1,19 @@
-# Authentication & collaboration (syslog-bucket)
+# Authentication & collaboration
 
-syslog-bucket is the multi-user tool in the yard: it holds your team's
-triage state, so its UI and API sit behind sign-in. syslog-hose and
-syslog-valve are single-operator admin tools — they ship without built-in
-auth; put them behind your reverse proxy's auth (or keep their ports
-internal) when exposing the yard beyond a lab.
+**syslog-bucket is the yard's identity provider.** Users, passwords, roles,
+and OIDC all live there; syslog-hose and syslog-valve don't store any
+accounts. When a deployment sets `YARD_AUTH_URL` on the hose or valve
+(the shipped compose and quadlet files do), that tool's UI and API are
+guarded by the same accounts: login is proxied to the bucket, and every
+request's session is verified against it (cached ~30 s).
+
+**One sign-in covers the whole yard** on a standard deployment: the
+session cookie is host-scoped (ports don't matter), so signing in at any
+of the three UIs on `localhost:8080/8081/8082` signs you into all of
+them, and signing out anywhere revokes the session everywhere.
+
+Removing `YARD_AUTH_URL` returns a tool to its open, standalone behavior —
+appropriate for a lab or when you front it with reverse-proxy auth instead.
 
 ## First sign-in
 
@@ -19,11 +28,11 @@ account:
 
 ## Roles
 
-| Role | Can |
-|---------|-----------------------------------------------------------------|
-| admin | everything: manage users, see/edit/delete every bucket |
-| analyst | full triage: entries, tags, rules; create and share own buckets |
-| viewer | read-only: browse entries and visible buckets, live tail |
+| Role | In the bucket | In the hose & valve |
+|---------|-----------------------------------------------------------------|------------------------------|
+| admin | everything: manage users, see/edit/delete every bucket | full control |
+| analyst | full triage: entries, tags, rules; create and share own buckets | full control |
+| viewer | read-only: browse entries and visible buckets, live tail | read-only: watch jobs, graph, live tail |
 
 Admins manage accounts under **👤 → Users…**: add local users, change
 roles, reset passwords, disable (revokes all sessions immediately), or
@@ -61,21 +70,30 @@ Any standard OIDC provider works (Keycloak, Authentik, Entra ID, Google,
 | `BUCKET_OIDC_NAME` | login-button label (default `SSO`) |
 | `BUCKET_OIDC_DEFAULT_ROLE` | role for first-time OIDC users (default `analyst`) |
 
-The login page gains a "Sign in with …" button. First sign-in
+The bucket's login page gains a "Sign in with …" button. First sign-in
 auto-provisions an account bound to the OIDC subject (username from
 `preferred_username`/`email`); admins can adjust its role afterwards like
 any other account. OIDC accounts have no local password — password
-management stays at the IdP.
+management stays at the IdP. OIDC users sign in **at the bucket**; on a
+same-host deployment the resulting session covers the hose and valve too
+(their own login forms take local credentials only).
 
 ## Sessions & deployment notes
 
 - Sessions are opaque cookies (`HttpOnly`, `SameSite=Lax`), valid 30 days;
   only a SHA-256 of the token is stored server-side. Password changes and
-  account disables revoke existing sessions.
+  account disables revoke existing sessions; the hose/valve verification
+  cache means revocation reaches them within ~30 seconds.
 - Serving over HTTPS (recommended outside a lab)? Set
-  `BUCKET_COOKIE_SECURE=true` so cookies are marked `Secure`.
+  `BUCKET_COOKIE_SECURE=true` on the bucket and `YARD_COOKIE_SECURE=true`
+  on the hose/valve so cookies are marked `Secure`.
+- If the bucket is down, hose/valve logins and (uncached) API calls answer
+  503 — the data planes (sending and routing syslog) keep running; only
+  the UIs are affected.
 - The ingest path (syslog-ng → `BUCKET_INGEST_ADDR`) is not behind auth —
-  it's an internal listener on the compose network. Don't publish it.
+  it's an internal listener on the compose network. Don't publish it. The
+  same goes for the valve's syslog IN ports: auth covers UIs/APIs, not
+  syslog traffic.
 - `GET /api/healthz` and `GET /api/hints` stay unauthenticated (liveness
   probes, cross-tool nav); everything else under `/api/` requires a
-  session.
+  session, on every tool.

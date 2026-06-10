@@ -19,10 +19,12 @@ import (
 	"github.com/syslog-yard/syslog-valve/internal/rotate"
 	"github.com/syslog-yard/syslog-valve/internal/supervisor"
 	"github.com/syslog-yard/syslog-valve/internal/tap"
+	"github.com/syslog-yard/syslog-valve/internal/yardauth"
 )
 
 type Server struct {
 	mux       *http.ServeMux
+	handler   http.Handler
 	sup       *supervisor.Supervisor
 	graphPath string
 	hints     map[string]string
@@ -32,7 +34,9 @@ type Server struct {
 	mu        sync.Mutex // serializes graph writes and applies
 }
 
-func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]string, shares codegen.Shares, rotator *rotate.Rotator, tp *tap.Tap) *Server {
+// New builds the handler; guard enforces yard auth when YARD_AUTH_URL is
+// set (nil = open, standalone mode).
+func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]string, shares codegen.Shares, rotator *rotate.Rotator, tp *tap.Tap, guard *yardauth.Guard) *Server {
 	s := &Server{
 		mux:       http.NewServeMux(),
 		sup:       sup,
@@ -61,10 +65,15 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 	if ui != nil {
 		s.mux.Handle("/", spaHandler(ui))
 	}
+	if guard == nil {
+		guard = yardauth.New("", false)
+	}
+	guard.Routes(s.mux)
+	s.handler = guard.Middleware(s.mux)
 	return s
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.handler.ServeHTTP(w, r) }
 
 func (s *Server) loadGraph() ([]byte, error) {
 	data, err := os.ReadFile(s.graphPath)

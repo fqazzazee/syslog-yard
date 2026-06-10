@@ -44,15 +44,30 @@ export interface TailEvent {
   message: string;
 }
 
+// AuthUser comes from syslog-bucket, the yard's identity provider; auth is
+// active only when the deployment sets YARD_AUTH_URL.
+export interface AuthUser {
+  id: number;
+  username: string;
+  display_name: string;
+  role: string;
+}
+
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) {
+    // A 401 outside the auth endpoints means the session died mid-use;
+    // tell the app shell to fall back to the login screen.
+    if (res.status === 401 && !url.startsWith("/api/auth/")) {
+      window.dispatchEvent(new Event("auth-expired"));
+    }
     let msg = `${res.status}`;
+    const raw = (await res.text().catch(() => "")).trim();
     try {
-      const body = await res.json();
-      if (body.error) msg = body.error;
+      const body = JSON.parse(raw);
+      msg = body.error || msg;
     } catch {
-      /* not json */
+      msg = raw || msg;
     }
     throw new Error(msg);
   }
@@ -85,6 +100,11 @@ export const api = {
   deletePreset: (name: string) =>
     req<void>(`/api/presets/${encodeURIComponent(name)}`, { method: "DELETE" }),
   hints: () => req<Record<string, string>>("/api/hints"),
+  authInfo: () => req<{ enabled: boolean }>("/api/auth/info"),
+  me: () => req<AuthUser>("/api/auth/me"),
+  login: (username: string, password: string) =>
+    req<AuthUser>("/api/auth/login", json("POST", { username, password })),
+  logout: () => req<void>("/api/auth/logout", { method: "POST" }),
   preview: (body: {
     preset?: string;
     yaml?: string;

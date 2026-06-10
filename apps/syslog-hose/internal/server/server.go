@@ -13,30 +13,38 @@ import (
 
 	"github.com/syslog-yard/syslog-hose/internal/engine"
 	"github.com/syslog-yard/syslog-hose/internal/preset"
+	"github.com/syslog-yard/syslog-hose/internal/yardauth"
 )
 
 // Server wires the manager and preset store into an http.Handler.
 type Server struct {
-	mgr   *engine.Manager
-	store *preset.Store
-	ui    fs.FS
-	hints map[string]string
-	mux   *http.ServeMux
+	mgr     *engine.Manager
+	store   *preset.Store
+	ui      fs.FS
+	hints   map[string]string
+	mux     *http.ServeMux
+	handler http.Handler
 }
 
 // New builds the handler. ui is the built web app (may be nil in tests);
 // hints carries deployment-provided UI defaults (suggested destination,
-// neighbor UI links).
-func New(mgr *engine.Manager, store *preset.Store, ui fs.FS, hints map[string]string) *Server {
+// neighbor UI links); guard enforces yard auth when YARD_AUTH_URL is set
+// (nil = open, standalone mode).
+func New(mgr *engine.Manager, store *preset.Store, ui fs.FS, hints map[string]string, guard *yardauth.Guard) *Server {
 	if hints == nil {
 		hints = map[string]string{}
 	}
+	if guard == nil {
+		guard = yardauth.New("", false)
+	}
 	s := &Server{mgr: mgr, store: store, ui: ui, hints: hints, mux: http.NewServeMux()}
 	s.routes()
+	guard.Routes(s.mux)
+	s.handler = guard.Middleware(s.mux)
 	return s
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.handler.ServeHTTP(w, r) }
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/jobs", s.listJobs)

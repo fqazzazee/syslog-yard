@@ -16,6 +16,8 @@ Environment=VALVE_SUGGESTED_FORWARD=bucket-syslog:514
 Environment=YARD_LINK_HOSE=8080
 Environment=YARD_LINK_VALVE=8081
 Environment=YARD_LINK_BUCKET=8082
+# Guard this UI with the bucket's user accounts (docs/AUTH.md); remove to run open.
+Environment=YARD_AUTH_URL=http://syslog-bucket:8080
 # External shares (see docs/SHARES.md): bind a host-mounted share and
 # list its name so the UI offers it.
 # Volume=/mnt/nas/syslog:/shares/archive:z

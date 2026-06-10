@@ -13,6 +13,8 @@ Environment=HOSE_SUGGESTED_DEST=syslog-valve:514
 Environment=YARD_LINK_HOSE=8080
 Environment=YARD_LINK_VALVE=8081
 Environment=YARD_LINK_BUCKET=8082
+# Guard this UI with the bucket's user accounts (docs/AUTH.md); remove to run open.
+Environment=YARD_AUTH_URL=http://syslog-bucket:8080
 
 [Service]
 Restart=always

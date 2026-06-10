@@ -33,6 +33,8 @@ on 514/udp).
 | `VALVE_DATA`              | `/data`     | Graph, configs, history          |
 | `VALVE_SUGGESTED_FORWARD` | _(unset)_   | Pre-fills new OUT ports (host:port) |
 | `VALVE_SYSLOGNG_BIN`      | `syslog-ng` | Data-plane binary                |
+| `YARD_AUTH_URL`           | _(unset)_   | Guard the UI with syslog-bucket's accounts (unset = open) |
+| `YARD_COOKIE_SECURE`      | `false`     | Mark session cookies `Secure` (HTTPS) |
 
 ## Development
 

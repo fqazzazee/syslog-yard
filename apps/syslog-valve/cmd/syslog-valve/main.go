@@ -20,6 +20,7 @@ import (
 	"github.com/syslog-yard/syslog-valve/internal/server"
 	"github.com/syslog-yard/syslog-valve/internal/supervisor"
 	"github.com/syslog-yard/syslog-valve/internal/tap"
+	"github.com/syslog-yard/syslog-valve/internal/yardauth"
 	"github.com/syslog-yard/syslog-valve/web"
 )
 
@@ -108,7 +109,14 @@ func main() {
 	}
 	go rotator.Loop(ctx, time.Hour)
 
-	srv := &http.Server{Addr: addr, Handler: server.New(sup, dataDir, ui, hints, shares, rotator, tp)}
+	// Yard auth: when YARD_AUTH_URL points at the bucket, its user accounts
+	// guard this UI too (unset = open, standalone mode).
+	guard := yardauth.New(os.Getenv("YARD_AUTH_URL"), os.Getenv("YARD_COOKIE_SECURE") == "true")
+	if guard.Enabled() {
+		fmt.Printf("syslog-valve: auth enforced via %s\n", os.Getenv("YARD_AUTH_URL"))
+	}
+
+	srv := &http.Server{Addr: addr, Handler: server.New(sup, dataDir, ui, hints, shares, rotator, tp, guard)}
 	go func() {
 		fmt.Printf("syslog-valve listening on %s (data dir %s, syslog-ng %s)\n",
 			addr, dataDir, sup.Version())

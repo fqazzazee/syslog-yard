@@ -57,6 +57,9 @@ services:
       YARD_LINK_HOSE: "8080"
       YARD_LINK_VALVE: "8081"
       YARD_LINK_BUCKET: "8082"
+      # Guard this UI with the bucket's user accounts (docs/AUTH.md).
+      # Remove to run the hose open/standalone.
+      YARD_AUTH_URL: "http://syslog-bucket:8080"
     volumes:
       - hose-data:/data
     restart: unless-stopped
@@ -78,6 +81,9 @@ services:
       YARD_LINK_HOSE: "8080"
       YARD_LINK_VALVE: "8081"
       YARD_LINK_BUCKET: "8082"
+      # Guard this UI with the bucket's user accounts (docs/AUTH.md).
+      # Remove to run the valve open/standalone.
+      YARD_AUTH_URL: "http://syslog-bucket:8080"
       # YARD_SHARES: "archive"     # external shares — see docs/SHARES.md
     volumes:
       - valve-data:/data

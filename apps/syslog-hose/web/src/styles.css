@@ -156,3 +156,29 @@ textarea.yaml {
 .tail-line { display: flex; gap: 10px; padding: 1px 0; }
 .tail-job { color: var(--accent); flex: none; min-width: 110px; }
 .tail-msg { color: var(--fg); white-space: pre; }
+
+/* --- yard auth (login gate + user chip) --- */
+.login-wrap { display: flex; align-items: center; justify-content: center; height: 100vh; }
+.login-card {
+  width: 330px; background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 24px 28px 28px;
+}
+.login-card h1 { font-size: 20px; margin: 0 0 4px; }
+.login-hint { color: var(--dim); font-size: 12.5px; margin: 0 0 14px; }
+.login-card label { display: block; color: var(--dim); font-size: 12.5px; margin: 10px 0 4px; }
+.login-card input {
+  display: block; width: 100%; margin-top: 4px;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px;
+}
+.login-card input:focus { outline: none; border-color: var(--accent); }
+.login-card .primary { width: 100%; margin-top: 16px; padding: 8px; }
+.login-error {
+  margin-top: 10px; padding: 8px 10px; border-radius: 6px;
+  background: #3d1513; color: var(--red); font-size: 13px;
+}
+.user-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.role-tag {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  background: var(--bg3); color: var(--dim); border-radius: 8px; padding: 1px 7px;
+}

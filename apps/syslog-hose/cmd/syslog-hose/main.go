@@ -11,6 +11,7 @@ import (
 	"github.com/syslog-yard/syslog-hose/internal/engine"
 	"github.com/syslog-yard/syslog-hose/internal/preset"
 	"github.com/syslog-yard/syslog-hose/internal/server"
+	"github.com/syslog-yard/syslog-hose/internal/yardauth"
 	"github.com/syslog-yard/syslog-hose/web"
 )
 
@@ -68,7 +69,14 @@ func main() {
 		}
 	}
 
-	srv := &http.Server{Addr: addr, Handler: server.New(mgr, store, ui, hints)}
+	// Yard auth: when YARD_AUTH_URL points at the bucket, its user accounts
+	// guard this UI too (unset = open, standalone mode).
+	guard := yardauth.New(os.Getenv("YARD_AUTH_URL"), os.Getenv("YARD_COOKIE_SECURE") == "true")
+	if guard.Enabled() {
+		fmt.Printf("syslog-hose: auth enforced via %s\n", os.Getenv("YARD_AUTH_URL"))
+	}
+
+	srv := &http.Server{Addr: addr, Handler: server.New(mgr, store, ui, hints, guard)}
 	go func() {
 		fmt.Printf("syslog-hose listening on %s (data dir %s, %d presets)\n",
 			addr, dataDir, len(store.List()))

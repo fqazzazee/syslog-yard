@@ -23,11 +23,12 @@ scripts/yardctl status     # health check; also: down / restart / logs / smoke
 
 UIs: hose http://localhost:8080 · valve http://localhost:8081 · bucket
 http://localhost:8082 — each UI carries a small **yard** nav linking to the
-other two. The bucket asks you to sign in: the default compose ships an
-`admin` account with the password from `BUCKET_ADMIN_PASSWORD`
-(`yardadmin` in `deploy/compose.yaml` — change it after first login). See
-[docs/AUTH.md](docs/AUTH.md) for users, roles, OIDC single sign-on, and
-bucket sharing.
+other two. All three UIs share one sign-in: accounts are defined in the
+bucket (the yard's identity provider), and signing in at any UI covers the
+others. The default compose ships an `admin` account with the password
+from `BUCKET_ADMIN_PASSWORD` (`yardadmin` in `deploy/compose.yaml` —
+change it after first login). See [docs/AUTH.md](docs/AUTH.md) for users,
+roles, OIDC single sign-on, and bucket sharing.
 
 External syslog entry: host port **6514** (udp/tcp) into the valve's IN
 ports. Note: VM-based runtimes (Rancher/Docker Desktop, Colima) forward TCP
@@ -81,7 +82,9 @@ through, auto-tagged by rules:
 
 ## Status
 
-S6 complete — auth & collaboration: the bucket now fronts everything with
-sign-in (local accounts and optional OIDC), role-based access
-(admin / analyst / read-only viewer), per-user bucket ownership, and
-sharing with view or edit rights. Next: security review across the suite.
+S6 complete — auth & collaboration: sign-in with local accounts and
+optional OIDC, role-based access (admin / analyst / read-only viewer),
+per-user bucket ownership, and sharing with view or edit rights. The
+bucket is the yard's identity provider; the hose and valve UIs are
+guarded by the same accounts and share the session — one sign-in covers
+all three. Next: security review across the suite.

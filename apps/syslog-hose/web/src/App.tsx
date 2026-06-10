@@ -1,13 +1,50 @@
 import { useEffect, useRef, useState } from "react";
-import { api, Job, PresetSummary, TailEvent } from "./api";
+import { api, AuthUser, Job, PresetSummary, TailEvent } from "./api";
 import { JobForm } from "./JobForm";
+import { Login } from "./Login";
 import { PresetsView } from "./PresetsView";
 import { Tail } from "./Tail";
 import { YardNav } from "./YardNav";
 
 type TabName = "jobs" | "presets";
 
+type AuthState = { enabled: boolean; user: AuthUser | null };
+
+// App gates the workspace behind yard auth when the deployment enables it
+// (YARD_AUTH_URL); standalone runs stay open.
 export default function App() {
+  const [auth, setAuth] = useState<AuthState | undefined>(undefined);
+
+  useEffect(() => {
+    api
+      .authInfo()
+      .then(async (info) => {
+        if (!info.enabled) return setAuth({ enabled: false, user: null });
+        try {
+          setAuth({ enabled: true, user: await api.me() });
+        } catch {
+          setAuth({ enabled: true, user: null });
+        }
+      })
+      .catch(() => setAuth({ enabled: false, user: null }));
+    const expired = () => setAuth((a) => (a?.enabled ? { enabled: true, user: null } : a));
+    window.addEventListener("auth-expired", expired);
+    return () => window.removeEventListener("auth-expired", expired);
+  }, []);
+
+  if (auth === undefined) return null;
+  if (auth.enabled && !auth.user) {
+    return <Login onLogin={(user) => setAuth({ enabled: true, user })} />;
+  }
+  return (
+    <Workspace
+      user={auth.user}
+      onSignOut={() => api.logout().finally(() => setAuth({ enabled: true, user: null }))}
+    />
+  );
+}
+
+function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () => void }) {
   const [tab, setTab] = useState<TabName>("jobs");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [presets, setPresets] = useState<PresetSummary[]>([]);
@@ -17,6 +54,7 @@ export default function App() {
   const [showTail, setShowTail] = useState(true);
   const [hints, setHints] = useState<Record<string, string>>({});
   const paused = useRef(false);
+  const readOnly = user?.role === "viewer";
 
   const refreshPresets = () => api.presets().then(setPresets).catch(() => {});
 
@@ -76,10 +114,19 @@ export default function App() {
           </button>
         </nav>
         <div className="spacer" />
-        {running > 0 && (
+        {running > 0 && !readOnly && (
           <button className="danger" onClick={() => act(api.stopAll)}>
             ■ Stop all
           </button>
+        )}
+        {user && (
+          <span className="user-chip">
+            👤 {user.display_name || user.username}
+            <span className="role-tag">{user.role}</span>
+            <button className="quiet" onClick={onSignOut}>
+              Sign out
+            </button>
+          </span>
         )}
       </header>
 
@@ -91,11 +138,13 @@ export default function App() {
 
       {tab === "jobs" && (
         <main>
-          <div className="toolbar">
-            <button className="primary" onClick={() => setEditing(newJob())}>
-              + New job
-            </button>
-          </div>
+          {!readOnly && (
+            <div className="toolbar">
+              <button className="primary" onClick={() => setEditing(newJob())}>
+                + New job
+              </button>
+            </div>
+          )}
           {jobs.length === 0 && (
             <div className="empty">
               No jobs yet. Create one to start spraying syslog at something.
@@ -106,6 +155,7 @@ export default function App() {
               <JobCard
                 key={j.id}
                 job={j}
+                readOnly={readOnly}
                 onStart={() => act(() => api.startJob(j.id))}
                 onStop={() => act(() => api.stopJob(j.id))}
                 onEdit={() => setEditing(j)}
@@ -159,6 +209,7 @@ function fmtCount(n: number): string {
 
 function JobCard(props: {
   job: Job;
+  readOnly: boolean;
   onStart: () => void;
   onStop: () => void;
   onEdit: () => void;
@@ -195,24 +246,26 @@ function JobCard(props: {
         </span>
       </div>
       {j.lastError && <div className="card-err">{j.lastError}</div>}
-      <div className="card-actions">
-        {j.running ? (
-          <button className="danger" onClick={props.onStop}>
-            ■ Stop
+      {!props.readOnly && (
+        <div className="card-actions">
+          {j.running ? (
+            <button className="danger" onClick={props.onStop}>
+              ■ Stop
+            </button>
+          ) : (
+            <button className="primary" onClick={props.onStart}>
+              ▶ Start
+            </button>
+          )}
+          <button onClick={props.onEdit} disabled={j.running} title={j.running ? "Stop first" : ""}>
+            Edit
           </button>
-        ) : (
-          <button className="primary" onClick={props.onStart}>
-            ▶ Start
+          <button onClick={props.onDuplicate}>Duplicate</button>
+          <button className="quiet" onClick={props.onDelete}>
+            Delete
           </button>
-        )}
-        <button onClick={props.onEdit} disabled={j.running} title={j.running ? "Stop first" : ""}>
-          Edit
-        </button>
-        <button onClick={props.onDuplicate}>Duplicate</button>
-        <button className="quiet" onClick={props.onDelete}>
-          Delete
-        </button>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

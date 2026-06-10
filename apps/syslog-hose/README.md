@@ -90,6 +90,8 @@ then `systemctl --user daemon-reload && systemctl --user start syslog-hose`.
 |----------------|---------|----------------------------------|
 | `HOSE_ADDR` | `:8080` | Web UI / API listen address      |
 | `HOSE_DATA` | `/data` | Jobs + custom presets directory  |
+| `YARD_AUTH_URL` | _(unset)_ | Guard the UI with syslog-bucket's accounts (unset = open) |
+| `YARD_COOKIE_SECURE` | `false` | Mark session cookies `Secure` (HTTPS) |
 
 Everything else is configured in the UI. State lives in `/data/jobs.json` and
 `/data/presets/*.yaml`.
