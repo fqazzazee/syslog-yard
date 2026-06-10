@@ -126,9 +126,12 @@ Graph JSON, generated configs, and version history as flat files in `/data`.
   OIDC; collaboration via sharing buckets with different users.
 - **S7 — Security review:** review of the code and ensuring the overall
   security posture of the suite.
-- **S8 — Bucket sorting:** better bucket sorting based on sort keys, device
+- **S8 — Sorting & MITRE:** better bucket sorting based on sort keys, device
   class, and additional fields for quick sorting and filtering of syslog
-  events.
+  events. MITRE ATT&CK across the suite: events mapped to techniques at
+  ingest, a MITRE view in the bucket with sorting by tactic/technique, and
+  a valve filter condition matching MITRE techniques so flows can route or
+  drop by technique.
 - **S9 — Notifications:** webhooks for notifications and SMTP support.
 - **S10 — Clean-up:** code clean-up, more UI hints, and improved
   documentation.
