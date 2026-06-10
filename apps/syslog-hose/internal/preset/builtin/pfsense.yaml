@@ -1,0 +1,30 @@
+name: pfsense
+vendor: pfSense / OPNsense
+description: pfSense/OPNsense (filterlog CSV plus sshd/dhcpd host events)
+format: rfc3164
+facility: 16
+appname: filterlog
+events:
+  - weight: 45
+    severity: 6
+    template: >-
+      {{randInt 4 90}},,,1000000103,{{oneOf "igb0" "em0" "vtnet0"}},match,block,in,4,0x0,,{{randInt 48 128}},{{randInt 1 65000}},0,DF,6,tcp,{{randInt 40 60}},{{randIP "public"}},{{randIP "rfc1918"}},{{randPort}},{{oneOf "22" "23" "445" "3389" "8080"}},0,S,{{randInt 100000 4000000000}},,{{randInt 1024 65535}},,
+  - weight: 30
+    severity: 6
+    template: >-
+      {{randInt 4 90}},,,1000000117,{{oneOf "igb1" "em1"}},match,pass,out,4,0x0,,{{randInt 48 128}},{{randInt 1 65000}},0,DF,6,tcp,{{randInt 40 60}},{{randIP "rfc1918"}},{{randIP "public"}},{{randPort}},{{oneOf "443" "80" "53"}},0,S,{{randInt 100000 4000000000}},,{{randInt 1024 65535}},,
+  - weight: 10
+    severity: 6
+    template: >-
+      {{randInt 4 90}},,,1000000103,{{oneOf "igb0" "em0"}},match,block,in,4,0x0,,{{randInt 48 255}},{{randInt 1 65000}},0,none,17,udp,{{randInt 28 500}},{{randIP "public"}},{{randIP "rfc1918"}},{{randPort}},{{oneOf "5060" "161" "1900" "111"}},{{randInt 8 480}}
+  - weight: 8
+    severity: 6
+    appname: sshd
+    template: >-
+      {{oneOf "Accepted" "Failed"}} {{oneOf "password" "publickey"}} for {{oneOf "admin" "root" "netops"}}
+      from {{randIP "rfc1918"}} port {{randPort}} ssh2
+  - weight: 7
+    severity: 6
+    appname: dhcpd
+    template: >-
+      DHCPACK on {{randIP "rfc1918"}} to {{randMAC}} ({{oneOf "laptop-eng" "printer-3f" "cam-lobby" "iot-sensor"}}) via {{oneOf "igb1" "em1"}}

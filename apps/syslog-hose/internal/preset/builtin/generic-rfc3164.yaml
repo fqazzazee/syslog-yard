@@ -1,0 +1,28 @@
+name: generic-rfc3164
+vendor: Generic
+description: Plain RFC 3164 (BSD syslog) app messages — good for smoke tests and parser baselines
+format: rfc3164
+facility: 16
+appname: app
+events:
+  - weight: 40
+    severity: 6
+    template: >-
+      request completed method={{oneOf "GET" "POST" "PUT"}} path=/api/{{oneOf "users" "orders" "items" "health"}}
+      status={{oneOf "200" "200" "201" "404" "500"}} duration_ms={{randInt 2 1500}} client={{randIP "rfc1918"}}
+  - weight: 25
+    severity: 6
+    template: >-
+      worker {{randInt 1 8}} processed batch id={{seq "batch"}} size={{randInt 1 500}} queue_depth={{randInt 0 2000}}
+  - weight: 15
+    severity: 4
+    template: >-
+      slow query detected duration_ms={{randInt 1500 30000}} table={{oneOf "events" "sessions" "audit_log"}} rows={{randInt 1000 9000000}}
+  - weight: 10
+    severity: 3
+    template: >-
+      upstream connection failed host={{randIP "rfc1918"}}:{{oneOf "5432" "6379" "9200"}} err="{{oneOf "connection refused" "i/o timeout" "no route to host"}}" retry={{randInt 1 5}}
+  - weight: 10
+    severity: 5
+    template: >-
+      config reloaded version={{seq "cfg"}} source={{oneOf "file" "env" "api"}} changed_keys={{randInt 0 12}}

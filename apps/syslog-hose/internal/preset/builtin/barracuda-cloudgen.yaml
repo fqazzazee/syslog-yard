@@ -1,0 +1,30 @@
+name: barracuda-cloudgen
+vendor: Barracuda
+description: Barracuda CloudGen Firewall (box_Firewall_Activity pipe-delimited activity log)
+format: rfc3164
+facility: 16
+appname: box_Firewall_Activity
+events:
+  - weight: 55
+    severity: 6
+    template: >-
+      Info {{hostname}} Allow: FWD|{{oneOf "eth1" "eth2" "p1"}}|{{oneOf "eth0" "wan0"}}|{{oneOf "TCP" "UDP"}}|{{randIP "rfc1918"}}|{{randPort}}|{{randIP "public"}}|{{oneOf "443" "80" "53" "123"}}|{{randIP "public"}}|{{randPort}}|LAN-2-INTERNET|{{randInt 1 40}}|{{randInt 1 600}}|{{randInt 200 4000000}}|{{randInt 200 900000}}|0|Normal Operation
+  - weight: 25
+    severity: 4
+    template: >-
+      Warning {{hostname}} Block: LIN|{{oneOf "eth0" "wan0"}}||{{oneOf "TCP" "UDP"}}|{{randIP "public"}}|{{randPort}}|{{randIP "rfc1918"}}|{{oneOf "22" "445" "3389" "23" "8080"}}|0.0.0.0|0|BLOCKALL|0|0|0|0|0|Block by Rule
+  - weight: 10
+    severity: 5
+    template: >-
+      Info {{hostname}} Remove: FWD|{{oneOf "eth1" "eth2"}}|{{oneOf "eth0" "wan0"}}|TCP|{{randIP "rfc1918"}}|{{randPort}}|{{randIP "public"}}|443|{{randIP "public"}}|{{randPort}}|LAN-2-INTERNET|{{randInt 1 40}}|{{randInt 1 600}}|{{randInt 200 4000000}}|{{randInt 200 900000}}|0|Session Idle Timeout
+  - weight: 6
+    severity: 4
+    appname: box_Event_eventS
+    template: >-
+      Warning {{hostname}} [{{seq "evid"}}] {{oneOf "Authentication Failure" "Configuration Change" "Subsystem Restart"}}:
+      {{oneOf "Login failed for user root from" "Config block firewall changed by admin from" "Service fwd restarted, requested from"}} {{randIP "rfc1918"}}
+  - weight: 4
+    severity: 5
+    appname: box_Auth_access
+    template: >-
+      Info {{hostname}} Authentication succeeded for user {{oneOf "admin" "fwops" "support"}} from {{randIP "rfc1918"}} (method: {{oneOf "MSAD" "local" "TACACS+"}})

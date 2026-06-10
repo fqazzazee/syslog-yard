@@ -1,0 +1,38 @@
+name: ot-switch
+vendor: OT / Industrial
+description: Industrial managed switch (Moxa/Hirschmann style — port link, redundancy, auth, environment)
+format: rfc3164
+facility: 16
+appname: switch
+events:
+  - weight: 30
+    severity: 5
+    template: >-
+      Port {{randInt 1 16}} link {{oneOf "up, 100M Full" "up, 1G Full" "down"}}
+  - weight: 18
+    severity: 4
+    template: >-
+      {{oneOf "Turbo Ring" "RSTP" "MRP"}} topology changed: {{oneOf "ring recovered" "ring broken at segment" "new root bridge elected" "redundant path activated"}}
+      (port {{randInt 1 16}})
+  - weight: 15
+    severity: 5
+    template: >-
+      {{oneOf "Web" "CLI" "SNMP"}} login {{oneOf "success" "success" "failure"}} user={{oneOf "admin" "engineer" "scada-ro"}}
+      from {{randIP "rfc1918"}}
+  - weight: 12
+    severity: 4
+    template: >-
+      Port {{randInt 1 16}} security violation: unknown MAC {{randMAC}} blocked (port-lock active)
+  - weight: 10
+    severity: 6
+    template: >-
+      Config {{oneOf "saved to flash" "changed by admin via web" "exported to ABC-02 unit"}}
+  - weight: 8
+    severity: 3
+    template: >-
+      Power input {{randInt 1 2}} {{oneOf "lost, switching to redundant input" "restored"}} (PWR{{randInt 1 2}}=
+      {{oneOf "24.1" "23.8" "0.0" "24.3"}}V)
+  - weight: 7
+    severity: 4
+    template: >-
+      DI {{randInt 1 2}} state changed to {{oneOf "ON" "OFF"}} (relay alarm {{oneOf "raised" "cleared"}})

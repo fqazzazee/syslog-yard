@@ -1,0 +1,67 @@
+name: fortinet-fortigate
+vendor: Fortinet
+description: FortiGate firewall (FortiOS key=value logs — traffic, UTM webfilter, VPN, system events)
+format: raw
+facility: 23
+appname: fortigate
+events:
+  - weight: 55
+    severity: 5
+    template: >-
+      date={{now "2006-01-02"}} time={{now "15:04:05"}} devname="{{hostname}}"
+      devid="FGT60FTK2009012345" logid="0000000013" type="traffic"
+      subtype="forward" level="notice" vd="root" srcip={{randIP "rfc1918"}}
+      srcport={{randPort}} srcintf="internal" srcintfrole="lan" dstip={{randIP "public"}}
+      dstport={{oneOf "443" "80" "53" "123" "8443"}} dstintf="wan1" dstintfrole="wan"
+      sessionid={{seq "session"}} proto={{oneOf "6" "6" "6" "17"}} action="accept"
+      policyid={{randInt 1 40}} policytype="policy" service="{{oneOf "HTTPS" "HTTP" "DNS" "NTP"}}"
+      trandisp="snat" transip={{randIP "public"}} transport={{randPort}}
+      appcat="unscanned" duration={{randInt 1 600}} sentbyte={{randInt 200 900000}}
+      rcvdbyte={{randInt 200 4000000}} sentpkt={{randInt 1 900}} rcvdpkt={{randInt 1 1200}}
+  - weight: 20
+    severity: 4
+    template: >-
+      date={{now "2006-01-02"}} time={{now "15:04:05"}} devname="{{hostname}}"
+      devid="FGT60FTK2009012345" logid="0000000020" type="traffic" subtype="forward"
+      level="warning" vd="root" srcip={{randIP "public"}} srcport={{randPort}}
+      srcintf="wan1" srcintfrole="wan" dstip={{randIP "rfc1918"}}
+      dstport={{oneOf "22" "23" "445" "3389" "1433" "8080"}} dstintf="internal"
+      dstintfrole="lan" sessionid={{seq "session"}} proto=6 action="deny"
+      policyid=0 policytype="policy" service="{{oneOf "SSH" "TELNET" "SMB" "RDP" "MSSQL"}}"
+      duration=0 sentbyte=0 rcvdbyte=0
+  - weight: 12
+    severity: 4
+    template: >-
+      date={{now "2006-01-02"}} time={{now "15:04:05"}} devname="{{hostname}}"
+      devid="FGT60FTK2009012345" logid="0316013056" type="utm" subtype="webfilter"
+      eventtype="ftgd_blk" level="warning" vd="root" policyid={{randInt 1 40}}
+      sessionid={{seq "session"}} srcip={{randIP "rfc1918"}} srcport={{randPort}}
+      dstip={{randIP "public"}} dstport=443 proto=6 service="HTTPS"
+      hostname="{{oneOf "bet-win-now.example.com" "free-vbucks.example.net" "stream-hub.example.org" "casino-gold.example.com"}}"
+      action="blocked" cat={{randInt 10 90}} catdesc="{{oneOf "Gambling" "Malicious Websites" "Streaming Media and Download" "Phishing"}}"
+  - weight: 6
+    severity: 5
+    template: >-
+      date={{now "2006-01-02"}} time={{now "15:04:05"}} devname="{{hostname}}"
+      devid="FGT60FTK2009012345" logid="0101037124" type="event" subtype="vpn"
+      level="notice" vd="root" logdesc="IPsec phase 2 status changed"
+      msg="IPsec phase 2 status change" action="phase2-{{oneOf "up" "down"}}"
+      remip={{randIP "public"}} locip={{randIP "public"}} remport=500 locport=500
+      outintf="wan1" vpntunnel="vpn-to-{{oneOf "branch1" "branch2" "dc" "azure"}}"
+  - weight: 4
+    severity: 5
+    template: >-
+      date={{now "2006-01-02"}} time={{now "15:04:05"}} devname="{{hostname}}"
+      devid="FGT60FTK2009012345" logid="0100032001" type="event" subtype="system"
+      level="information" vd="root" logdesc="Admin login successful"
+      sn="{{seq "loginsn"}}" user="{{oneOf "admin" "fwadmin" "netops"}}" ui="https({{randIP "rfc1918"}})"
+      method="https" srcip={{randIP "rfc1918"}} action="login" status="success"
+      reason="none" msg="Administrator logged in successfully from https"
+  - weight: 3
+    severity: 3
+    template: >-
+      date={{now "2006-01-02"}} time={{now "15:04:05"}} devname="{{hostname}}"
+      devid="FGT60FTK2009012345" logid="0100032002" type="event" subtype="system"
+      level="alert" vd="root" logdesc="Admin login failed" user="{{oneOf "admin" "root" "administrator"}}"
+      ui="ssh({{randIP "any"}})" method="ssh" srcip={{randIP "any"}} action="login"
+      status="failed" reason="name_invalid" msg="Administrator login failed"

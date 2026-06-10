@@ -1,0 +1,28 @@
+name: generic-rfc5424
+vendor: Generic
+description: Plain RFC 5424 messages with version/timestamp/host/app/procid header
+format: rfc5424
+facility: 16
+appname: app
+events:
+  - weight: 40
+    severity: 6
+    template: >-
+      request completed method={{oneOf "GET" "POST" "DELETE"}} path=/v1/{{oneOf "ingest" "search" "buckets" "status"}}
+      status={{oneOf "200" "200" "204" "429" "503"}} latency_ms={{randInt 1 900}} trace={{uuid}}
+  - weight: 25
+    severity: 6
+    template: >-
+      session {{oneOf "started" "renewed" "ended"}} user={{oneOf "jsmith" "mlopez" "svc-ingest"}} sid={{uuid}} ip={{randIP "rfc1918"}}
+  - weight: 15
+    severity: 4
+    template: >-
+      queue backlog warning topic={{oneOf "events" "metrics" "alerts"}} depth={{randInt 5000 200000}} consumer_lag_s={{randInt 5 900}}
+  - weight: 10
+    severity: 2
+    template: >-
+      service unhealthy check={{oneOf "db" "disk" "cert-expiry"}} detail="{{oneOf "connection pool exhausted" "volume 92% full" "certificate expires in 3 days"}}"
+  - weight: 10
+    severity: 5
+    template: >-
+      deploy completed version={{randInt 1 4}}.{{randInt 0 20}}.{{randInt 0 50}} commit={{randHex 8}} by={{oneOf "ci-bot" "jsmith"}}

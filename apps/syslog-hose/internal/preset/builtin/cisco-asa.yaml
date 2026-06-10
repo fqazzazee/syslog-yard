@@ -1,0 +1,49 @@
+name: cisco-asa
+vendor: Cisco
+description: Cisco ASA firewall (%ASA syslog message IDs — connections, denies, VPN, auth)
+format: raw
+facility: 20
+appname: asa
+events:
+  - weight: 40
+    severity: 6
+    template: >-
+      %ASA-6-302013: Built outbound TCP connection {{seq "conn"}} for
+      outside:{{randIP "public"}}/{{oneOf "443" "80" "53" "8443"}}
+      ({{randIP "public"}}/{{oneOf "443" "80" "53" "8443"}}) to
+      inside:{{randIP "rfc1918"}}/{{randPort}} ({{randIP "public"}}/{{randPort}})
+  - weight: 30
+    severity: 6
+    template: >-
+      %ASA-6-302014: Teardown TCP connection {{seq "conn"}} for
+      outside:{{randIP "public"}}/443 to inside:{{randIP "rfc1918"}}/{{randPort}}
+      duration {{randInt 0 1}}:{{randInt 10 59}}:{{randInt 10 59}} bytes {{randInt 500 5000000}}
+      {{oneOf "TCP FINs" "TCP Reset-I" "TCP Reset-O" "SYN Timeout"}}
+  - weight: 15
+    severity: 4
+    template: >-
+      %ASA-4-106023: Deny {{oneOf "tcp" "udp"}} src outside:{{randIP "public"}}/{{randPort}}
+      dst inside:{{randIP "rfc1918"}}/{{oneOf "22" "23" "445" "3389" "1433"}}
+      by access-group "OUTSIDE_IN" [0x0, 0x0]
+  - weight: 5
+    severity: 6
+    template: >-
+      %ASA-6-113004: AAA user {{oneOf "authentication" "authorization"}} Successful :
+      server = {{randIP "rfc1918"}} : user = {{oneOf "jsmith" "mlopez" "achen" "svc-vpn"}}
+  - weight: 4
+    severity: 4
+    template: >-
+      %ASA-4-113019: Group = RA-VPN, Username = {{oneOf "jsmith" "mlopez" "achen"}},
+      IP = {{randIP "public"}}, Session disconnected. Session Type: SSL,
+      Duration: {{randInt 0 8}}h:{{randInt 10 59}}m:{{randInt 10 59}}s,
+      Bytes xmt: {{randInt 10000 90000000}}, Bytes rcv: {{randInt 10000 9000000}},
+      Reason: User Requested
+  - weight: 3
+    severity: 5
+    template: >-
+      %ASA-5-611103: User logged out: Uname: {{oneOf "admin" "netops" "fwadmin"}}
+  - weight: 3
+    severity: 5
+    template: >-
+      %ASA-5-111008: User '{{oneOf "admin" "netops"}}' executed the
+      '{{oneOf "show running-config" "write memory" "show conn count" "show xlate"}}' command.

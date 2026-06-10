@@ -1,0 +1,41 @@
+name: sonicwall
+vendor: SonicWall
+description: SonicWall firewall (id=firewall key=value event log)
+format: raw
+facility: 16
+appname: sonicwall
+events:
+  - weight: 45
+    severity: 6
+    template: >-
+      id=firewall sn=18B1690729A8 time="{{now "2006-01-02 15:04:05"}} UTC" fw={{randIP "public"}}
+      pri=6 c=262144 m=98 msg="Connection Opened" app={{randInt 1 1500}} n={{seq "n"}}
+      src={{randIP "rfc1918"}}:{{randPort}}:X0 dst={{randIP "public"}}:{{oneOf "443" "80" "53"}}:X1
+      proto={{oneOf "tcp/https" "tcp/http" "udp/dns"}}
+  - weight: 25
+    severity: 6
+    template: >-
+      id=firewall sn=18B1690729A8 time="{{now "2006-01-02 15:04:05"}} UTC" fw={{randIP "public"}}
+      pri=6 c=1024 m=537 msg="Connection Closed" app={{randInt 1 1500}} n={{seq "n"}}
+      src={{randIP "rfc1918"}}:{{randPort}}:X0 dst={{randIP "public"}}:443:X1 proto=tcp/https
+      sent={{randInt 200 900000}} rcvd={{randInt 200 4000000}}
+  - weight: 18
+    severity: 4
+    template: >-
+      id=firewall sn=18B1690729A8 time="{{now "2006-01-02 15:04:05"}} UTC" fw={{randIP "public"}}
+      pri=4 c=64 m=36 msg="TCP connection dropped" app={{randInt 1 1500}} n={{seq "n"}}
+      src={{randIP "public"}}:{{randPort}}:X1 dst={{randIP "rfc1918"}}:{{oneOf "22" "445" "3389"}}:X0
+      proto=tcp rule="Default Access Rule"
+  - weight: 7
+    severity: 1
+    template: >-
+      id=firewall sn=18B1690729A8 time="{{now "2006-01-02 15:04:05"}} UTC" fw={{randIP "public"}}
+      pri=1 c=32 m=82 msg="Possible port scan detected" n={{seq "n"}}
+      src={{randIP "public"}}:{{randPort}}:X1 dst={{randIP "public"}}:{{randInt 1 1024}}:X1
+      note="TCP scanned port list: {{randInt 20 99}}, {{randInt 100 999}}, {{randInt 1000 9999}}"
+  - weight: 5
+    severity: 5
+    template: >-
+      id=firewall sn=18B1690729A8 time="{{now "2006-01-02 15:04:05"}} UTC" fw={{randIP "public"}}
+      pri=5 c=16 m=29 msg="Administrator login {{oneOf "allowed" "denied"}}" n={{seq "n"}}
+      usr="{{oneOf "admin" "fwadmin"}}" src={{randIP "rfc1918"}}:{{randPort}}:X0 dst={{randIP "rfc1918"}}:443:X0

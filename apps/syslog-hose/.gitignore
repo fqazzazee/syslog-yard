@@ -1,0 +1,6 @@
+/syshose
+/data/
+web/node_modules/
+web/dist/
+nohup.out
+*.log

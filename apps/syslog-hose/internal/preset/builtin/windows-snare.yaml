@@ -1,0 +1,42 @@
+name: windows-snare
+vendor: Microsoft Windows
+description: Windows Security events forwarded in Snare agent format (4624/4625/4634/4672/7045)
+format: rfc3164
+facility: 13
+appname: MSWinEventLog
+events:
+  - weight: 40
+    severity: 6
+    template: >-
+      1	Security	{{seq "snare"}}	{{now "Mon Jan 02 15:04:05 2006"}}	4624	Microsoft-Windows-Security-Auditing
+      	N/A	N/A	Success Audit	{{hostname}}	Logon	An account was successfully logged on.
+      Subject: Security ID: S-1-0-0 Logon Type: {{oneOf "3" "3" "10" "2"}}
+      New Logon: Account Name: {{oneOf "jsmith" "mlopez" "svc-backup" "achen"}} Account Domain: CORP
+      Source Network Address: {{randIP "rfc1918"}} Logon Process: NtLmSsp	{{seq "snare"}}
+  - weight: 25
+    severity: 4
+    template: >-
+      1	Security	{{seq "snare"}}	{{now "Mon Jan 02 15:04:05 2006"}}	4625	Microsoft-Windows-Security-Auditing
+      	N/A	N/A	Failure Audit	{{hostname}}	Logon	An account failed to log on.
+      Account Name: {{oneOf "administrator" "jsmith" "svc-sql" "guest"}} Account Domain: CORP
+      Failure Reason: Unknown user name or bad password. Logon Type: 3
+      Source Network Address: {{randIP "any"}}	{{seq "snare"}}
+  - weight: 18
+    severity: 6
+    template: >-
+      1	Security	{{seq "snare"}}	{{now "Mon Jan 02 15:04:05 2006"}}	4634	Microsoft-Windows-Security-Auditing
+      	N/A	N/A	Success Audit	{{hostname}}	Logoff	An account was logged off.
+      Account Name: {{oneOf "jsmith" "mlopez" "svc-backup"}} Account Domain: CORP Logon Type: 3	{{seq "snare"}}
+  - weight: 10
+    severity: 6
+    template: >-
+      1	Security	{{seq "snare"}}	{{now "Mon Jan 02 15:04:05 2006"}}	4672	Microsoft-Windows-Security-Auditing
+      	N/A	N/A	Success Audit	{{hostname}}	Special Logon	Special privileges assigned to new logon.
+      Account Name: {{oneOf "DA-jsmith" "SYSTEM" "svc-veeam"}} Privileges: SeDebugPrivilege, SeBackupPrivilege	{{seq "snare"}}
+  - weight: 7
+    severity: 4
+    template: >-
+      1	System	{{seq "snare"}}	{{now "Mon Jan 02 15:04:05 2006"}}	7045	Service Control Manager
+      	N/A	N/A	Information	{{hostname}}	Service Install	A service was installed in the system.
+      Service Name: {{oneOf "GoogleUpdater" "SentinelAgent" "PSEXESVC" "RemoteMaint"}}
+      Service File Name: C:\Windows\{{oneOf "Temp" "System32"}}\{{randHex 8}}.exe Service Type: user mode service	{{seq "snare"}}
