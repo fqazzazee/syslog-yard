@@ -120,6 +120,16 @@ Graph JSON, generated configs, and version history as flat files in `/data`.
   with screenshots, NFS/CIFS share docs.
 - **S5 — Ops polish:** TLS in/out on the valve, config version history,
   graph import/export, live tail, GHCR publish, quadlet docs.
+- **S6 — Auth & collaboration:** user authentication with local accounts and
+  OIDC; collaboration via sharing buckets with different users.
+- **S7 — Security review:** review of the code and ensuring the overall
+  security posture of the suite.
+- **S8 — Bucket sorting:** better bucket sorting based on sort keys, device
+  class, and additional fields for quick sorting and filtering of syslog
+  events.
+- **S9 — Notifications:** webhooks for notifications and SMTP support.
+- **S10 — Clean-up:** code clean-up, more UI hints, and improved
+  documentation.
 
 Per-tool detail beyond this lives in each app's own `docs/PLAN.md`
 (syslog-bucket's existing plan migrates in S0; syslog-hose's plan comes along with
