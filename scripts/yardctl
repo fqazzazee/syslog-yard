@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# yardctl — operate the syslog-yard suite on a Linux host.
+#
+#   yardctl prereqs    install a container runtime + compose (dnf or apt)
+#   yardctl up         build images and start the suite
+#   yardctl down       stop the suite (volumes are kept)
+#   yardctl restart    restart all suite services
+#   yardctl status     container status + UI health checks
+#   yardctl logs [svc] follow logs (all services or one)
+#   yardctl firewall   open the yard's ports (firewalld or ufw; needs sudo)
+#   yardctl firewall-remove   close them again
+#   yardctl smoke      send a test message through valve -> bucket
+#
+# UI ports: 8080 (hose) 8081 (valve) 8082 (bucket); syslog entry: 6514 udp+tcp.
+set -euo pipefail
+
+YARD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE_FILE="$YARD_DIR/deploy/compose.yaml"
+UI_PORTS=(8080 8081 8082)
+SYSLOG_PORT=6514
+
+info() { printf '\e[1;34m[yardctl]\e[0m %s\n' "$*"; }
+die()  { printf '\e[1;31m[yardctl]\e[0m %s\n' "$*" >&2; exit 1; }
+
+compose() {
+    if command -v docker >/dev/null && docker compose version >/dev/null 2>&1; then
+        docker compose -f "$COMPOSE_FILE" "$@"
+    elif command -v podman >/dev/null && podman compose version >/dev/null 2>&1; then
+        podman compose -f "$COMPOSE_FILE" "$@"
+    elif command -v podman-compose >/dev/null; then
+        podman-compose -f "$COMPOSE_FILE" "$@"
+    else
+        die "no compose runtime found — run: yardctl prereqs"
+    fi
+}
+
+prereqs() {
+    if command -v docker >/dev/null || command -v podman >/dev/null; then
+        info "container runtime already present: $(command -v docker || command -v podman)"
+    elif command -v dnf >/dev/null; then
+        info "installing podman + podman-compose (dnf)"
+        sudo dnf install -y podman podman-compose
+    elif command -v apt-get >/dev/null; then
+        info "installing docker + compose plugin (apt)"
+        sudo apt-get update
+        sudo apt-get install -y docker.io docker-compose-v2
+        sudo systemctl enable --now docker
+        info "add yourself to the docker group (or use sudo): sudo usermod -aG docker \$USER"
+    else
+        die "unsupported distro: install docker or podman manually"
+    fi
+    for tool in curl logger; do
+        command -v "$tool" >/dev/null || info "note: '$tool' not found — needed for status/smoke"
+    done
+    info "prereqs OK"
+}
+
+firewall() {
+    local action="$1" # add | remove
+    if systemctl is-active --quiet firewalld 2>/dev/null; then
+        local op="--add-port" && [ "$action" = remove ] && op="--remove-port"
+        info "configuring firewalld ($action)"
+        for p in "${UI_PORTS[@]}"; do sudo firewall-cmd --permanent "$op=$p/tcp"; done
+        sudo firewall-cmd --permanent "$op=$SYSLOG_PORT/tcp"
+        sudo firewall-cmd --permanent "$op=$SYSLOG_PORT/udp"
+        sudo firewall-cmd --reload
+        info "firewalld updated. If host->container UDP still fails, trust the"
+        info "compose bridge interface:"
+        info '  BR=br-$(docker network inspect syslog-yard_yardnet -f "{{.Id}}" | cut -c1-12)'
+        info '  sudo firewall-cmd --permanent --zone=trusted --add-interface=$BR'
+        info '  sudo firewall-cmd --reload'
+    elif command -v ufw >/dev/null; then
+        local cmd="allow" && [ "$action" = remove ] && cmd="delete allow"
+        info "configuring ufw ($action)"
+        for p in "${UI_PORTS[@]}"; do sudo ufw $cmd "$p/tcp"; done
+        sudo ufw $cmd "$SYSLOG_PORT/tcp"
+        sudo ufw $cmd "$SYSLOG_PORT/udp"
+    else
+        info "no firewalld/ufw detected — open these yourself if needed:"
+        info "  tcp: ${UI_PORTS[*]} $SYSLOG_PORT   udp: $SYSLOG_PORT"
+    fi
+}
+
+status() {
+    compose ps
+    echo
+    for p in "${UI_PORTS[@]}"; do
+        if curl -fsS -m 2 -o /dev/null "http://localhost:$p/"; then
+            info "UI :$p up"
+        else
+            info "UI :$p NOT responding"
+        fi
+    done
+}
+
+smoke() {
+    info "sending test message to localhost:$SYSLOG_PORT/udp"
+    logger -n 127.0.0.1 -P "$SYSLOG_PORT" -d --rfc3164 -t yardctl "yardctl smoke $(date +%s)"
+    sleep 2
+    local n
+    n=$(curl -fsS "http://localhost:8082/api/entries?q=yardctl" | grep -o '"app_name":"yardctl"' | wc -l)
+    if [ "$n" -gt 0 ]; then
+        info "smoke OK — $n yardctl entr$([ "$n" = 1 ] && echo y || echo ies) in syslog-bucket"
+    else
+        die "smoke FAILED — message did not reach syslog-bucket (valve flow applied? firewall? see yardctl firewall)"
+    fi
+}
+
+case "${1:-}" in
+    prereqs)          prereqs ;;
+    up|start)         compose up -d --build && status ;;
+    down|stop)        compose down ;;
+    restart)          compose restart && status ;;
+    status)           status ;;
+    logs)             shift; compose logs -f "$@" ;;
+    firewall)         firewall add ;;
+    firewall-remove)  firewall remove ;;
+    smoke)            smoke ;;
+    *)                grep '^#   yardctl' "$0" | sed 's/^# *//'; exit 1 ;;
+esac

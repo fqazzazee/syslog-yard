@@ -1,0 +1,26 @@
+# Edge override: run syslog-valve on the host network so real devices reach
+# its listeners directly and source IPs are preserved (the bridge — and
+# especially rootless podman's slirp4netns — masquerades them).
+#
+#   docker compose -f compose.yaml -f compose.host-net.yaml up -d
+#
+# Notes:
+# - The valve's IN ports now bind host ports directly (e.g. an IN port on
+#   514 binds host 514 — needs root, CAP_NET_BIND_SERVICE, or
+#   `sysctl net.ipv4.ip_unprivileged_port_start=0`; or just use 5514).
+# - Off yardnet, the valve reaches the bucket via the loopback port
+#   published below: point OUT ports at 127.0.0.1:5515.
+services:
+  syslog-valve:
+    network_mode: host
+    networks: !reset []
+    ports: !reset []
+    environment:
+      VALVE_ADDR: ":8081"
+      VALVE_DATA: /data
+      VALVE_SUGGESTED_FORWARD: "127.0.0.1:5515"
+
+  bucket-syslog:
+    ports:
+      - "127.0.0.1:5515:514/udp"
+      - "127.0.0.1:5515:514/tcp"
