@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchBuckets, fetchEntries, fetchRules, fetchStats, fetchTags, liveTailURL } from "./api";
+import { fetchBuckets, fetchEntries, fetchHints, fetchRules, fetchStats, fetchTags, liveTailURL } from "./api";
 import type { Bucket, Entry, Filters, Rule, Selection, Stats, Tag } from "./types";
 import BucketModal from "./components/BucketModal";
 import EntryDetail from "./components/EntryDetail";
@@ -8,6 +8,7 @@ import LogTable from "./components/LogTable";
 import RuleModal from "./components/RuleModal";
 import Sidebar from "./components/Sidebar";
 import TagsModal from "./components/TagsModal";
+import { YardNav } from "./components/YardNav";
 import { useLiveTail } from "./hooks";
 
 const MAX_ROWS = 2000;
@@ -32,8 +33,13 @@ export default function App() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
+  const [hints, setHints] = useState<Record<string, string>>({});
   const entriesRef = useRef<Entry[]>([]);
   entriesRef.current = entries;
+
+  useEffect(() => {
+    fetchHints().then(setHints).catch(() => {});
+  }, []);
 
   const tagsById = useMemo(() => new Map(tags.map((t) => [t.id, t])), [tags]);
 
@@ -125,6 +131,7 @@ export default function App() {
         <h1>
           syslog-bucket <span className="bucket-label">{title}</span>
         </h1>
+        <YardNav links={hints} current="bucket" />
         {stats && (
           <span className="stats">
             ~{stats.approx_total.toLocaleString()} entries · {stats.last_minute}/min

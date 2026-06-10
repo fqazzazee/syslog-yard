@@ -20,12 +20,18 @@ type Server struct {
 	mgr   *engine.Manager
 	store *preset.Store
 	ui    fs.FS
+	hints map[string]string
 	mux   *http.ServeMux
 }
 
-// New builds the handler. ui is the built web app (may be nil in tests).
-func New(mgr *engine.Manager, store *preset.Store, ui fs.FS) *Server {
-	s := &Server{mgr: mgr, store: store, ui: ui, mux: http.NewServeMux()}
+// New builds the handler. ui is the built web app (may be nil in tests);
+// hints carries deployment-provided UI defaults (suggested destination,
+// neighbor UI links).
+func New(mgr *engine.Manager, store *preset.Store, ui fs.FS, hints map[string]string) *Server {
+	if hints == nil {
+		hints = map[string]string{}
+	}
+	s := &Server{mgr: mgr, store: store, ui: ui, hints: hints, mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -46,6 +52,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/presets/{name}", s.deletePreset)
 	s.mux.HandleFunc("POST /api/preview", s.preview)
 	s.mux.HandleFunc("GET /api/stream", s.stream)
+	s.mux.HandleFunc("GET /api/hints", s.getHints)
 	if s.ui != nil {
 		s.mux.Handle("/", spaHandler(s.ui))
 	}
@@ -230,6 +237,12 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
 		samples = append(samples, msg)
 	}
 	writeJSON(w, 200, map[string]any{"samples": samples})
+}
+
+// getHints returns deployment-provided UI defaults (suggested destination,
+// neighbor UI links). Empty object when running standalone.
+func (s *Server) getHints(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, s.hints)
 }
 
 // --- SSE stream: job stats + live tail ---

@@ -3,6 +3,7 @@ import { api, Job, PresetSummary, TailEvent } from "./api";
 import { JobForm } from "./JobForm";
 import { PresetsView } from "./PresetsView";
 import { Tail } from "./Tail";
+import { YardNav } from "./YardNav";
 
 type TabName = "jobs" | "presets";
 
@@ -14,12 +15,14 @@ export default function App() {
   const [editing, setEditing] = useState<Partial<Job> | null>(null);
   const [error, setError] = useState("");
   const [showTail, setShowTail] = useState(true);
+  const [hints, setHints] = useState<Record<string, string>>({});
   const paused = useRef(false);
 
   const refreshPresets = () => api.presets().then(setPresets).catch(() => {});
 
   useEffect(() => {
     refreshPresets();
+    api.hints().then(setHints).catch(() => {});
     const es = new EventSource("/api/stream");
     es.onmessage = (m) => {
       const data = JSON.parse(m.data) as { jobs: Job[]; events: TailEvent[] };
@@ -43,6 +46,16 @@ export default function App() {
 
   const running = jobs.filter((j) => j.running).length;
 
+  // New jobs start aimed at the suite neighbor when the deployment
+  // suggests one (HOSE_SUGGESTED_DEST, e.g. "syslog-valve:514").
+  const newJob = (): Partial<Job> => {
+    const dest = hints.suggestedDest;
+    if (!dest) return {};
+    const i = dest.lastIndexOf(":");
+    if (i < 1) return { host: dest };
+    return { host: dest.slice(0, i), port: Number(dest.slice(i + 1)) || 514 };
+  };
+
   return (
     <div className="app">
       <header>
@@ -50,6 +63,7 @@ export default function App() {
           <span className="logo">⟫⟫</span> syslog-hose
         </h1>
         <span className="sub">syslog generator</span>
+        <YardNav links={hints} current="hose" />
         <nav>
           <button className={tab === "jobs" ? "tab active" : "tab"} onClick={() => setTab("jobs")}>
             Jobs {running > 0 && <span className="badge">{running} running</span>}
@@ -78,7 +92,7 @@ export default function App() {
       {tab === "jobs" && (
         <main>
           <div className="toolbar">
-            <button className="primary" onClick={() => setEditing({})}>
+            <button className="primary" onClick={() => setEditing(newJob())}>
               + New job
             </button>
           </div>

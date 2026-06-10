@@ -62,9 +62,21 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Links to the neighbor yard UIs for the cross-tool nav (full URL or
+	// bare port; absent when running standalone).
+	hints := map[string]string{}
+	for envKey, hintKey := range map[string]string{
+		"YARD_LINK_HOSE":   "linkHose",
+		"YARD_LINK_VALVE":  "linkValve",
+		"YARD_LINK_BUCKET": "linkBucket",
+	} {
+		if v := os.Getenv(envKey); v != "" {
+			hints[hintKey] = v
+		}
+	}
 	httpSrv := &http.Server{
 		Addr:    cfg.APIAddr,
-		Handler: api.New(st, eng, hub, dist),
+		Handler: api.New(st, eng, hub, dist, hints),
 	}
 	httpErr := make(chan error, 1)
 	go func() {

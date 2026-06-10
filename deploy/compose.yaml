@@ -19,7 +19,7 @@ volumes:
   hose-data:
   valve-data:
   bucket-dbdata:
-  # ---- external share examples ----------------------------------------
+  # ---- external share examples (full guide: ../docs/SHARES.md) --------
   # Define a share once here, then hand it to any tool as /shares/<name>
   # (and list the name in that tool's YARD_SHARES env). For rootless
   # podman, prefer bind-mounting a share already mounted on the host:
@@ -49,8 +49,14 @@ services:
     environment:
       HOSE_ADDR: ":8080"
       HOSE_DATA: /data
-      # Neighbor hint (UI default destination, wired up in S4).
+      # Neighbor hint: new jobs default to this destination (editable).
       HOSE_SUGGESTED_DEST: "syslog-valve:514"
+      # Cross-tool nav links. A bare port resolves against whatever host
+      # the browser used to reach this UI; set full URLs instead when the
+      # tools live behind a reverse proxy or on different hosts.
+      YARD_LINK_HOSE: "8080"
+      YARD_LINK_VALVE: "8081"
+      YARD_LINK_BUCKET: "8082"
     volumes:
       - hose-data:/data
     restart: unless-stopped
@@ -69,7 +75,10 @@ services:
       VALVE_ADDR: ":8081"
       VALVE_DATA: /data
       VALVE_SUGGESTED_FORWARD: "bucket-syslog:514"
-      # YARD_SHARES: "archive"     # S3: external share support
+      YARD_LINK_HOSE: "8080"
+      YARD_LINK_VALVE: "8081"
+      YARD_LINK_BUCKET: "8082"
+      # YARD_SHARES: "archive"     # external shares — see docs/SHARES.md
     volumes:
       - valve-data:/data
       # - logshare-nfs:/shares/archive
@@ -101,6 +110,9 @@ services:
       BUCKET_DB_URL: postgres://syslog_bucket:syslog_bucket@bucket-db:5432/syslog_bucket?sslmode=disable
       BUCKET_API_ADDR: ":8080"
       BUCKET_INGEST_ADDR: ":6601"
+      YARD_LINK_HOSE: "8080"
+      YARD_LINK_VALVE: "8081"
+      YARD_LINK_BUCKET: "8082"
     depends_on:
       bucket-db:
         condition: service_healthy

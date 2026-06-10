@@ -55,6 +55,8 @@ export function liveTailURL(f: Filters, sel: Selection): string {
 
 export const fetchStats = () => request<Stats>("/api/stats");
 
+export const fetchHints = () => request<Record<string, string>>("/api/hints");
+
 export const patchEntry = (id: number, patch: { status?: string; priority?: number }) =>
   send<Entry>("PATCH", `/api/entries/${id}`, patch);
 

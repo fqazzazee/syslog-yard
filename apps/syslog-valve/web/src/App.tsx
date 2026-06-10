@@ -20,6 +20,7 @@ import {
 } from "./api";
 import { nodeTypes, rfType, type FlowNode } from "./FlowNodes";
 import { NodePanel } from "./NodePanel";
+import { YardNav } from "./YardNav";
 
 function mkEdge(from: string, to: string, fromPort?: string | null): Edge {
   return {
@@ -181,6 +182,7 @@ export default function App() {
     <div className="app">
       <header>
         <span className="logo">⊶</span> syslog-valve
+        <YardNav links={hints} current="valve" />
         <div className="toolbar">
           <button onClick={() => addNode("source")}>+ IN port</button>
           <button onClick={() => addNode("filter")}>+ Filter</button>

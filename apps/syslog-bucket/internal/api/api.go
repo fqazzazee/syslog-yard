@@ -27,12 +27,17 @@ type server struct {
 	engine *engine.Engine
 	hub    *ws.Hub
 	web    fs.FS
+	hints  map[string]string
 }
 
-func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, web fs.FS) http.Handler {
-	s := &server{store: st, engine: eng, hub: hub, web: web}
+func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, web fs.FS, hints map[string]string) http.Handler {
+	if hints == nil {
+		hints = map[string]string{}
+	}
+	s := &server{store: st, engine: eng, hub: hub, web: web, hints: hints}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/healthz", s.healthz)
+	mux.HandleFunc("GET /api/hints", s.getHints)
 	mux.HandleFunc("GET /api/entries", s.listEntries)
 	mux.HandleFunc("GET /api/entries/{id}", s.getEntry)
 	mux.HandleFunc("PATCH /api/entries/{id}", s.patchEntry)
@@ -64,6 +69,12 @@ func (s *server) healthz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// getHints returns deployment-provided hints for the UI: links to the
+// neighbor yard tools. Empty object when running standalone.
+func (s *server) getHints(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, s.hints)
 }
 
 // condFromRequest translates the SPA's filter query parameters — plus an

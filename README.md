@@ -22,11 +22,40 @@ scripts/yardctl status     # health check; also: down / restart / logs / smoke
 ```
 
 UIs: hose http://localhost:8080 · valve http://localhost:8081 · bucket
-http://localhost:8082. External syslog entry: host port **6514** (udp/tcp)
-into the valve's IN port 514.
+http://localhost:8082 — each UI carries a small **yard** nav linking to the
+other two. External syslog entry: host port **6514** (udp/tcp) into the
+valve's IN ports. Note: VM-based runtimes (Rancher/Docker Desktop, Colima)
+forward TCP but not UDP across the VM boundary — `yardctl smoke` probes
+both and tells you which arrived.
 
-See [docs/PLAN.md](docs/PLAN.md) for the build plan. Status: S3 complete —
-filter nodes (severity/program/regex with match/else ports) and cache nodes
-(logrotate retention, external shares) work end-to-end; a FortiGate security
-demo ships pre-wired (hose → valve splits critical/high to the bucket,
-noise to disk). Next: S4 cross-UI cohesion.
+Log storage can target external NAS shares (NFS/CIFS) — see
+[docs/SHARES.md](docs/SHARES.md).
+
+## The demo loop
+
+The hose streams FortiGate traffic at the valve; the valve forwards
+critical/high severities to the bucket and rotates the noise to disk;
+the bucket tags and sorts what arrives.
+
+**syslog-hose** — generator jobs built from vendor presets, live tail below:
+
+![syslog-hose](docs/img/syslog-hose.png)
+
+**syslog-valve** — two IN ports feed a severity filter; `match` forwards to
+the bucket, `else` caches to disk under logrotate retention:
+
+![syslog-valve](docs/img/syslog-valve.png)
+
+**syslog-bucket** — email-client-style triage of the alerts that got
+through, auto-tagged by rules:
+
+![syslog-bucket](docs/img/syslog-bucket.png)
+
+## Status
+
+See [docs/PLAN.md](docs/PLAN.md) for the build plan. S4 complete — the
+suite is cohesive: cross-UI yard nav (env-injected links, hidden when
+standalone), neighbor-hint defaults (new hose jobs aim at the valve, new
+valve OUT ports aim at the bucket), NFS/CIFS share docs, README
+screenshots. Next: S5 ops polish (TLS, live tail on wires, import/export,
+GHCR publish, quadlet docs).

@@ -58,6 +58,17 @@ func main() {
 	if v := os.Getenv("VALVE_SUGGESTED_FORWARD"); v != "" {
 		hints["suggestedForward"] = v
 	}
+	// Links to the neighbor UIs for the cross-tool nav (full URL or bare
+	// port; absent when running standalone).
+	for envKey, hintKey := range map[string]string{
+		"YARD_LINK_HOSE":   "linkHose",
+		"YARD_LINK_VALVE":  "linkValve",
+		"YARD_LINK_BUCKET": "linkBucket",
+	} {
+		if v := os.Getenv(envKey); v != "" {
+			hints[hintKey] = v
+		}
+	}
 
 	// External shares are mounted by the deployment under /shares/<name>;
 	// YARD_SHARES lists which names to offer in the UI.
@@ -76,6 +87,7 @@ func main() {
 			}
 			shares[name] = mount
 			ok = append(ok, name)
+			fmt.Printf("syslog-valve: share %q: %s\n", name, mount)
 		}
 		hints["shares"] = strings.Join(ok, ",")
 	}

@@ -57,6 +57,13 @@ body {
   font-size: 13px;
 }
 
+/* cross-tool nav (syslog-yard suite; hidden when standalone) */
+.yard-nav { display: flex; align-items: center; gap: 2px; font-size: 12px; }
+.yard-nav-label { color: var(--fg-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-right: 5px; }
+.yard-link { color: var(--fg-dim); text-decoration: none; padding: 3px 8px; border-radius: 5px; border: 1px solid transparent; }
+.yard-link:hover { color: var(--fg); border-color: var(--border); }
+.yard-link.current { color: var(--accent); }
+
 .live {
   margin-left: auto;
   background: var(--bg-hover);

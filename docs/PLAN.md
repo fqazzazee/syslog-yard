@@ -5,9 +5,9 @@ deployed as plain containers (docker or rootless podman) under a single compose 
 
 | Tool | Role | UI port | Status |
 |------------------|--------------------------------------------|---------|---------------------------|
-| **syslog-hose** | traffic generator (fills the pipe) | 8080 | built as "Syshose" v0.1 — rename pending |
-| **syslog-valve** | visual router/filter on top of syslog-ng | 8081 | new |
-| **syslog-bucket**| email-client-style syslog server & triage | 8082 | planned as "Sysbucket" — see `apps/syslog-bucket/docs/PLAN.md` |
+| **syslog-hose** | traffic generator (fills the pipe) | 8080 | shipped (imported from Syshose in S0) |
+| **syslog-valve** | visual router/filter on top of syslog-ng | 8081 | shipped: source/filter/forward/cache + retention (S1–S3) |
+| **syslog-bucket**| email-client-style syslog server & triage | 8082 | shipped: ingest + triage (S2) — see `apps/syslog-bucket/docs/PLAN.md` |
 
 Each tool works standalone; the suite is composition, not coupling.
 
@@ -28,7 +28,9 @@ Each tool works standalone; the suite is composition, not coupling.
   `VALVE_SUGGESTED_FORWARD=syslog-bucket:514`; each UI pre-fills its neighbor as the
   default destination. Defaults only — every field stays editable.
 - **Cross-navigation**: small shared header in each UI linking to the other two
-  (URLs injected via env; hidden when running standalone).
+  (`YARD_LINK_HOSE|VALVE|BUCKET` env — a full URL, or a bare port resolved
+  against the browser's current host; hidden when running standalone). Each
+  tool serves its deployment hints at `GET /api/hints`.
 - Postgres (syslog-bucket's store) gets no published port.
 - `deploy/compose.host-net.yaml` override puts syslog-valve on host networking for
   real edge deployments (preserves device source IPs; avoids slirp4netns masking
@@ -49,7 +51,8 @@ in addition to its local `/data` volume.
 - syslog-valve cache nodes and syslog-bucket retention exports can each point at
   local `/data` or any share. logrotate applies wherever the files land
   (note in docs: compression on NFS is fine; beware locking quirks on CIFS).
-- `deploy/compose.yaml` ships a commented NFS and CIFS volume example.
+- `deploy/compose.yaml` ships a commented NFS and CIFS volume example;
+  the full guide is `docs/SHARES.md`.
 
 ## Repo layout
 
@@ -129,5 +132,8 @@ the subtree import).
 - syslog-ng reload is graceful for TCP; brief UDP drop during reload is acceptable
   and documented.
 - Rootless podman: slirp4netns masks source IPs — document pasta / host networking.
+- VM-based runtimes (Rancher/Docker Desktop, Colima) forward TCP but not UDP
+  from the host into containers — wire a TCP IN port on the valve for host
+  entry there; `yardctl smoke` probes both transports and reports each.
 - CIFS file locking can bite logrotate's compress step — document `copytruncate`
   fallback for SMB shares.

@@ -84,6 +84,7 @@ export const api = {
     req<{ name: string }>("/api/presets", { method: "POST", body: yaml }),
   deletePreset: (name: string) =>
     req<void>(`/api/presets/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  hints: () => req<Record<string, string>>("/api/hints"),
   preview: (body: {
     preset?: string;
     yaml?: string;

@@ -53,7 +53,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := &http.Server{Addr: addr, Handler: server.New(mgr, store, ui)}
+	// Suite hints: the deployment can suggest a default destination and
+	// inject links to the neighbor UIs (see /api/hints). All optional —
+	// standalone runs simply get an empty map.
+	hints := map[string]string{}
+	for envKey, hintKey := range map[string]string{
+		"HOSE_SUGGESTED_DEST": "suggestedDest",
+		"YARD_LINK_HOSE":      "linkHose",
+		"YARD_LINK_VALVE":     "linkValve",
+		"YARD_LINK_BUCKET":    "linkBucket",
+	} {
+		if v := os.Getenv(envKey); v != "" {
+			hints[hintKey] = v
+		}
+	}
+
+	srv := &http.Server{Addr: addr, Handler: server.New(mgr, store, ui, hints)}
 	go func() {
 		fmt.Printf("syslog-hose listening on %s (data dir %s, %d presets)\n",
 			addr, dataDir, len(store.List()))

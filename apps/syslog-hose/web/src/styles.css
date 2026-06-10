@@ -35,6 +35,13 @@ header h1 { font-size: 19px; margin: 0; letter-spacing: 0.5px; }
 nav { display: flex; gap: 4px; }
 .spacer { flex: 1; }
 
+/* cross-tool nav (syslog-yard suite; hidden when standalone) */
+.yard-nav { display: flex; align-items: center; gap: 2px; font-size: 12px; font-weight: 400; margin-right: 10px; }
+.yard-nav-label { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-right: 5px; }
+.yard-link { color: var(--dim); text-decoration: none; padding: 3px 8px; border-radius: 5px; border: 1px solid transparent; }
+.yard-link:hover { color: var(--fg); border-color: var(--border); }
+.yard-link.current { color: var(--accent); }
+
 button {
   background: var(--bg3);
   color: var(--fg);

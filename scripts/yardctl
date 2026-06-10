@@ -94,16 +94,25 @@ status() {
 }
 
 smoke() {
-    info "sending test message to localhost:$SYSLOG_PORT/udp"
-    logger -n 127.0.0.1 -P "$SYSLOG_PORT" -d --rfc3164 -t yardctl "yardctl smoke $(date +%s)"
+    # user.err: severe enough that the demo flow's severity filter forwards
+    # it to the bucket instead of caching it as noise. Probe both transports:
+    # VM-based runtimes (Rancher/Docker Desktop, Colima) forward TCP but not
+    # UDP, so one missing transport is a warning, not a failure.
+    local ts ok=""
+    ts=$(date +%s)
+    info "sending test messages to localhost:$SYSLOG_PORT (udp + tcp)"
+    logger -n 127.0.0.1 -P "$SYSLOG_PORT" -d -p user.err --rfc3164 -t yard-udp "yardctl smoke udp $ts" || true
+    logger -n 127.0.0.1 -P "$SYSLOG_PORT" -T -p user.err --rfc3164 -t yard-tcp "yardctl smoke tcp $ts" || true
     sleep 2
-    local n
-    n=$(curl -fsS "http://localhost:8082/api/entries?q=yardctl" | grep -o '"app_name":"yardctl"' | wc -l)
-    if [ "$n" -gt 0 ]; then
-        info "smoke OK — $n yardctl entr$([ "$n" = 1 ] && echo y || echo ies) in syslog-bucket"
-    else
-        die "smoke FAILED — message did not reach syslog-bucket (valve flow applied? firewall? see yardctl firewall)"
-    fi
+    for proto in udp tcp; do
+        if curl -fsS "http://localhost:8082/api/entries?app=yard-$proto&limit=5" | grep -q "smoke $proto $ts"; then
+            info "smoke $proto OK — reached syslog-bucket"
+            ok=1
+        else
+            info "smoke $proto: message did not arrive (needs a matching IN port on the valve; UDP cannot cross VM-based runtimes' port forwarding)"
+        fi
+    done
+    [ -n "$ok" ] || die "smoke FAILED — nothing reached syslog-bucket (valve flow applied? firewall? see yardctl firewall)"
 }
 
 case "${1:-}" in
