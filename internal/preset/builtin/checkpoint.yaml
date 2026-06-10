@@ -1,0 +1,38 @@
+name: checkpoint
+vendor: Check Point
+description: Check Point gateway (Log Exporter syslog style, semicolon key:"value" pairs)
+format: rfc5424
+facility: 16
+appname: CheckPoint
+events:
+  - weight: 60
+    severity: 6
+    template: >-
+      [action:"Accept"; flags:"444676"; ifdir:"inbound"; ifname:"eth1"; loguid:"{0x{{randHex 8}},0x{{randHex 7}},0x{{randHex 7}},0x{{randHex 7}}}";
+      origin:"{{randIP "rfc1918"}}"; time:"{{now "2006-01-02T15:04:05Z07:00"}}"; version:"5";
+      __policy_id_tag:"product=VPN-1 & FireWall-1[db_tag={F00D};mgmt=cp-mgmt]";
+      dst:"{{randIP "public"}}"; product:"VPN-1 & FireWall-1"; proto:"{{oneOf "6" "17"}}";
+      rule:"{{randInt 1 30}}"; s_port:"{{randPort}}"; service:"{{oneOf "443" "80" "53"}}";
+      service_id:"{{oneOf "https" "http" "domain-udp"}}"; src:"{{randIP "rfc1918"}}"]
+  - weight: 25
+    severity: 4
+    template: >-
+      [action:"Drop"; flags:"393216"; ifdir:"inbound"; ifname:"eth0"; loguid:"{0x{{randHex 8}},0x{{randHex 7}},0x{{randHex 7}},0x{{randHex 7}}}";
+      origin:"{{randIP "rfc1918"}}"; time:"{{now "2006-01-02T15:04:05Z07:00"}}"; version:"5";
+      dst:"{{randIP "rfc1918"}}"; product:"VPN-1 & FireWall-1"; proto:"6";
+      rule:"Cleanup rule"; s_port:"{{randPort}}"; service:"{{oneOf "22" "445" "3389" "135"}}";
+      src:"{{randIP "public"}}"]
+  - weight: 10
+    severity: 4
+    template: >-
+      [action:"Prevent"; ifdir:"inbound"; ifname:"eth0"; loguid:"{0x{{randHex 8}},0x{{randHex 7}},0x{{randHex 7}},0x{{randHex 7}}}";
+      origin:"{{randIP "rfc1918"}}"; time:"{{now "2006-01-02T15:04:05Z07:00"}}"; product:"IPS";
+      attack:"{{oneOf "Microsoft Windows SMB Information Disclosure" "Web Server Suspicious URL" "SSH Brute Force Attempt"}}";
+      severity:"{{oneOf "High" "Critical" "Medium"}}"; confidence_level:"{{randInt 3 5}}";
+      src:"{{randIP "public"}}"; dst:"{{randIP "rfc1918"}}"; proto:"6"; service:"{{oneOf "445" "80" "22"}}"]
+  - weight: 5
+    severity: 5
+    template: >-
+      [action:"Key Install"; ifdir:"outbound"; loguid:"{0x{{randHex 8}},0x{{randHex 7}},0x{{randHex 7}},0x{{randHex 7}}}";
+      origin:"{{randIP "rfc1918"}}"; time:"{{now "2006-01-02T15:04:05Z07:00"}}"; product:"VPN-1 & FireWall-1";
+      peer_gateway:"{{randIP "public"}}"; scheme:"IKEv2"; methods:"AES-256 + SHA256"; community:"site-to-site-vpn"]

@@ -1,0 +1,23 @@
+name: paloalto-panos
+vendor: Palo Alto Networks
+description: PAN-OS firewall (CSV TRAFFIC / THREAT / SYSTEM logs, abridged field set)
+format: raw
+facility: 14
+appname: panos
+events:
+  - weight: 60
+    severity: 6
+    template: >-
+      {{now "Jan _2 15:04:05"}} {{hostname}} 1,{{now "2006/01/02 15:04:05"}},007251000123456,TRAFFIC,end,2561,{{now "2006/01/02 15:04:05"}},{{randIP "rfc1918"}},{{randIP "public"}},{{randIP "public"}},{{randIP "public"}},allow-outbound,,,{{oneOf "ssl" "web-browsing" "dns" "ms-update"}},vsys1,trust,untrust,ethernet1/2,ethernet1/1,Log-Forwarding,{{now "2006/01/02 15:04:05"}},{{seq "session"}},1,{{randPort}},{{oneOf "443" "80" "53"}},{{randPort}},{{oneOf "443" "80" "53"}},0x40001c,{{oneOf "tcp" "udp"}},allow,{{randInt 500 4000000}},{{randInt 300 900000}},{{randInt 200 3000000}},{{randInt 4 4000}},{{now "2006/01/02 15:04:05"}},{{randInt 1 600}},any
+  - weight: 20
+    severity: 6
+    template: >-
+      {{now "Jan _2 15:04:05"}} {{hostname}} 1,{{now "2006/01/02 15:04:05"}},007251000123456,TRAFFIC,deny,2561,{{now "2006/01/02 15:04:05"}},{{randIP "public"}},{{randIP "rfc1918"}},0.0.0.0,0.0.0.0,deny-inbound,,,not-applicable,vsys1,untrust,trust,ethernet1/1,ethernet1/2,Log-Forwarding,{{now "2006/01/02 15:04:05"}},{{seq "session"}},1,{{randPort}},{{oneOf "22" "445" "3389" "23"}},0,0,0x0,tcp,deny,0,0,0,1,{{now "2006/01/02 15:04:05"}},0,any
+  - weight: 12
+    severity: 3
+    template: >-
+      {{now "Jan _2 15:04:05"}} {{hostname}} 1,{{now "2006/01/02 15:04:05"}},007251000123456,THREAT,{{oneOf "vulnerability" "spyware" "virus"}},2561,{{now "2006/01/02 15:04:05"}},{{randIP "public"}},{{randIP "rfc1918"}},0.0.0.0,0.0.0.0,alert-inbound,,,{{oneOf "web-browsing" "smtp" "ssl"}},vsys1,untrust,trust,ethernet1/1,ethernet1/2,Log-Forwarding,{{now "2006/01/02 15:04:05"}},{{seq "session"}},1,{{randPort}},{{oneOf "80" "25" "443"}},0,0,0x80004000,tcp,{{oneOf "alert" "reset-both" "drop"}},"{{oneOf "Generic HTTP Cross Site Scripting Attempt" "SQL Injection Attempt" "Suspicious DNS Query" "ETERNALBLUE SMB Exploit"}}",{{randInt 30000 60000}},{{oneOf "medium" "high" "critical"}},client-to-server
+  - weight: 8
+    severity: 5
+    template: >-
+      {{now "Jan _2 15:04:05"}} {{hostname}} 1,{{now "2006/01/02 15:04:05"}},007251000123456,SYSTEM,general,2561,{{now "2006/01/02 15:04:05"}},,,general,,{{oneOf "Successful admin login from console" "Commit job succeeded" "DHCP lease renewed" "HA peer state sync complete"}},{{seq "evid"}},0x0,{{oneOf "informational" "low"}}

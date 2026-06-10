@@ -1,0 +1,48 @@
+name: linux-host
+vendor: Linux
+description: Linux server (sshd auth, sudo, cron, systemd, kernel)
+format: rfc3164
+facility: 4
+appname: sshd
+events:
+  - weight: 25
+    severity: 6
+    template: >-
+      Accepted {{oneOf "password" "publickey" "publickey"}} for {{oneOf "deploy" "ansible" "jsmith" "mlopez"}}
+      from {{randIP "rfc1918"}} port {{randPort}} ssh2{{oneOf "" ": RSA SHA256:" ": ED25519 SHA256:"}}{{randHex 12}}
+  - weight: 20
+    severity: 5
+    template: >-
+      Failed password for {{oneOf "root" "admin" "invalid user oracle" "invalid user test" "invalid user postgres"}}
+      from {{randIP "public"}} port {{randPort}} ssh2
+  - weight: 12
+    severity: 6
+    template: >-
+      pam_unix(sshd:session): session {{oneOf "opened" "closed"}} for user {{oneOf "deploy" "jsmith" "ansible"}}(uid={{randInt 1000 1010}})
+  - weight: 12
+    severity: 5
+    appname: sudo
+    template: >-
+      {{oneOf "jsmith" "mlopez" "deploy"}} : TTY=pts/{{randInt 0 4}} ; PWD=/home/{{oneOf "jsmith" "mlopez" "deploy"}} ;
+      USER=root ; COMMAND=/usr/bin/{{oneOf "systemctl restart nginx" "dnf update -y" "journalctl -u app" "cat /var/log/secure"}}
+  - weight: 12
+    severity: 6
+    appname: CRON
+    template: >-
+      (root) CMD ({{oneOf "/usr/local/bin/backup.sh" "run-parts /etc/cron.hourly" "/usr/lib64/sa/sa1 1 1" "certbot renew -q"}})
+  - weight: 10
+    severity: 6
+    appname: systemd
+    template: >-
+      {{oneOf "Started" "Stopped" "Reloaded"}} {{oneOf "nginx.service - The nginx HTTP and reverse proxy server" "sshd.service - OpenSSH server daemon" "app.service - Production API" "chronyd.service - NTP client/server"}}.
+  - weight: 5
+    severity: 4
+    appname: kernel
+    template: >-
+      TCP: request_sock_TCP: Possible SYN flooding on port {{oneOf "443" "80"}}. Sending cookies. Check SNMP counters.
+  - weight: 4
+    severity: 2
+    appname: kernel
+    template: >-
+      Out of memory: Killed process {{randInt 1000 65000}} ({{oneOf "java" "node" "python3" "chrome"}})
+      total-vm:{{randInt 1000000 9000000}}kB, anon-rss:{{randInt 500000 4000000}}kB

@@ -1,0 +1,46 @@
+name: juniper-srx
+vendor: Juniper
+description: Juniper SRX (structured RT_FLOW session create/close/deny, RFC 5424 with junos structured-data)
+format: raw
+facility: 18
+appname: RT_FLOW
+events:
+  - weight: 40
+    severity: 6
+    template: >-
+      1 {{now "2006-01-02T15:04:05.000Z07:00"}} {{hostname}} RT_FLOW - RT_FLOW_SESSION_CREATE
+      [junos@2636.1.1.1.2.129 source-address="{{randIP "rfc1918"}}" source-port="{{randPort}}"
+      destination-address="{{randIP "public"}}" destination-port="{{oneOf "443" "80" "53"}}"
+      service-name="junos-{{oneOf "https" "http" "dns-udp"}}" nat-source-address="{{randIP "public"}}"
+      nat-source-port="{{randPort}}" nat-destination-address="{{randIP "public"}}"
+      nat-destination-port="443" protocol-id="{{oneOf "6" "17"}}" policy-name="trust-to-untrust"
+      source-zone-name="trust" destination-zone-name="untrust" session-id-32="{{seq "session"}}"]
+      session created
+  - weight: 35
+    severity: 6
+    template: >-
+      1 {{now "2006-01-02T15:04:05.000Z07:00"}} {{hostname}} RT_FLOW - RT_FLOW_SESSION_CLOSE
+      [junos@2636.1.1.1.2.129 reason="{{oneOf "TCP FIN" "TCP RST" "idle Timeout" "response received"}}"
+      source-address="{{randIP "rfc1918"}}" source-port="{{randPort}}"
+      destination-address="{{randIP "public"}}" destination-port="443"
+      service-name="junos-https" protocol-id="6" policy-name="trust-to-untrust"
+      source-zone-name="trust" destination-zone-name="untrust" session-id-32="{{seq "session"}}"
+      packets-from-client="{{randInt 4 900}}" bytes-from-client="{{randInt 400 900000}}"
+      packets-from-server="{{randInt 4 1200}}" bytes-from-server="{{randInt 400 4000000}}"
+      elapsed-time="{{randInt 1 600}}"] session closed
+  - weight: 18
+    severity: 5
+    template: >-
+      1 {{now "2006-01-02T15:04:05.000Z07:00"}} {{hostname}} RT_FLOW - RT_FLOW_SESSION_DENY
+      [junos@2636.1.1.1.2.129 source-address="{{randIP "public"}}" source-port="{{randPort}}"
+      destination-address="{{randIP "rfc1918"}}" destination-port="{{oneOf "22" "23" "445" "3389"}}"
+      service-name="None" protocol-id="6" icmp-type="0" policy-name="default-deny"
+      source-zone-name="untrust" destination-zone-name="trust" reason="policy deny"]
+      session denied
+  - weight: 7
+    severity: 5
+    appname: sshd
+    template: >-
+      1 {{now "2006-01-02T15:04:05.000Z07:00"}} {{hostname}} sshd - SSHD_LOGIN_ATTEMPT
+      [junos@2636.1.1.1.2.129 username="{{oneOf "netops" "admin" "jcli"}}" source-address="{{randIP "rfc1918"}}"
+      result="{{oneOf "success" "success" "failure"}}"] SSH login attempt

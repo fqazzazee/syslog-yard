@@ -1,0 +1,36 @@
+name: unifi
+vendor: Ubiquiti UniFi
+description: UniFi gateway/switch/AP (iptables kernel firewall log, hostapd wireless, switch events)
+format: rfc3164
+facility: 1
+appname: kernel
+events:
+  - weight: 45
+    severity: 4
+    template: >-
+      [WAN_LOCAL-default-D]IN={{oneOf "eth8" "eth9" "ppp0"}} OUT= MAC={{randMAC}}:{{randMAC}}:08:00
+      SRC={{randIP "public"}} DST={{randIP "public"}} LEN={{randInt 40 60}} TOS=0x00 PREC=0x00
+      TTL={{randInt 40 240}} ID={{randInt 0 65000}} PROTO=TCP SPT={{randPort}}
+      DPT={{oneOf "22" "23" "443" "8443" "3389"}} WINDOW={{randInt 1024 65535}} RES=0x00 SYN URGP=0
+  - weight: 25
+    severity: 4
+    template: >-
+      [LAN_IN-2000-A]IN=br0 OUT={{oneOf "eth8" "ppp0"}} MAC={{randMAC}}:{{randMAC}}:08:00
+      SRC={{randIP "rfc1918"}} DST={{randIP "public"}} LEN={{randInt 40 1500}} TOS=0x00 PREC=0x00
+      TTL=64 ID={{randInt 0 65000}} DF PROTO={{oneOf "TCP" "UDP"}} SPT={{randPort}}
+      DPT={{oneOf "443" "80" "53" "123"}} LEN={{randInt 20 1480}}
+  - weight: 15
+    severity: 6
+    appname: hostapd
+    template: >-
+      ath{{randInt 0 1}}: STA {{randMAC}} IEEE 802.11: {{oneOf "associated" "disassociated" "authenticated"}}
+  - weight: 8
+    severity: 6
+    appname: wpa_supplicant
+    template: >-
+      ath{{randInt 0 1}}: STA {{randMAC}} WPA: pairwise key handshake completed (RSN)
+  - weight: 7
+    severity: 5
+    appname: switch
+    template: >-
+      Port {{randInt 1 24}} link {{oneOf "up (1G full)" "up (100M full)" "down"}}

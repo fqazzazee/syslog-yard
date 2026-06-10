@@ -1,0 +1,13 @@
+services:
+  syshose:
+    build: .
+    image: syshose:latest
+    container_name: syshose
+    ports:
+      - "8080:8080"
+    volumes:
+      - syshose-data:/data
+    restart: unless-stopped
+
+volumes:
+  syshose-data:

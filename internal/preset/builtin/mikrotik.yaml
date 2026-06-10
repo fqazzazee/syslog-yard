@@ -1,0 +1,33 @@
+name: mikrotik
+vendor: MikroTik
+description: MikroTik RouterOS (topic-prefixed messages — firewall, system, dhcp, wireless)
+format: raw
+facility: 16
+appname: routeros
+events:
+  - weight: 45
+    severity: 6
+    template: >-
+      firewall,info forward: in:{{oneOf "ether1" "ether2" "bridge1"}} out:{{oneOf "ether1" "ether5" "bridge1"}},
+      proto TCP (SYN), {{randIP "rfc1918"}}:{{randPort}}->{{randIP "public"}}:{{oneOf "443" "80" "53"}}, len {{randInt 40 60}}
+  - weight: 20
+    severity: 4
+    template: >-
+      firewall,warning input: in:{{oneOf "ether1" "pppoe-out1"}} out:(unknown 0), proto TCP (SYN),
+      {{randIP "public"}}:{{randPort}}->{{randIP "public"}}:{{oneOf "22" "8291" "23" "8728"}}, len {{randInt 40 60}} drop
+  - weight: 12
+    severity: 5
+    template: >-
+      system,info,account user {{oneOf "admin" "netops"}} logged in from {{randIP "rfc1918"}} via {{oneOf "winbox" "ssh" "web"}}
+  - weight: 8
+    severity: 4
+    template: >-
+      system,error,critical login failure for user {{oneOf "admin" "root" "user"}} from {{randIP "public"}} via {{oneOf "ssh" "telnet" "winbox"}}
+  - weight: 8
+    severity: 6
+    template: >-
+      dhcp,info dhcp-lan assigned {{randIP "rfc1918"}} for {{randMAC}} {{oneOf "android-phone" "DESKTOP-3F" "esp32-sensor" ""}}
+  - weight: 7
+    severity: 6
+    template: >-
+      wireless,info {{randMAC}}@wlan{{randInt 1 2}}: {{oneOf "connected" "disconnected, received deauth: sending station leaving (3)"}}, signal strength -{{randInt 38 82}}
