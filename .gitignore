@@ -2,6 +2,4 @@ node_modules/
 *.log
 .env
 /data/
-dist/
-!web/dist/
 *.tsbuildinfo

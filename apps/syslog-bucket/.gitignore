@@ -1,0 +1,12 @@
+# Go
+/syslog-bucket
+*.test
+
+# Frontend
+web/node_modules/
+web/dist/*
+!web/dist/index.html
+
+# Misc
+.env
+*.log

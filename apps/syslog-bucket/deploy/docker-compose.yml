@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: syslog_bucket
+      POSTGRES_PASSWORD: syslog_bucket
+      POSTGRES_DB: syslog_bucket
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U syslog_bucket"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      context: ..
+    environment:
+      BUCKET_DB_URL: postgres://syslog_bucket:syslog_bucket@db:5432/syslog_bucket?sslmode=disable
+      BUCKET_API_ADDR: ":8080"
+      BUCKET_INGEST_ADDR: ":6601"
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  syslog:
+    image: balabit/syslog-ng:4.8.3
+    command: ["--no-caps", "-F"]
+    volumes:
+      - ./syslog-ng/syslog-ng.conf:/etc/syslog-ng/syslog-ng.conf:ro
+    ports:
+      # Host ports are unprivileged (5514/5601) so this works rootless;
+      # point devices at 514/601 directly or remap as needed.
+      - "5514:514/udp"
+      - "5514:514/tcp"
+      - "5601:601/tcp"
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  dbdata:
