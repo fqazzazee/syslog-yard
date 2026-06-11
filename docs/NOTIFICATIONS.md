@@ -1,6 +1,6 @@
 # Notifications
 
-S9 lets the yard push alerts off-box. Two complementary places fire them:
+The yard can push alerts off-box. Two complementary places fire them:
 
 - **syslog-bucket** — a rule's **Notify** action alerts on *stored, triaged*
   entries (webhook, Slack/Teams, or SMTP email). Best-effort, off the ingest
@@ -46,7 +46,7 @@ delivered text is a one-line summary:
 ```
 
 Combine with the rest of the rule engine: condition on severity, host, a saved
-search, a tag, or a **MITRE technique** (S8), then notify — e.g. "anything
+search, a tag, or a **MITRE technique**, then notify — e.g. "anything
 mapped to T1190, page the SOC channel."
 
 ## Valve notify node (in-stream)

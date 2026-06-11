@@ -1,6 +1,6 @@
 # Security posture
 
-This is the S7 review of syslog-yard: the trust boundaries, what the code
+This is the security review of syslog-yard: the trust boundaries, what the code
 defends against today, the residual risks you accept by running it, and a
 checklist for hardening a real deployment. Authentication mechanics live in
 [AUTH.md](AUTH.md); this document is about the threat model.
@@ -23,8 +23,8 @@ Two distinct planes:
   into **parameterized** inserts, and message text is stored as data and
   rendered as React text nodes (auto-escaped), so a hostile log line can't
   inject SQL or script.
-- **Control plane** — the three web UIs and their REST APIs. Authenticated
-  (S6): the bucket is the identity provider, the hose and valve verify the
+- **Control plane** — the three web UIs and their REST APIs. Authenticated:
+  the bucket is the identity provider, the hose and valve verify the
   shared session against it. This is the plane that mutates state (jobs,
   flow graphs, triage, users).
 

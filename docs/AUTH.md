@@ -57,7 +57,7 @@ Buckets (saved searches) are personal by default:
 - Share it from the bucket's edit dialog: pick users, each as view-only
   or **can edit**. Editing covers name/description/condition; deleting and
   re-sharing stay with the owner (and admins).
-- Buckets that existed before S6, or whose owner was deleted, are
+- Buckets created before ownership existed, or whose owner was deleted, are
   **yard buckets** (no owner): everyone sees them, analysts and admins may
   edit them.
 - Shared-by/shared-with markers show in the sidebar (`· owner` suffix,

@@ -1,7 +1,7 @@
 # Sorting & MITRE ATT&CK
 
-S8 adds two related triage aids: richer **sorting/filtering** of stored events,
-and **MITRE ATT&CK** mapping across the suite. Authentication is in
+syslog-yard provides two related triage aids: richer **sorting/filtering** of
+stored events, and **MITRE ATT&CK** mapping across the suite. Authentication is in
 [AUTH.md](AUTH.md); the threat model is in [SECURITY.md](SECURITY.md).
 
 ## ATT&CK mapping at ingest (bucket)

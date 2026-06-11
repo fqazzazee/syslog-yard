@@ -92,16 +92,28 @@ through, auto-tagged by rules:
 
 ## Status
 
-S10 complete — UI polish: one icon-driven look across all three tools, with a
-self-hosted [Material Symbols](https://fonts.google.com/icons) set (inline SVG,
-no CDN, so the strict CSP is untouched). Each tool has a garden brand mark — the
-suite is a **yard**, the hose a water-drop, the valve a valve, the bucket an
-inbox — and a shared top bar, account menu, and sign-in page. Every UI now
-carries a built-in **About / Help** (the `?` button): author, source link, what
-each tool does, a short how-to, and links to these docs. Builds on S9
-(notifications; [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)), S8 (MITRE
-ATT&CK mapping + matrix view, sorting, device class; [docs/MITRE.md](docs/MITRE.md)),
-S7 (security review: threat model, CSP + hardening headers, login throttling),
-and S6 (local + OIDC sign-in, admin/analyst/viewer roles, per-user bucket
-sharing; the bucket is the yard's identity provider and the hose and valve share
-one sign-in).
+The suite works end-to-end — generate → route/filter → store — and is usable for
+a real lab or small deployment today. What's in place:
+
+- Single sign-on across all three UIs with local + OIDC accounts and
+  admin/analyst/viewer roles; the bucket is the yard's identity provider
+  ([docs/AUTH.md](docs/AUTH.md)).
+- A reviewed security posture — parameterized everywhere, CSP + hardening
+  headers, login throttling, and a documented threat model
+  ([docs/SECURITY.md](docs/SECURITY.md)).
+- MITRE ATT&CK mapping with a kill-chain matrix, sorting/filtering, and device
+  classification ([docs/MITRE.md](docs/MITRE.md)).
+- Notifications to webhook / Slack-Teams / SMTP, from the bucket and in-stream
+  on the valve ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)).
+- A unified, icon-driven UI across the three tools with a built-in About/Help
+  panel (the `?` button) in every top bar.
+
+Possible improvements on the radar:
+
+- A pluggable **classification framework** that makes MITRE ATT&CK one of
+  several mappings (e.g. Cyber Kill Chain, NIST CSF, CIS Controls,
+  data-sensitivity, custom org labels), each with its own view and a visible
+  "unclassified" coverage gap.
+- **Analyst classification** — hand-classify what the automated packs miss,
+  mark entries benign, and promote a manual call into a reusable detection.
+- Per-edge throughput rendered on the valve's wires from `syslog-ng-ctl stats`.
