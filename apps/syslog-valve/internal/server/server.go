@@ -69,7 +69,7 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 		guard = yardauth.New("", false)
 	}
 	guard.Routes(s.mux)
-	s.handler = guard.Middleware(s.mux)
+	s.handler = secureHeaders(guard.Middleware(s.mux))
 	return s
 }
 

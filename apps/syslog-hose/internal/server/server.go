@@ -40,7 +40,7 @@ func New(mgr *engine.Manager, store *preset.Store, ui fs.FS, hints map[string]st
 	s := &Server{mgr: mgr, store: store, ui: ui, hints: hints, mux: http.NewServeMux()}
 	s.routes()
 	guard.Routes(s.mux)
-	s.handler = guard.Middleware(s.mux)
+	s.handler = secureHeaders(guard.Middleware(s.mux))
 	return s
 }
 

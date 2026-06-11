@@ -74,7 +74,7 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, web fs.FS, hints map[
 	mux.HandleFunc("POST /api/rules/{id}/apply", s.applyRule)
 	mux.HandleFunc("GET /api/ws", s.liveTail)
 	mux.HandleFunc("GET /", s.spa)
-	return authSvc.Middleware(mux)
+	return secureHeaders(authSvc.Middleware(mux))
 }
 
 func (s *server) healthz(w http.ResponseWriter, r *http.Request) {

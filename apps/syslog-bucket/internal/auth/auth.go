@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,16 +25,27 @@ const (
 	sessionCookie = "bucket_session"
 	sessionTTL    = 30 * 24 * time.Hour
 	minPassword   = 8
+
+	// Brute-force throttle: lock an account's login for loginWindow after
+	// loginMaxFails consecutive bad passwords.
+	loginMaxFails = 10
+	loginWindow   = 5 * time.Minute
 )
 
 type Service struct {
 	store        *store.Store
 	oidc         *OIDC // nil = OIDC disabled
 	cookieSecure bool
+	loginLimiter *throttle
 }
 
 func New(st *store.Store, oidc *OIDC, cookieSecure bool) *Service {
-	return &Service{store: st, oidc: oidc, cookieSecure: cookieSecure}
+	return &Service{
+		store:        st,
+		oidc:         oidc,
+		cookieSecure: cookieSecure,
+		loginLimiter: newThrottle(loginMaxFails, loginWindow),
+	}
 }
 
 // Bootstrap creates the initial admin account on an empty users table.
@@ -167,6 +179,12 @@ func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
+	key := strings.ToLower(strings.TrimSpace(req.Username))
+	if ok, retry := s.loginLimiter.allow(key); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())+1))
+		http.Error(w, "too many failed attempts — try again later", http.StatusTooManyRequests)
+		return
+	}
 	u, err := s.store.GetUserByUsername(r.Context(), strings.TrimSpace(req.Username))
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -174,11 +192,13 @@ func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if u == nil || u.Disabled || u.PasswordHash == "" ||
 		bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Password)) != nil {
+		s.loginLimiter.fail(key)
 		// Flat delay + uniform message: no username/password oracle.
 		time.Sleep(500 * time.Millisecond)
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
+	s.loginLimiter.reset(key)
 	if err := s.issueSession(r.Context(), w, u.ID); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

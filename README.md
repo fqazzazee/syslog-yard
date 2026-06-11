@@ -60,6 +60,7 @@ through, auto-tagged by rules:
 | Doc | Covers |
 |-----|--------|
 | [docs/AUTH.md](docs/AUTH.md) | bucket sign-in, roles, OIDC, sharing buckets |
+| [docs/SECURITY.md](docs/SECURITY.md) | threat model, what's defended, production hardening checklist |
 | [docs/SHARES.md](docs/SHARES.md) | external NAS shares (NFS/CIFS) for log storage |
 | [deploy/quadlet](deploy/quadlet) | rootless podman systemd units |
 | per-app READMEs | standalone use, env vars, development |
@@ -82,9 +83,11 @@ through, auto-tagged by rules:
 
 ## Status
 
-S6 complete — auth & collaboration: sign-in with local accounts and
-optional OIDC, role-based access (admin / analyst / read-only viewer),
-per-user bucket ownership, and sharing with view or edit rights. The
-bucket is the yard's identity provider; the hose and valve UIs are
-guarded by the same accounts and share the session — one sign-in covers
-all three. Next: security review across the suite.
+S7 complete — security review across the suite: a documented threat model
+([docs/SECURITY.md](docs/SECURITY.md)), a Content-Security-Policy and
+hardening headers on all three tools, and per-account login brute-force
+throttling. Builds on S6 (sign-in with local accounts and optional OIDC,
+admin/analyst/viewer roles, per-user bucket ownership and sharing; the
+bucket is the yard's identity provider and the hose and valve are guarded
+by the same accounts with one shared sign-in). Next: sorting & MITRE
+ATT&CK (S8).
