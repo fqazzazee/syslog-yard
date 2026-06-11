@@ -20,6 +20,7 @@ import {
   type HistoryEntry,
   type TailEvent,
 } from "./api";
+import { AccountMenu } from "./AccountMenu";
 import { nodeTypes, rfType, type FlowNode } from "./FlowNodes";
 import { Login } from "./Login";
 import { NodePanel } from "./NodePanel";
@@ -297,13 +298,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
               </button>
             </>
           )}
-          {user && (
-            <span className="user-chip">
-              👤 {user.display_name || user.username}
-              <span className="role-tag">{user.role}</span>
-              <button onClick={onSignOut}>Sign out</button>
-            </span>
-          )}
+          {user && <AccountMenu user={user} onSignOut={onSignOut} />}
         </div>
       </header>
       {banner && (

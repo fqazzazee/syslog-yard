@@ -302,7 +302,9 @@ func (s *server) liveTail(w http.ResponseWriter, r *http.Request) {
 }
 
 // spa serves the built frontend, falling back to index.html for client-side
-// routes (anything without a file extension).
+// routes (anything without a file extension). Hashed assets cache forever;
+// index.html must revalidate, or a browser that cached it before an image
+// update keeps requesting bundles that no longer exist.
 func (s *server) spa(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 	if name == "" {
@@ -314,6 +316,11 @@ func (s *server) spa(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		name = "index.html"
+	}
+	if strings.HasPrefix(name, "assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
 	}
 	http.ServeFileFS(w, r, s.web, name)
 }

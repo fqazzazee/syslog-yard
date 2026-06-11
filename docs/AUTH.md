@@ -34,9 +34,12 @@ account:
 | analyst | full triage: entries, tags, rules; create and share own buckets | full control |
 | viewer | read-only: browse entries and visible buckets, live tail | read-only: watch jobs, graph, live tail |
 
-Admins manage accounts under **👤 → Users…**: add local users, change
-roles, reset passwords, disable (revokes all sessions immediately), or
-delete. You cannot demote, disable, or delete your own account.
+Every yard UI carries the same **👤 account menu**: password change under
+**Account…**, and for admins **Users…** — add local users, change roles,
+reset passwords, disable (revokes all sessions immediately), or delete.
+On the hose and valve these actions are proxied to the bucket, which
+enforces the roles. You cannot demote, disable, or delete your own
+account.
 
 ## Bucket sharing
 

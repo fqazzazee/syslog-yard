@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { AccountMenu } from "./AccountMenu";
 import { api, AuthUser, Job, PresetSummary, TailEvent } from "./api";
 import { JobForm } from "./JobForm";
 import { Login } from "./Login";
@@ -119,15 +120,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
             ■ Stop all
           </button>
         )}
-        {user && (
-          <span className="user-chip">
-            👤 {user.display_name || user.username}
-            <span className="role-tag">{user.role}</span>
-            <button className="quiet" onClick={onSignOut}>
-              Sign out
-            </button>
-          </span>
-        )}
+        {user && <AccountMenu user={user} onSignOut={onSignOut} />}
       </header>
 
       {error && (

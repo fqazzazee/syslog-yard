@@ -182,3 +182,37 @@ textarea.yaml {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
   background: var(--bg3); color: var(--dim); border-radius: 8px; padding: 1px 7px;
 }
+
+/* --- yard account menu (dropdown + management modal rows) --- */
+.user-menu { position: relative; }
+.user-btn {
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--fg); padding: 5px 10px; cursor: pointer; font-size: 13px; white-space: nowrap;
+}
+.user-btn:hover, .user-btn.open { border-color: var(--accent); }
+.user-btn .caret { color: var(--dim); font-size: 10px; }
+.user-dropdown {
+  position: absolute; right: 0; top: 110%; z-index: 50;
+  display: flex; flex-direction: column; min-width: 150px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 4px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+.user-dropdown button {
+  background: none; border: none; color: var(--fg); text-align: left;
+  padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.user-dropdown button:hover { background: var(--bg3); }
+.acct-modal { width: 540px; }
+.acct-head { display: flex; align-items: center; justify-content: space-between; }
+.acct-head h2 { margin: 0; }
+.acct-close { background: none; border: none; color: var(--dim); font-size: 15px; cursor: pointer; }
+.acct-modal label { margin-top: 10px; }
+.acct-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.acct-row .acct-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.acct-row input { flex: 1; min-width: 0; }
+.acct-hint { color: var(--dim); font-size: 12px; margin: 12px 0 0; }
+.linkish { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12.5px; padding: 2px 6px; }
+.linkish:disabled { color: var(--dim); cursor: default; }

@@ -28,11 +28,14 @@ const (
 )
 
 // User is the subset of the bucket's user object the guard cares about.
+// HasPassword distinguishes local accounts from OIDC-only ones (the
+// account dialog offers password change only for the former).
 type User struct {
 	ID          int64  `json:"id"`
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
 	Role        string `json:"role"`
+	HasPassword bool   `json:"has_password"`
 }
 
 type cacheEntry struct {
@@ -63,12 +66,19 @@ func New(authURL string, cookieSecure bool) *Guard {
 func (g *Guard) Enabled() bool { return g.authURL != "" }
 
 // Routes mounts the tool-local auth endpoints. They exist even when the
-// guard is disabled so the SPA can always ask /api/auth/info.
+// guard is disabled so the SPA can always ask /api/auth/info. Account
+// management (password change, user admin) is proxied to the bucket so
+// every yard UI offers the same account menu; the bucket enforces roles.
 func (g *Guard) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/info", g.handleInfo)
 	mux.HandleFunc("GET /api/auth/me", g.handleMe)
 	mux.HandleFunc("POST /api/auth/login", g.handleLogin)
 	mux.HandleFunc("POST /api/auth/logout", g.handleLogout)
+	mux.HandleFunc("PUT /api/auth/password", g.proxy)
+	mux.HandleFunc("GET /api/users", g.proxy)
+	mux.HandleFunc("POST /api/users", g.proxy)
+	mux.HandleFunc("PUT /api/users/{id}", g.proxy)
+	mux.HandleFunc("DELETE /api/users/{id}", g.proxy)
 }
 
 // public lists /api/ paths reachable without a session: liveness, the yard
@@ -100,7 +110,9 @@ func (g *Guard) Middleware(next http.Handler) http.Handler {
 			http.Error(w, statusMessage(code), code)
 			return
 		}
-		if u.Role == "viewer" && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		// Viewers are read-only, except for changing their own password.
+		if u.Role == "viewer" && r.Method != http.MethodGet && r.Method != http.MethodHead &&
+			p != "/api/auth/password" {
 			http.Error(w, "read-only role", http.StatusForbidden)
 			return
 		}
@@ -271,6 +283,57 @@ func (g *Guard) handleLogout(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: g.cookieSecure,
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// proxy forwards an account-management request to the bucket verbatim
+// (method, path, body, session cookie) and relays the answer. A re-issued
+// session cookie — the bucket rotates it on password change — is passed
+// along so the user stays signed in.
+func (g *Guard) proxy(w http.ResponseWriter, r *http.Request) {
+	if !g.Enabled() {
+		http.Error(w, "authentication disabled", http.StatusNotFound)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	req, err := http.NewRequestWithContext(r.Context(), r.Method,
+		g.authURL+r.URL.Path, strings.NewReader(string(body)))
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	var oldToken string
+	if c, err := r.Cookie(cookieName); err == nil {
+		oldToken = c.Value
+		req.AddCookie(&http.Cookie{Name: cookieName, Value: c.Value})
+	}
+	resp, err := g.client.Do(req)
+	if err != nil {
+		http.Error(w, statusMessage(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		return
+	}
+	defer resp.Body.Close()
+	for _, c := range resp.Cookies() {
+		if c.Name == cookieName && c.Value != "" {
+			g.mu.Lock()
+			delete(g.cache, oldToken) // the old session was just revoked
+			g.mu.Unlock()
+			http.SetCookie(w, &http.Cookie{
+				Name: cookieName, Value: c.Value, Path: "/",
+				MaxAge: c.MaxAge, HttpOnly: true,
+				SameSite: http.SameSiteLaxMode, Secure: g.cookieSecure,
+			})
+		}
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, io.LimitReader(resp.Body, 1<<20))
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

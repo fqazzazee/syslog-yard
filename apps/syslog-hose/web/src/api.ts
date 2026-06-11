@@ -51,6 +51,15 @@ export interface AuthUser {
   username: string;
   display_name: string;
   role: string;
+  has_password?: boolean;
+}
+
+// YardUser is the fuller record the bucket's user-management API returns.
+export interface YardUser extends AuthUser {
+  email: string;
+  disabled: boolean;
+  has_password: boolean;
+  oidc: boolean;
 }
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -105,6 +114,16 @@ export const api = {
   login: (username: string, password: string) =>
     req<AuthUser>("/api/auth/login", json("POST", { username, password })),
   logout: () => req<void>("/api/auth/logout", { method: "POST" }),
+  changePassword: (oldPw: string, newPw: string) =>
+    req<void>("/api/auth/password", json("PUT", { old: oldPw, new: newPw })),
+  users: () => req<{ users: YardUser[] }>("/api/users").then((b) => b.users),
+  createUser: (u: { username: string; display_name: string; email: string; role: string; password: string }) =>
+    req<YardUser>("/api/users", json("POST", u)),
+  updateUser: (
+    id: number,
+    u: { display_name: string; email: string; role: string; disabled: boolean; password?: string },
+  ) => req<YardUser>(`/api/users/${id}`, json("PUT", u)),
+  deleteUser: (id: number) => req<void>(`/api/users/${id}`, { method: "DELETE" }),
   preview: (body: {
     preset?: string;
     yaml?: string;

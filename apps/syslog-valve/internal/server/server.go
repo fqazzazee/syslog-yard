@@ -307,11 +307,18 @@ func httpError(w http.ResponseWriter, code int, err error) {
 }
 
 // spaHandler serves the embedded UI, falling back to index.html for
-// client-side routes.
+// client-side routes. Hashed assets cache forever; index.html must
+// revalidate, or a browser that cached it before an image update keeps
+// requesting bundles that no longer exist.
 func spaHandler(ui fs.FS) http.Handler {
 	fileServer := http.FileServer(http.FS(ui))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(r.URL.Path, "/")
+		if strings.HasPrefix(p, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
 		if p != "" {
 			if f, err := ui.Open(p); err == nil {
 				f.Close()

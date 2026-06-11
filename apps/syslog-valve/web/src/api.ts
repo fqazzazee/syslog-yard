@@ -89,6 +89,15 @@ export interface AuthUser {
   username: string;
   display_name: string;
   role: string;
+  has_password?: boolean;
+}
+
+// YardUser is the fuller record the bucket's user-management API returns.
+export interface YardUser extends AuthUser {
+  email: string;
+  disabled: boolean;
+  has_password: boolean;
+  oidc: boolean;
 }
 
 async function check(res: Response): Promise<Response> {
@@ -144,4 +153,17 @@ export const api = {
       .then((r) => r.json()),
   logout: (): Promise<Response> =>
     fetch("/api/auth/logout", { method: "POST" }).then(check),
+  changePassword: (oldPw: string, newPw: string): Promise<Response> =>
+    fetch("/api/auth/password", { method: "PUT", body: JSON.stringify({ old: oldPw, new: newPw }) }).then(check),
+  users: (): Promise<YardUser[]> =>
+    fetch("/api/users").then(check).then((r) => r.json()).then((b: { users: YardUser[] }) => b.users),
+  createUser: (u: { username: string; display_name: string; email: string; role: string; password: string }): Promise<YardUser> =>
+    fetch("/api/users", { method: "POST", body: JSON.stringify(u) }).then(check).then((r) => r.json()),
+  updateUser: (
+    id: number,
+    u: { display_name: string; email: string; role: string; disabled: boolean; password?: string },
+  ): Promise<YardUser> =>
+    fetch(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(u) }).then(check).then((r) => r.json()),
+  deleteUser: (id: number): Promise<Response> =>
+    fetch(`/api/users/${id}`, { method: "DELETE" }).then(check),
 };
