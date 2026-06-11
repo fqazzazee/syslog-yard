@@ -217,7 +217,7 @@ textarea.yaml {
 .linkish { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12.5px; padding: 2px 6px; }
 .linkish:disabled { color: var(--dim); cursor: default; }
 
-/* ===== S10: yard chrome — Material icons, brand, account, About overlay ===== */
+/* ===== yard chrome — Material icons, brand, account, About overlay ===== */
 .icon { display: inline-block; vertical-align: -0.18em; flex: none; line-height: 0; }
 h1.brand { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 h1.brand .logo { display: inline-flex; color: var(--accent); }

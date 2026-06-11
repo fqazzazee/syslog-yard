@@ -2,8 +2,8 @@ package rules
 
 import "fmt"
 
-// Action is one ordered rule action (PLAN §5). The engine ships tag,
-// set_priority, suppress, and notify (S9); assign lands later.
+// Action is one ordered rule action. The engine ships tag,
+// set_priority, suppress, and notify; assign lands later.
 type Action struct {
 	Type      string `json:"type"` // "tag" | "set_priority" | "suppress" | "notify"
 	TagID     int64  `json:"tag_id,omitempty"`

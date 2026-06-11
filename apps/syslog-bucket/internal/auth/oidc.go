@@ -136,7 +136,7 @@ func (s *Service) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // userForSubject finds the account bound to an OIDC subject, creating one
-// on first sign-in (PLAN §7: OIDC subject mapping). Username collisions
+// on first sign-in (OIDC subject mapping). Username collisions
 // with existing local accounts get a subject-derived suffix rather than
 // silently hijacking the local account.
 func (s *Service) userForSubject(ctx context.Context, subject, preferred, email, name string) (*store.User, error) {

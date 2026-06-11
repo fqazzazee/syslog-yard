@@ -108,7 +108,7 @@ export interface Action {
   channel_id?: number;
 }
 
-// Notification channel (S9). config is kind-specific; the SMTP password is
+// Notification channel. config is kind-specific; the SMTP password is
 // write-only (blanked on read, with has_password flagging whether one is set).
 export type ChannelKind = "webhook" | "slack" | "smtp";
 

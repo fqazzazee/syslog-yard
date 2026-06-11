@@ -1,6 +1,5 @@
 // Package api serves the internal REST API consumed by the SPA, plus the
-// SPA's static files and the live-tail WebSocket. No public API in v1
-// (PLAN §3).
+// SPA's static files and the live-tail WebSocket. No public API in v1.
 package api
 
 import (
@@ -129,7 +128,7 @@ func (s *server) getMitreSummary(w http.ResponseWriter, r *http.Request) {
 
 // condFromRequest translates the SPA's filter query parameters — plus an
 // optional bucket — into one condition tree, the same grammar buckets and
-// rules use (PLAN §5: one grammar, three uses).
+// rules use — one grammar, three uses.
 func (s *server) condFromRequest(r *http.Request) (rules.Cond, error) {
 	q := r.URL.Query()
 	var all []rules.Cond

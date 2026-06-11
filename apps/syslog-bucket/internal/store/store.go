@@ -249,8 +249,7 @@ func (s *Store) insertRuleTags(ctx context.Context, entries []Entry) error {
 }
 
 // EntryFilter selects entries via the shared condition AST plus pagination.
-// Suppressed entries are hidden unless IncludeSuppressed is set (PLAN §5:
-// flagged, not deleted).
+// Suppressed entries are hidden unless IncludeSuppressed is set (flagged, not deleted).
 type EntryFilter struct {
 	Cond              rules.Cond
 	IncludeSuppressed bool

@@ -1,4 +1,4 @@
--- S8: MITRE ATT&CK technique tagging + device classification. Techniques are
+-- MITRE ATT&CK technique tagging + device classification. Techniques are
 -- stamped at ingest by internal/mitre (an array of IDs like {T1110,T1190});
 -- device_class is the coarse class from internal/classify. Both are set on
 -- the entry before insert, so existing rows keep the defaults.

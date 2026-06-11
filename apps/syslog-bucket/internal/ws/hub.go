@@ -1,4 +1,4 @@
-// Package ws is the live-tail hub (PLAN §9): every connected client holds a
+// Package ws is the live-tail hub: every connected client holds a
 // condition from the shared AST, and each freshly inserted entry is fanned
 // out to the clients whose condition matches — the WebSocket twin of the
 // bucket's SQL query.

@@ -7,7 +7,7 @@
 // them on a standard same-host deployment.
 //
 // Unset YARD_AUTH_URL = guard disabled = the tool runs open (standalone
-// mode, pre-S6 behavior). This file is identical in syslog-hose and
+// mode). This file is identical in syslog-hose and
 // syslog-valve; keep edits in sync.
 package yardauth
 

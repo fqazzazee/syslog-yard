@@ -4,7 +4,7 @@ import (
 	"context"
 )
 
-// Tag is a color-coded label, the email-client "label/flag" (PLAN §1).
+// Tag is a color-coded label, the email-client "label/flag".
 type Tag struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`

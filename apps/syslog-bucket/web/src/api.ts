@@ -111,7 +111,7 @@ export const updateBucket = (b: Bucket) => send<Bucket>("PUT", `/api/buckets/${b
 export const deleteBucket = (id: number) =>
   request<void>(`/api/buckets/${id}`, { method: "DELETE" });
 
-// --- auth & users (S6) ---
+// --- auth & users ---
 
 export const fetchAuthInfo = () => request<AuthInfo>("/api/auth/info");
 export const fetchMe = () => request<User>("/api/auth/me");
@@ -135,7 +135,7 @@ export const fetchBucketShares = (bucketId: number) =>
 export const putBucketShares = (bucketId: number, shares: BucketShare[]) =>
   send<{ shares: BucketShare[] }>("PUT", `/api/buckets/${bucketId}/shares`, { shares });
 
-// --- notification channels (S9) ---
+// --- notification channels ---
 
 export const fetchChannels = () =>
   request<{ channels: Channel[] }>("/api/channels").then((b) => b.channels);

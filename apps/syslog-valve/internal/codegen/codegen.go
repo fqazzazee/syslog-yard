@@ -30,7 +30,7 @@ const TapSocket = "/data/syslog-ng/tap.sock"
 
 // NotifySocket is a second unix datagram socket: messages routed into a
 // notify node are duplicated here, tagged with the node ident, for the Go
-// notification dispatcher to deliver (S9 valve notify).
+// notification dispatcher to deliver.
 const NotifySocket = "/data/syslog-ng/notify.sock"
 
 // Generate renders the full syslog-ng.conf for g. version is the
@@ -203,7 +203,7 @@ func filterExpr(n graph.Node) (string, error) {
 		conds = append(conds, fmt.Sprintf("message(%q)", m))
 	}
 	// A MITRE technique compiles to its syslog-ng pattern (message regex
-	// and/or program), so a flow can route or drop by technique (S8).
+	// and/or program), so a flow can route or drop by technique.
 	if tid := n.Config.Technique; tid != "" {
 		t, ok := mitre.Lookup(tid)
 		if !ok {

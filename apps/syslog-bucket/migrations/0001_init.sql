@@ -1,4 +1,4 @@
--- M1: sources + entries. Later milestones add buckets, rules, tags, users, etc.
+-- sources + entries. Later migrations add buckets, rules, tags, users, etc.
 
 CREATE TABLE sources (
     id          BIGSERIAL PRIMARY KEY,

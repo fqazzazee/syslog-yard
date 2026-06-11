@@ -42,10 +42,10 @@ type Config struct {
 	SeverityMax *int   `json:"severityMax,omitempty"` // pass if severity <= this
 	Program     string `json:"program,omitempty"`
 	Match       string `json:"match,omitempty"`     // regex on the message text
-	Technique   string `json:"technique,omitempty"` // MITRE ATT&CK technique id (S8)
+	Technique   string `json:"technique,omitempty"` // MITRE ATT&CK technique id
 
 	// notify: deliver matched messages to a notification destination. The
-	// Go app fires these (S9 valve notify); webhook posts a JSON body, slack
+	// Go app fires these; webhook posts a JSON body, slack
 	// posts {"text":…} to an incoming webhook. RatePerMin caps deliveries.
 	NotifyKind string `json:"notifyKind,omitempty"` // webhook | slack
 	URL        string `json:"url,omitempty"`

@@ -1,5 +1,5 @@
-// Package mitre carries the ATT&CK techniques the valve can filter on (suite
-// S8). Unlike the bucket — which maps techniques from fully parsed structured
+// Package mitre carries the ATT&CK techniques the valve can filter on.
+// Unlike the bucket — which maps techniques from fully parsed structured
 // fields — the valve matches on the raw syslog line as it crosses syslog-ng,
 // so each technique is expressed as a syslog-ng filter pattern (a PCRE over
 // the message, and/or a program name).

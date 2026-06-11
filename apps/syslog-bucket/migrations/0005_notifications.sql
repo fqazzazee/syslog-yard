@@ -1,4 +1,4 @@
--- S9: notifications. A channel is a delivery destination (generic webhook,
+-- notifications. A channel is a delivery destination (generic webhook,
 -- Slack/Teams incoming webhook, or SMTP email); the `notify` rule action
 -- fires matching entries at a channel. notification_log records deliveries so
 -- the UI can show "did it fire" and surface errors. Secrets (SMTP password)

@@ -281,7 +281,7 @@ footer .err { color: var(--err); }
 .linkish { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12.5px; padding: 2px 6px; }
 .linkish:disabled { color: var(--muted); cursor: default; }
 
-/* ===== S10: yard chrome — Material icons, brand, account, About overlay ===== */
+/* ===== yard chrome — Material icons, brand, account, About overlay ===== */
 header h1 { margin: 0; font-size: 19px; letter-spacing: 0.5px; }
 .sub { color: var(--muted); font-size: 12px; margin-right: 6px; }
 .icon { display: inline-block; vertical-align: -0.18em; flex: none; line-height: 0; }

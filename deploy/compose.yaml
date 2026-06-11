@@ -1,7 +1,7 @@
 # syslog-yard — generate → route/filter → store, on one internal bridge.
 #
 #   syslog-hose  UI  http://localhost:8080   (traffic generator)
-#   syslog-valve UI  http://localhost:8081   (visual router — lands in S1)
+#   syslog-valve UI  http://localhost:8081   (visual router)
 #   syslog-bucket UI http://localhost:8082   (email-style triage)
 #
 # External syslog entry point: host port 6514 (udp/tcp) → syslog-valve's

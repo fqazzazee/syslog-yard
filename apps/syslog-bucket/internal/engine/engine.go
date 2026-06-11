@@ -1,4 +1,4 @@
-// Package engine evaluates rules against entries at ingest time (PLAN §5).
+// Package engine evaluates rules against entries at ingest time.
 // It keeps an in-memory snapshot of enabled rules, refreshed when the API
 // mutates rules and periodically as a safety net. The retroactive
 // counterpart (apply a rule to history) lives in store.ApplyRuleHistorical,

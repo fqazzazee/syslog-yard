@@ -1,4 +1,4 @@
--- M2: tags, buckets, rules (PLAN §4-5). Buckets and rules store a condition
+-- tags, buckets, rules. Buckets and rules store a condition
 -- AST as JSONB; rules add an ordered actions array. Suppression flags
 -- entries instead of deleting them so a rule mistake is recoverable.
 

@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Channel is a notification destination (S9). Config is kind-specific JSON:
+// Channel is a notification destination. Config is kind-specific JSON:
 //   - webhook / slack: {"url": "https://..."}
 //   - smtp:            {"host","port","username","password","from","to":[],"tls":"starttls|tls|none"}
 //

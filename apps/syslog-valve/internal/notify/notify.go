@@ -1,5 +1,5 @@
 // Package notify delivers messages routed into a valve "notify" node to a
-// webhook or Slack/Teams incoming webhook (S9 valve notify). It mirrors the
+// webhook or Slack/Teams incoming webhook. It mirrors the
 // live-tail tap: syslog-ng duplicates matched messages to a unix datagram
 // socket tagged with the notify node's ident, and this dispatcher — running
 // in the Go app, not syslog-ng — formats and POSTs them. Channel config lives

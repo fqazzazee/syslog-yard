@@ -1,5 +1,4 @@
-// Package parsers holds the vendor-normalization plugin layer described in
-// docs/PLAN.md §8. Parsers run after syslog-ng's wire-level parsing: they see
+// Package parsers holds the vendor-normalization plugin layer. Parsers run after syslog-ng's wire-level parsing: they see
 // an Entry already populated with host/app/severity/msg and enrich
 // Entry.Structured with vendor-specific fields.
 package parsers
@@ -15,7 +14,7 @@ type Parser interface {
 }
 
 // Registry applies the first matching parser. Vendor packs (Cisco, Claroty,
-// ...) register ahead of the catch-all generic parser in later milestones.
+// ...) register ahead of the catch-all generic parser.
 type Registry struct {
 	parsers []Parser
 }

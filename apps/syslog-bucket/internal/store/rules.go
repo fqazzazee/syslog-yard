@@ -9,7 +9,7 @@ import (
 	"github.com/syslog-yard/syslog-bucket/internal/rules"
 )
 
-// Rule is a mail-filter analogue: condition + ordered actions (PLAN §5).
+// Rule is a mail-filter analogue: condition + ordered actions.
 type Rule struct {
 	ID        int64          `json:"id"`
 	Name      string         `json:"name"`
@@ -99,7 +99,7 @@ func marshalRule(r Rule) (cond, actions []byte, err error) {
 }
 
 // ApplyRuleHistorical runs a rule's actions against all existing entries
-// matching its condition — the retroactive half of PLAN §5. Returns the
+// matching its condition — the retroactive half. Returns the
 // number of rows each pass touched.
 func (s *Store) ApplyRuleHistorical(ctx context.Context, r Rule) (int64, error) {
 	var total int64

@@ -10,8 +10,8 @@ export interface NodeConfig {
   severityMax?: number; // pass if syslog severity <= this (0 emerg .. 7 debug)
   program?: string;
   match?: string;
-  technique?: string; // MITRE ATT&CK technique id (S8)
-  // notify (S9): deliver matched messages to a webhook / Slack-Teams hook
+  technique?: string; // MITRE ATT&CK technique id
+  // notify: deliver matched messages to a webhook / Slack-Teams hook
   notifyKind?: "webhook" | "slack";
   url?: string;
   ratePerMin?: number;
@@ -121,7 +121,7 @@ export interface MitreCatalog {
   techniques: MitreTechnique[];
 }
 
-// NotifyDelivery is one recorded notification attempt (S9 valve notify).
+// NotifyDelivery is one recorded notification attempt.
 export interface NotifyDelivery {
   seq: number;
   node: string;

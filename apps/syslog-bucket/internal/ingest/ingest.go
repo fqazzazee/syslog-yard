@@ -178,7 +178,7 @@ func (s *Server) toEntry(ctx context.Context, rec record) (store.Entry, error) {
 
 	s.registry.Apply(&e)
 	// Enrich before the rule engine so rules can match on device class and
-	// MITRE technique (S8): parsers have populated structured fields by now.
+	// MITRE technique: parsers have populated structured fields by now.
 	e.DeviceClass = classify.Class(e.AppName, e.Msg)
 	e.Mitre = mitre.Map(&e)
 	if s.applier != nil {

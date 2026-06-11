@@ -64,7 +64,7 @@ body {
 .yard-link:hover { color: var(--fg); border-color: var(--border); }
 .yard-link.current { color: var(--accent); }
 
-/* --- auth (S6) --- */
+/* --- auth --- */
 
 .login-wrap {
   display: flex;
@@ -895,7 +895,7 @@ button.nav-item {
   word-break: break-word;
 }
 
-/* --- S8: sorting + MITRE ATT&CK --- */
+/* --- sorting + MITRE ATT&CK --- */
 
 .col-pri { width: 56px; }
 .col-class { width: 84px; color: var(--fg-dim); }
@@ -981,7 +981,7 @@ button.nav-item {
   font-weight: 700;
 }
 
-/* --- S9: notification channels --- */
+/* --- notification channels --- */
 
 .channel-card {
   border: 1px solid var(--border);
@@ -1022,7 +1022,7 @@ button.nav-item {
 .delivery-time { color: var(--fg-dim); }
 .delivery-detail { color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* ===== S10: yard chrome — Material icons, brand, account, About overlay ===== */
+/* ===== yard chrome — Material icons, brand, account, About overlay ===== */
 .icon { display: inline-block; vertical-align: -0.18em; flex: none; line-height: 0; }
 .spacer { flex: 1; }
 h1.brand { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }

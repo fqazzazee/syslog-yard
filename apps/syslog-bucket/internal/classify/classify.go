@@ -1,5 +1,5 @@
 // Package classify derives a coarse device class for an entry from its app
-// name (suite S8). The class is a first-class, sortable/filterable column —
+// name. The class is a first-class, sortable/filterable column —
 // it lets an analyst pull "all firewall events" or "all host events" without
 // knowing every vendor's app name. It is intentionally coarse; vendor-level
 // detail stays in app_name and the parsed structured fields.

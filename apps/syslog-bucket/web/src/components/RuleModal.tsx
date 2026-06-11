@@ -48,7 +48,7 @@ export default function RuleModal({ rule, tags, channels, onClose }: Props) {
     if (await save()) onClose(true);
   };
 
-  // Save first so history sees exactly what future entries will (PLAN §5).
+  // Save first so history sees exactly what future entries will.
   const saveAndApply = async () => {
     const saved = await save();
     if (!saved) return;

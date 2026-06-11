@@ -96,7 +96,7 @@ status() {
 
 # bucket_stored reports whether a message containing needle has landed in
 # the bucket's store. It queries Postgres directly rather than the REST API:
-# /api/entries needs a session (auth landed in S6), and the datastore is the
+# /api/entries needs a session (auth required), and the datastore is the
 # most direct "did it actually get stored" check anyway. Needs the suite up.
 bucket_stored() {
     local needle="$1" n

@@ -239,7 +239,7 @@ export function NodePanel({
 }
 
 // TechniqueSelect lets a filter match a MITRE ATT&CK technique, which the
-// backend compiles to the matching syslog-ng pattern (S8). Options are
+// backend compiles to the matching syslog-ng pattern. Options are
 // grouped by tactic.
 function TechniqueSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
   const [catalog, setCatalog] = useState<MitreCatalog | null>(null);

@@ -1,4 +1,4 @@
--- M3/S6: users, sessions, bucket ownership + sharing (PLAN §7).
+-- users, sessions, bucket ownership + sharing.
 -- A NULL password_hash means OIDC-only; a NULL oidc_subject means local-only.
 -- Buckets created before this migration keep owner_id NULL = a shared "yard
 -- bucket" everyone sees and admins/analysts may edit.

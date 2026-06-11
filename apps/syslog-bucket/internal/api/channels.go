@@ -10,7 +10,7 @@ import (
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
 
-// --- notification channels (S9) ---
+// --- notification channels ---
 //
 // Channels are managed by analysts/admins (the auth middleware already blocks
 // viewers from non-GET). SMTP passwords are write-only: redacted on read,

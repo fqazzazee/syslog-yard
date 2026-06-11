@@ -1,4 +1,4 @@
-// Package auth implements S6/M3 authentication (PLAN §7): local accounts
+// Package auth implements authentication: local accounts
 // with bcrypt passwords, optional OIDC, opaque cookie sessions stored
 // hashed in Postgres, and the role middleware the API mounts in front of
 // every handler.

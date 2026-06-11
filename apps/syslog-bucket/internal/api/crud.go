@@ -78,7 +78,7 @@ func validTag(w http.ResponseWriter, t store.Tag) bool {
 
 // --- buckets ---
 //
-// Visibility and edit rights follow PLAN §7: owners and admins manage a
+// Visibility and edit rights: owners and admins manage a
 // bucket, shares grant view or edit, ownerless buckets belong to the yard.
 
 func (s *server) listBuckets(w http.ResponseWriter, r *http.Request) {
@@ -250,7 +250,7 @@ func (s *server) deleteRule(w http.ResponseWriter, r *http.Request) {
 }
 
 // applyRule runs a rule against historical entries — the retroactive power
-// of virtual buckets (PLAN §5).
+// of virtual buckets.
 func (s *server) applyRule(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r, "id")
 	if !ok {

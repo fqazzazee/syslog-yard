@@ -8,10 +8,10 @@ import (
 	"github.com/syslog-yard/syslog-bucket/internal/rules"
 )
 
-// Bucket is a virtual folder: a saved condition, not stored rows (PLAN §4).
-// OwnerID NULL marks a shared "yard bucket" (pre-S6 or unowned) visible to
+// Bucket is a virtual folder: a saved condition, not stored rows.
+// OwnerID NULL marks a shared "yard bucket" (unowned) visible to
 // everyone and editable by admins/analysts; otherwise visibility is owner +
-// shares + admins, with per-share can_edit (PLAN §7).
+// shares + admins, with per-share can_edit.
 type Bucket struct {
 	ID          int64      `json:"id"`
 	Name        string     `json:"name"`

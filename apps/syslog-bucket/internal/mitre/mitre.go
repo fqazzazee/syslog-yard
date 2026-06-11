@@ -1,4 +1,4 @@
-// Package mitre maps ingested entries to MITRE ATT&CK techniques (suite S8).
+// Package mitre maps ingested entries to MITRE ATT&CK techniques.
 // It carries a small, curated slice of the ATT&CK Enterprise matrix — the
 // tactics and techniques that show up in the syslog the suite actually sees
 // (firewall, IPS/AV, auth) — plus a detection table that reuses the shared

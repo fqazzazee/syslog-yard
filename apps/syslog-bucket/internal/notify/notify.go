@@ -1,4 +1,4 @@
-// Package notify delivers entries to notification channels (S9). The rule
+// Package notify delivers entries to notification channels. The rule
 // engine queues a notify on an entry at ingest; after the entry is stored the
 // ingest batcher hands the batch here, and a small worker pool formats and
 // delivers each to its channel (generic webhook, Slack/Teams webhook, or

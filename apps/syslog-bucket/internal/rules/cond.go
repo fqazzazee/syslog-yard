@@ -1,4 +1,4 @@
-// Package rules holds the shared condition AST described in docs/PLAN.md §5:
+// Package rules holds the shared condition AST:
 // one grammar that powers buckets, rules, and live-tail subscriptions. A
 // condition compiles two ways — to a SQL boolean expression over the entries
 // table for queries and retroactive rule runs, and to an in-memory matcher
@@ -34,7 +34,7 @@ type Cond struct {
 	// Entry carries this tag.
 	TagID int64 `json:"tag_id,omitempty"`
 
-	// Entry was mapped to this MITRE ATT&CK technique at ingest (S8).
+	// Entry was mapped to this MITRE ATT&CK technique at ingest.
 	Mitre string `json:"mitre,omitempty"`
 
 	// Entry was received within the trailing window.
