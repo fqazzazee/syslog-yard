@@ -20,11 +20,19 @@ appropriate for a lab or when you front it with reverse-proxy auth instead.
 On first start with an empty database the bucket creates an `admin`
 account:
 
-- `BUCKET_ADMIN_PASSWORD` set → that's the password
-  (`deploy/compose.yaml` ships `yardadmin`; change it after first login
-  via **👤 → Account…**).
-- unset → a random password is generated and printed once in the
-  container log (`docker compose logs syslog-bucket | grep admin`).
+- **unset (the shipped default)** → a strong random password is generated
+  and printed once in the log. Retrieve it with
+  `scripts/yardctl logs syslog-bucket | grep -i password` (or
+  `docker compose logs syslog-bucket | grep -i password`).
+- `BUCKET_ADMIN_PASSWORD` set → that password is used instead. Useful for
+  an automated/known bootstrap; change it after first login via
+  **👤 → Account…**.
+
+Forgot it, or want to rotate the generated one? `scripts/yardctl
+reset-admin` sets a fresh random password (and prints it), re-enables the
+account, and signs out other admin sessions. Without the script, the same
+thing runs as `docker compose exec syslog-bucket syslog-bucket
+reset-admin` (append a password to set a known one).
 
 ## Roles
 

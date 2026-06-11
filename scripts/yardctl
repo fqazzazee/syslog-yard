@@ -10,6 +10,7 @@
 #   yardctl firewall   open the yard's ports (firewalld or ufw; needs sudo)
 #   yardctl firewall-remove   close them again
 #   yardctl smoke      send a test message through valve -> bucket
+#   yardctl reset-admin   set a fresh random syslog-bucket admin password
 #
 # UI ports: 8080 (hose) 8081 (valve) 8082 (bucket); syslog entry: 6514 udp+tcp.
 set -euo pipefail
@@ -115,6 +116,16 @@ smoke() {
     [ -n "$ok" ] || die "smoke FAILED — nothing reached syslog-bucket (valve flow applied? firewall? see yardctl firewall)"
 }
 
+reset_admin() {
+    # Generate a fresh random admin password (the bucket prints it). Useful
+    # on a forgotten password or to rotate the generated one. Runs inside
+    # the live container so it reuses its database connection.
+    info "resetting the syslog-bucket admin password"
+    compose exec -T syslog-bucket syslog-bucket reset-admin \
+        || die "could not reach the syslog-bucket container — is the suite up? (yardctl up)"
+    info "other admin sessions were signed out; sign in at http://localhost:8082"
+}
+
 case "${1:-}" in
     prereqs)          prereqs ;;
     up|start)         compose up -d --build && status ;;
@@ -125,5 +136,6 @@ case "${1:-}" in
     firewall)         firewall add ;;
     firewall-remove)  firewall remove ;;
     smoke)            smoke ;;
+    reset-admin)      reset_admin ;;
     *)                grep '^#   yardctl' "$0" | sed 's/^# *//'; exit 1 ;;
 esac

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -23,10 +24,57 @@ import (
 )
 
 func main() {
+	// Subcommands run a one-off operation against the database instead of
+	// starting the server (e.g. `syslog-bucket reset-admin`).
+	if len(os.Args) > 1 {
+		if err := runCommand(os.Args[1], os.Args[2:]); err != nil {
+			slog.Error("fatal", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		slog.Error("fatal", "error", err)
 		os.Exit(1)
 	}
+}
+
+func runCommand(name string, args []string) error {
+	switch name {
+	case "reset-admin":
+		return resetAdmin(args)
+	default:
+		return fmt.Errorf("unknown command %q (known: reset-admin)", name)
+	}
+}
+
+// resetAdmin resets (or creates) the admin account's password, printing the
+// new one. With no argument a random password is generated; pass a password
+// to set a known one.
+func resetAdmin(args []string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cfg := config.FromEnv()
+	st, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		return err
+	}
+
+	password := ""
+	if len(args) > 0 {
+		password = args[0]
+	}
+	password, err = auth.ResetAdmin(ctx, st, password)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("admin password reset to: %s\n", password)
+	return nil
 }
 
 func run() error {

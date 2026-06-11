@@ -25,10 +25,12 @@ UIs: hose http://localhost:8080 · valve http://localhost:8081 · bucket
 http://localhost:8082 — each UI carries a small **yard** nav linking to the
 other two. All three UIs share one sign-in: accounts are defined in the
 bucket (the yard's identity provider), and signing in at any UI covers the
-others. The default compose ships an `admin` account with the password
-from `BUCKET_ADMIN_PASSWORD` (`yardadmin` in `deploy/compose.yaml` —
-change it after first login). See [docs/AUTH.md](docs/AUTH.md) for users,
-roles, OIDC single sign-on, and bucket sharing.
+others. On first start the bucket creates an `admin` account with a
+**random password printed once in its log** — grab it with
+`scripts/yardctl logs syslog-bucket | grep -i password`, or set a fresh
+one anytime with `scripts/yardctl reset-admin`. See
+[docs/AUTH.md](docs/AUTH.md) for users, roles, OIDC single sign-on, and
+bucket sharing.
 
 External syslog entry: host port **6514** (udp/tcp) into the valve's IN
 ports. Note: VM-based runtimes (Rancher/Docker Desktop, Colima) forward TCP

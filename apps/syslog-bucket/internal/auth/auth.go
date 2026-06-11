@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -76,6 +77,46 @@ func Bootstrap(ctx context.Context, st *store.Store, adminPassword string) error
 		slog.Info("created initial admin user", "username", "admin")
 	}
 	return nil
+}
+
+// ResetAdmin sets the admin account's password, creating the account if it
+// is missing, and returns the password actually set. An empty password
+// generates a strong random one. It also re-enables the account, restores
+// its admin role, and revokes existing sessions — so it doubles as a
+// lockout-recovery path for anyone with database/container access (run via
+// `syslog-bucket reset-admin` or `scripts/yardctl reset-admin`).
+func ResetAdmin(ctx context.Context, st *store.Store, password string) (string, error) {
+	if password == "" {
+		password = randHex(8)
+	} else if len(password) < minPassword {
+		return "", fmt.Errorf("password must be at least %d characters", minPassword)
+	}
+	hash, err := HashPassword(password)
+	if err != nil {
+		return "", err
+	}
+	u, err := st.GetUserByUsername(ctx, "admin")
+	if err != nil {
+		return "", err
+	}
+	if u == nil {
+		if _, err := st.CreateUser(ctx, store.User{
+			Username: "admin", DisplayName: "Administrator", Role: store.RoleAdmin, PasswordHash: hash,
+		}, ""); err != nil {
+			return "", err
+		}
+		return password, nil
+	}
+	if _, err := st.UpdateUser(ctx, u.ID, u.DisplayName, u.Email, store.RoleAdmin, false); err != nil {
+		return "", err
+	}
+	if _, err := st.SetPassword(ctx, u.ID, hash); err != nil {
+		return "", err
+	}
+	if err := st.DeleteUserSessions(ctx, u.ID); err != nil {
+		return "", err
+	}
+	return password, nil
 }
 
 func HashPassword(pw string) (string, error) {

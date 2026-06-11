@@ -119,9 +119,12 @@ services:
       YARD_LINK_HOSE: "8080"
       YARD_LINK_VALVE: "8081"
       YARD_LINK_BUCKET: "8082"
-      # Initial admin password (first start only — change it in the UI, or
-      # leave unset to get a generated one printed in the container log).
-      BUCKET_ADMIN_PASSWORD: "yardadmin"
+      # Initial admin password, first start only. Left unset on purpose so a
+      # strong random password is generated and printed once in the log —
+      # find it with `scripts/yardctl logs syslog-bucket | grep -i password`,
+      # or set a fresh random one anytime with `scripts/yardctl reset-admin`.
+      # Uncomment to pin a known password instead.
+      # BUCKET_ADMIN_PASSWORD: "change-me"
       # Optional OIDC sign-in (Keycloak / Authentik / Entra ID / Google):
       # BUCKET_OIDC_ISSUER: "https://idp.example.com/realms/yard"
       # BUCKET_OIDC_CLIENT_ID: "syslog-bucket"

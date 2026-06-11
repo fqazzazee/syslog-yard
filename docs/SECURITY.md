@@ -60,6 +60,10 @@ never back into config or commands.
   5-minute lockout), keyed by account so it applies even to logins proxied
   through the hose/valve; a correct password clears the counter. A flat
   500 ms delay and a uniform error message avoid a username/password oracle.
+- **No shipped default password** — the bucket has no built-in credentials;
+  on first start it generates a random admin password and logs it once
+  (`BUCKET_ADMIN_PASSWORD` can pin a known one for automated bootstraps).
+  `scripts/yardctl reset-admin` rotates it and revokes other sessions.
 - **CSRF / cross-origin WebSocket** — state changes are non-GET with
   `SameSite=Lax` cookies (not sent on cross-site POST or WS handshakes), and
   the live-tail WebSocket additionally checks the Origin against the host.
@@ -75,10 +79,6 @@ never back into config or commands.
 
 ## Residual risks (accept, or mitigate per the checklist)
 
-- **Default admin password.** `deploy/compose.yaml` ships
-  `BUCKET_ADMIN_PASSWORD=yardadmin` for a frictionless demo. Change it on
-  first login, or unset it so a random password is generated and logged
-  once. **Do not expose the shipped compose to an untrusted network as-is.**
 - **HTTP by default.** The suite serves plain HTTP for the localhost lab
   flow; cookies are only marked `Secure` when you opt in
   (`BUCKET_COOKIE_SECURE`/`YARD_COOKIE_SECURE=true`). Without TLS, sessions
@@ -102,9 +102,9 @@ never back into config or commands.
 1. Put all three UIs behind a TLS-terminating reverse proxy; set
    `BUCKET_COOKIE_SECURE=true` and `YARD_COOKIE_SECURE=true`, and add HSTS
    at the proxy.
-2. Change the admin password (or unset `BUCKET_ADMIN_PASSWORD` and read the
-   generated one from the log); give each operator their own account with
-   the least role they need.
+2. Read the generated admin password from the first-start log (or
+   `scripts/yardctl reset-admin` to set a fresh one); give each operator
+   their own account with the least role they need.
 3. Keep Postgres (`bucket-db`) and the ingest/syslog listeners on the
    internal network only — never publish their ports.
 4. Wire OIDC so accounts and MFA live in your IdP; set

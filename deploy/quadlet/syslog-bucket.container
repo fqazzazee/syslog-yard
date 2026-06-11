@@ -14,8 +14,10 @@ Environment=BUCKET_INGEST_ADDR=:6601
 Environment=YARD_LINK_HOSE=8080
 Environment=YARD_LINK_VALVE=8081
 Environment=YARD_LINK_BUCKET=8082
-# Initial admin password (first start only; unset = generated and logged).
-Environment=BUCKET_ADMIN_PASSWORD=yardadmin
+# Initial admin password, first start only. Commented out so a random one is
+# generated and printed once (find it: journalctl --user -u syslog-bucket |
+# grep -i password). Uncomment to pin a known password instead.
+# Environment=BUCKET_ADMIN_PASSWORD=change-me
 # Optional OIDC sign-in — see deploy/compose.yaml for the full list.
 # Environment=BUCKET_OIDC_ISSUER=https://idp.example.com/realms/yard
 # Environment=BUCKET_OIDC_CLIENT_ID=syslog-bucket
