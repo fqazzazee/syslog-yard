@@ -28,6 +28,11 @@ const (
 // source duplicates its stream there for the UI's live tail.
 const TapSocket = "/data/syslog-ng/tap.sock"
 
+// NotifySocket is a second unix datagram socket: messages routed into a
+// notify node are duplicated here, tagged with the node ident, for the Go
+// notification dispatcher to deliver (S9 valve notify).
+const NotifySocket = "/data/syslog-ng/notify.sock"
+
 // Generate renders the full syslog-ng.conf for g. version is the
 // "@version" directive value and should match the running syslog-ng
 // (it tolerates older config versions with a warning, not the reverse).
@@ -72,6 +77,13 @@ func Generate(g *graph.Graph, version string, shares Shares) (string, error) {
 			}
 			fmt.Fprintf(&b, "\n# cache %s\ndestination d_%s {\n    file(%q create-dirs(yes));\n};\n",
 				name(n), graph.Ident(n.ID), p)
+		case graph.TypeNotify:
+			// Matched messages are duplicated to the notify socket, tagged
+			// with the node ident; the Go dispatcher delivers them. The
+			// template mirrors the tap's, plus ${LEVEL} for the alert text.
+			id := graph.Ident(n.ID)
+			fmt.Fprintf(&b, "\n# notify %s\ndestination d_%s {\n    unix-dgram(%q persist-name(\"notify_%s\") template(\"%s\\t${ISODATE}\\t${HOST}\\t${PROGRAM}\\t${LEVEL}\\t${MSG}\\n\"));\n};\n",
+				name(n), id, NotifySocket, id, id)
 		case graph.TypeFilter:
 			expr, err := filterExpr(n)
 			if err != nil {
@@ -237,7 +249,7 @@ func flowPaths(g *graph.Graph) []flowPath {
 			switch next.Type {
 			case graph.TypeFilter:
 				walk(srcID, next.ID, cur)
-			case graph.TypeForward, graph.TypeCache:
+			case graph.TypeForward, graph.TypeCache, graph.TypeNotify:
 				out = append(out, flowPath{source: srcID, steps: cur, sink: next.ID})
 			}
 		}

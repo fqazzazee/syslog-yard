@@ -1,9 +1,17 @@
 # Notifications
 
-S9 lets syslog-bucket push alerts off-box: a rule's **Notify** action delivers
-matching entries to a **channel** — a generic webhook, a Slack/Teams incoming
-webhook, or email over SMTP. Delivery is best-effort and runs off the ingest
-path, so a slow or failing channel never slows ingestion.
+S9 lets the yard push alerts off-box. Two complementary places fire them:
+
+- **syslog-bucket** — a rule's **Notify** action alerts on *stored, triaged*
+  entries (webhook, Slack/Teams, or SMTP email). Best-effort, off the ingest
+  path, so a slow channel never slows ingestion.
+- **syslog-valve** — a **Notify** node alerts *in-stream, on the raw flow*,
+  before storage (webhook or Slack/Teams). Good for things the valve filters
+  out before they ever reach the bucket.
+
+They're complementary, not redundant — the bucket alerts on what it stored and
+parsed; the valve alerts on what crosses the wire, filterable by
+severity/program/regex/MITRE technique on the spot.
 
 ## Channels
 
@@ -40,6 +48,21 @@ delivered text is a one-line summary:
 Combine with the rest of the rule engine: condition on severity, host, a saved
 search, a tag, or a **MITRE technique** (S8), then notify — e.g. "anything
 mapped to T1190, page the SOC channel."
+
+## Valve notify node (in-stream)
+
+Add a **Notify** node from the valve palette and wire a filter's `match` (or
+`else`) port into it. Matched messages are delivered in real time by the
+valve's Go app — syslog-ng duplicates them to an internal datagram socket
+tagged with the node, and the dispatcher POSTs them (the same webhook and
+Slack/Teams formats as above). The node carries its own destination URL and a
+per-node **max/min** rate cap; **Send test** confirms wiring before you Apply,
+and recent attempts are kept in memory (`GET /api/notify/log`).
+
+The valve deliberately offers **webhook and Slack/Teams only, not SMTP**: the
+flow graph is inspected, exported, and archived in version history, which is
+the wrong place to keep a reusable SMTP password. For email, route the event
+to the bucket and use a bucket SMTP channel, where the password is write-only.
 
 ## Operational notes
 

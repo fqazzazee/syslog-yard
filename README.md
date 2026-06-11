@@ -77,8 +77,10 @@ through, auto-tagged by rules:
   syntax check, atomic swap, and one-click rollback; UDP/TCP/TLS listeners
   (one-click self-signed certs); facility/severity/host/program/regex and
   **MITRE ATT&CK technique** filters with if/else routing; disk cache nodes
-  with retention compiled to logrotate; live tail of everything entering the
-  valve; config version history with previews; graph import/export.
+  with retention compiled to logrotate; **in-stream notify nodes** (webhook,
+  Slack/Teams) that alert on the raw flow before storage; live tail of
+  everything entering the valve; config version history with previews; graph
+  import/export.
 - **syslog-bucket**: syslog-ng-fronted ingest into Postgres; email-style
   3-pane triage; virtual buckets (saved searches), color-coded tags, a rules
   engine that tags/prioritizes/suppresses at ingest and retroactively;
@@ -90,10 +92,12 @@ through, auto-tagged by rules:
 
 ## Status
 
-S9 complete — notifications ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)): a
-rule's notify action delivers matching entries to webhook, Slack/Teams, or SMTP
-channels, off the ingest path, with per-channel rate limiting and a delivery
-log. Builds on S8 (MITRE ATT&CK mapping + matrix view, sorting, device class;
+S9 complete — notifications ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)): in
+the bucket, a rule's notify action delivers stored entries to webhook,
+Slack/Teams, or SMTP channels (off the ingest path, rate-limited, with a
+delivery log); in the valve, a notify node alerts in-stream on the raw flow
+(webhook / Slack-Teams) before storage. Builds on S8 (MITRE ATT&CK mapping +
+matrix view, sorting, device class;
 [docs/MITRE.md](docs/MITRE.md)), S7 (security review: threat model, CSP +
 hardening headers, login throttling), and S6 (local + OIDC sign-in,
 admin/analyst/viewer roles, per-user bucket sharing; the bucket is the yard's

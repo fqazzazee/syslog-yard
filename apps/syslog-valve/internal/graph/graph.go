@@ -17,6 +17,7 @@ const (
 	TypeFilter  = "filter"
 	TypeForward = "forward"
 	TypeCache   = "cache"
+	TypeNotify  = "notify"
 )
 
 // Filter output ports: edges leaving a filter carry the branch they take.
@@ -42,6 +43,13 @@ type Config struct {
 	Program     string `json:"program,omitempty"`
 	Match       string `json:"match,omitempty"`     // regex on the message text
 	Technique   string `json:"technique,omitempty"` // MITRE ATT&CK technique id (S8)
+
+	// notify: deliver matched messages to a notification destination. The
+	// Go app fires these (S9 valve notify); webhook posts a JSON body, slack
+	// posts {"text":…} to an incoming webhook. RatePerMin caps deliveries.
+	NotifyKind string `json:"notifyKind,omitempty"` // webhook | slack
+	URL        string `json:"url,omitempty"`
+	RatePerMin int    `json:"ratePerMin,omitempty"`
 
 	// cache: file destination with logrotate retention
 	Location   string `json:"location,omitempty"` // "" = local /data, else share name
@@ -167,6 +175,20 @@ func validateNode(n Node) error {
 			return fmt.Errorf("node %q: retention values must be >= 0", label(n))
 		}
 		return nil
+	case TypeNotify:
+		c := n.Config
+		switch c.NotifyKind {
+		case "webhook", "slack":
+		default:
+			return fmt.Errorf("node %q: notify kind must be webhook or slack", label(n))
+		}
+		if strings.TrimSpace(c.URL) == "" {
+			return fmt.Errorf("node %q: notify needs a URL", label(n))
+		}
+		if c.RatePerMin < 0 {
+			return fmt.Errorf("node %q: ratePerMin must be >= 0", label(n))
+		}
+		return nil
 	default:
 		return fmt.Errorf("node %q: unknown type %q", label(n), n.Type)
 	}
@@ -189,7 +211,7 @@ func (g *Graph) validateEdge(e Edge) error {
 	default:
 		return fmt.Errorf("edge from %q: %s nodes have no outputs", label(*from), from.Type)
 	}
-	if to.Type != TypeFilter && to.Type != TypeForward && to.Type != TypeCache {
+	if to.Type != TypeFilter && to.Type != TypeForward && to.Type != TypeCache && to.Type != TypeNotify {
 		return fmt.Errorf("edge to %q: %s nodes have no inputs", label(*to), to.Type)
 	}
 	return nil

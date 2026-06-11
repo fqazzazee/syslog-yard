@@ -29,6 +29,17 @@ export function summary(g: GraphNode): string {
         .join(" ");
       return `${where}/${c.dir || "…"} keep ${keep}`;
     }
+    case "notify":
+      return `${c.notifyKind ?? "slack"} → ${hostOf(c.url) || "…"}`;
+  }
+}
+
+function hostOf(url?: string): string {
+  if (!url) return "";
+  try {
+    return new URL(url).host;
+  } catch {
+    return url.slice(0, 24);
   }
 }
 

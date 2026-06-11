@@ -70,6 +70,7 @@ const DEFAULTS: Record<NodeType, GraphNode["config"]> = {
   filter: { severityMax: 3 },
   forward: { transport: "udp", port: 514, host: "" },
   cache: { dir: "", rotate: 7, maxSizeMB: 100, maxAgeDays: 14, compress: true },
+  notify: { notifyKind: "slack", url: "", ratePerMin: 30 },
 };
 
 const NEW_NAMES: Record<NodeType, string> = {
@@ -77,6 +78,7 @@ const NEW_NAMES: Record<NodeType, string> = {
   filter: "severity filter",
   forward: "forward",
   cache: "cache",
+  notify: "notify",
 };
 
 type AuthState = { enabled: boolean; user: AuthUser | null };
@@ -158,7 +160,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
 
   const addNode = (type: NodeType) => {
     const id = `${type}-${Date.now().toString(36)}`;
-    const col = { source: 60, filter: 320, forward: 620, cache: 620 }[type];
+    const col = { source: 60, filter: 320, forward: 620, cache: 620, notify: 620 }[type];
     const g: GraphNode = {
       id,
       type,
@@ -272,6 +274,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
               <button onClick={() => addNode("filter")}>+ Filter</button>
               <button onClick={() => addNode("forward")}>+ OUT port</button>
               <button onClick={() => addNode("cache")}>+ Cache</button>
+              <button onClick={() => addNode("notify")}>+ Notify</button>
             </>
           )}
           <button onClick={exportGraph} title="Download the graph as JSON">

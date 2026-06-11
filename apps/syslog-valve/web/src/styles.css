@@ -138,6 +138,7 @@ footer .err { color: var(--err); }
 .vnode.vforward { border-color: var(--accent); }
 .vnode.vfilter { border-color: #d29922; padding-bottom: 18px; }
 .vnode.vcache { border-color: #a371f7; }
+.vnode.vnotify { border-color: #f06292; }
 .nlabel { display: flex; flex-direction: column; line-height: 1.3; }
 .nlabel span { font-size: 10px; color: var(--muted); }
 

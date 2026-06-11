@@ -1,4 +1,4 @@
-export type NodeType = "source" | "filter" | "forward" | "cache";
+export type NodeType = "source" | "filter" | "forward" | "cache" | "notify";
 
 export interface NodeConfig {
   transport?: "udp" | "tcp" | "tls";
@@ -11,6 +11,10 @@ export interface NodeConfig {
   program?: string;
   match?: string;
   technique?: string; // MITRE ATT&CK technique id (S8)
+  // notify (S9): deliver matched messages to a webhook / Slack-Teams hook
+  notifyKind?: "webhook" | "slack";
+  url?: string;
+  ratePerMin?: number;
   // cache
   location?: string; // "" local, else share name
   dir?: string;
@@ -117,6 +121,15 @@ export interface MitreCatalog {
   techniques: MitreTechnique[];
 }
 
+// NotifyDelivery is one recorded notification attempt (S9 valve notify).
+export interface NotifyDelivery {
+  seq: number;
+  node: string;
+  status: string; // ok | error | dropped
+  detail: string;
+  time: string;
+}
+
 async function check(res: Response): Promise<Response> {
   if (!res.ok) {
     // A 401 outside the auth endpoints means the session died mid-use;
@@ -156,6 +169,12 @@ export const api = {
     fetch("/api/hints").then(check).then((r) => r.json()),
   mitre: (): Promise<MitreCatalog> =>
     fetch("/api/mitre").then(check).then((r) => r.json()),
+  notifyLog: (): Promise<NotifyDelivery[]> =>
+    fetch("/api/notify/log").then(check).then((r) => r.json()),
+  notifyTest: (kind: string, url: string): Promise<{ ok: boolean }> =>
+    fetch("/api/notify/test", { method: "POST", body: JSON.stringify({ kind, url }) })
+      .then(check)
+      .then((r) => r.json()),
   historyConfig: (id: string): Promise<string> =>
     fetch(`/api/history/${id}/config`).then(check).then((r) => r.text()),
   certs: (): Promise<CertStatus> =>

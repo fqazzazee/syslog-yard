@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/syslog-yard/syslog-valve/internal/codegen"
+	"github.com/syslog-yard/syslog-valve/internal/notify"
 	"github.com/syslog-yard/syslog-valve/internal/rotate"
 	"github.com/syslog-yard/syslog-valve/internal/server"
 	"github.com/syslog-yard/syslog-valve/internal/supervisor"
@@ -51,6 +52,14 @@ func main() {
 	tp := tap.New()
 	if err := tp.Listen(ctx, codegen.TapSocket); err != nil {
 		fmt.Fprintf(os.Stderr, "syslog-valve: live-tail tap: %v\n", err)
+		os.Exit(1)
+	}
+
+	// The notify dispatcher listens on its own datagram socket (notify nodes
+	// duplicate matched messages there); bind it before syslog-ng starts.
+	nd := notify.New()
+	if err := nd.Listen(ctx, codegen.NotifySocket); err != nil {
+		fmt.Fprintf(os.Stderr, "syslog-valve: notify socket: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -116,7 +125,7 @@ func main() {
 		fmt.Printf("syslog-valve: auth enforced via %s\n", os.Getenv("YARD_AUTH_URL"))
 	}
 
-	srv := &http.Server{Addr: addr, Handler: server.New(sup, dataDir, ui, hints, shares, rotator, tp, guard)}
+	srv := &http.Server{Addr: addr, Handler: server.New(sup, dataDir, ui, hints, shares, rotator, tp, nd, guard)}
 	go func() {
 		fmt.Printf("syslog-valve listening on %s (data dir %s, syslog-ng %s)\n",
 			addr, dataDir, sup.Version())

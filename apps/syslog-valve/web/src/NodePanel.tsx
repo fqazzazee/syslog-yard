@@ -6,6 +6,7 @@ const TITLES: Record<GraphNode["type"], string> = {
   filter: "Filter",
   forward: "OUT port",
   cache: "Cache to disk",
+  notify: "Notify",
 };
 
 export function NodePanel({
@@ -133,6 +134,43 @@ export function NodePanel({
         </>
       )}
 
+      {node.type === "notify" && (
+        <>
+          <label>
+            Destination
+            <select
+              value={node.config.notifyKind ?? "slack"}
+              onChange={(e) => set({ notifyKind: e.target.value as "webhook" | "slack" })}
+            >
+              <option value="slack">Slack / Teams ({"{text}"})</option>
+              <option value="webhook">Webhook (JSON)</option>
+            </select>
+          </label>
+          <label>
+            Webhook URL
+            <input
+              value={node.config.url ?? ""}
+              placeholder="https://hooks.example.com/…"
+              onChange={(e) => set({ url: e.target.value })}
+            />
+          </label>
+          <label>
+            Max notifications/min (0 = unlimited)
+            <input
+              type="number"
+              min={0}
+              value={node.config.ratePerMin ?? 30}
+              onChange={(e) => set({ ratePerMin: Number(e.target.value) })}
+            />
+          </label>
+          <NotifyTest kind={node.config.notifyKind ?? "slack"} url={node.config.url ?? ""} />
+          <p className="muted">
+            Matched messages are delivered in real time, before storage. For email, use a
+            syslog-bucket channel. Changes take effect on Apply.
+          </p>
+        </>
+      )}
+
       {node.type === "cache" && (
         <>
           <label>
@@ -230,6 +268,30 @@ function TechniqueSelect({ value, onChange }: { value: string; onChange: (id: st
         })}
       </select>
     </label>
+  );
+}
+
+// NotifyTest delivers a synthetic message to the channel so the user can
+// confirm wiring before applying the graph.
+function NotifyTest({ kind, url }: { kind: string; url: string }) {
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+  const test = () => {
+    setBusy(true);
+    setStatus("sending…");
+    api
+      .notifyTest(kind, url)
+      .then(() => setStatus("✓ test delivered"))
+      .catch((e) => setStatus("✗ " + String(e)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="cond-row">
+      <button type="button" disabled={busy || !url} onClick={test}>
+        Send test
+      </button>
+      {status && <span className="muted">{status}</span>}
+    </div>
   );
 }
 

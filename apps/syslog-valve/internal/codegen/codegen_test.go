@@ -121,6 +121,40 @@ func TestGenerateTechniqueFilter(t *testing.T) {
 	}
 }
 
+func TestGenerateNotify(t *testing.T) {
+	// source -> filter(sev<=3) -> match: notify webhook
+	g := &graph.Graph{
+		Nodes: []graph.Node{
+			{ID: "src-1", Type: graph.TypeSource, Name: "in", Config: graph.Config{Transport: "udp", Port: 514}},
+			{ID: "f-1", Type: graph.TypeFilter, Name: "crit", Config: graph.Config{SeverityMax: sevMax(3)}},
+			{ID: "n-1", Type: graph.TypeNotify, Name: "soc", Config: graph.Config{NotifyKind: "slack", URL: "https://hooks.example.com/x", RatePerMin: 30}},
+		},
+		Edges: []graph.Edge{
+			{From: "src-1", To: "f-1"},
+			{From: "f-1", FromPort: graph.PortMatch, To: "n-1"},
+		},
+	}
+	conf, err := Generate(g, "4.8", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`destination d_n_1 {`,
+		`unix-dgram("/data/syslog-ng/notify.sock" persist-name("notify_n_1") template("n_1\t${ISODATE}\t${HOST}\t${PROGRAM}\t${LEVEL}\t${MSG}\n"));`,
+		"log {\n    source(s_src_1);\n    filter(f_f_1);\n    destination(d_n_1);\n};",
+	} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("notify config missing %q:\n%s", want, conf)
+		}
+	}
+
+	// A notify node with no URL is rejected.
+	g.Nodes[2].Config.URL = ""
+	if _, err := Generate(g, "4.8", nil); err == nil {
+		t.Fatal("expected error for notify without URL")
+	}
+}
+
 func TestCacheShares(t *testing.T) {
 	g := filteredGraph()
 	g.Nodes[3].Config.Location = "archive"

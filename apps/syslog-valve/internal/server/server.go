@@ -17,6 +17,7 @@ import (
 	"github.com/syslog-yard/syslog-valve/internal/codegen"
 	"github.com/syslog-yard/syslog-valve/internal/graph"
 	"github.com/syslog-yard/syslog-valve/internal/mitre"
+	"github.com/syslog-yard/syslog-valve/internal/notify"
 	"github.com/syslog-yard/syslog-valve/internal/rotate"
 	"github.com/syslog-yard/syslog-valve/internal/supervisor"
 	"github.com/syslog-yard/syslog-valve/internal/tap"
@@ -32,12 +33,13 @@ type Server struct {
 	shares    codegen.Shares
 	rotator   *rotate.Rotator
 	tap       *tap.Tap
+	notify    *notify.Dispatcher
 	mu        sync.Mutex // serializes graph writes and applies
 }
 
 // New builds the handler; guard enforces yard auth when YARD_AUTH_URL is
 // set (nil = open, standalone mode).
-func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]string, shares codegen.Shares, rotator *rotate.Rotator, tp *tap.Tap, guard *yardauth.Guard) *Server {
+func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]string, shares codegen.Shares, rotator *rotate.Rotator, tp *tap.Tap, nd *notify.Dispatcher, guard *yardauth.Guard) *Server {
 	s := &Server{
 		mux:       http.NewServeMux(),
 		sup:       sup,
@@ -46,6 +48,16 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 		shares:    shares,
 		rotator:   rotator,
 		tap:       tp,
+		notify:    nd,
+	}
+	// Seed notify targets from the persisted graph so deliveries work after a
+	// restart even before the next apply.
+	if nd != nil {
+		if data, err := s.loadGraph(); err == nil {
+			if g, err := graph.Parse(data); err == nil {
+				nd.SetGraph(g)
+			}
+		}
 	}
 	s.mux.HandleFunc("GET /api/graph", s.getGraph)
 	s.mux.HandleFunc("PUT /api/graph", s.putGraph)
@@ -62,6 +74,8 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 	s.mux.HandleFunc("GET /api/certs", s.certStatus)
 	s.mux.HandleFunc("POST /api/certs/selfsigned", s.certGenerate)
 	s.mux.HandleFunc("GET /api/tail", s.tail)
+	s.mux.HandleFunc("GET /api/notify/log", s.notifyLog)
+	s.mux.HandleFunc("POST /api/notify/test", s.notifyTest)
 	s.mux.HandleFunc("POST /api/rotate", s.rotateNow)
 	s.mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]string{"status": "ok"})
@@ -157,6 +171,9 @@ func (s *Server) apply(w http.ResponseWriter, _ *http.Request) {
 	if err := os.WriteFile(s.rotator.ConfPath, []byte(lr), 0o644); err != nil {
 		httpError(w, http.StatusInternalServerError, fmt.Errorf("writing logrotate config: %w", err))
 		return
+	}
+	if s.notify != nil {
+		s.notify.SetGraph(g)
 	}
 	writeJSON(w, map[string]any{"ok": true, "config": conf, "logrotate": lr})
 }
@@ -297,6 +314,37 @@ func (s *Server) rotateNow(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]string{"result": out})
+}
+
+// notifyLog returns the recent notification deliveries (in-memory ring).
+func (s *Server) notifyLog(w http.ResponseWriter, _ *http.Request) {
+	if s.notify == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	writeJSON(w, s.notify.Recent())
+}
+
+// notifyTest delivers a synthetic notification to a channel config so the user
+// can confirm wiring before applying the graph.
+func (s *Server) notifyTest(w http.ResponseWriter, r *http.Request) {
+	if s.notify == nil {
+		httpError(w, http.StatusServiceUnavailable, fmt.Errorf("notifications disabled"))
+		return
+	}
+	var body struct {
+		Kind string `json:"kind"`
+		URL  string `json:"url"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
+		httpError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.notify.TestSend(r.Context(), body.Kind, body.URL); err != nil {
+		httpError(w, http.StatusBadGateway, fmt.Errorf("delivery failed: %w", err))
+		return
+	}
+	writeJSON(w, map[string]bool{"ok": true})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
