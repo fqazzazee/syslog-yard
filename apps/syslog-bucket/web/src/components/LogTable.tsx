@@ -1,5 +1,6 @@
 import type { Entry, SortKey, Tag } from "./../types";
 import { PRIORITY_NAMES, SEVERITY_NAMES } from "./../types";
+import { Icon } from "./Icon";
 import { TagChip } from "./Tags";
 
 interface Props {
@@ -41,7 +42,11 @@ export default function LogTable({
   const Th = ({ k, label, cls }: { k: SortKey; label: string; cls?: string }) => (
     <th className={`${cls ?? ""} sortable${sort === k ? " sorted" : ""}`} onClick={() => onSort(k)}>
       {label}
-      {sort === k && <span className="sort-arrow">{desc ? " ▾" : " ▴"}</span>}
+      {sort === k && (
+        <span className="sort-arrow">
+          <Icon name={desc ? "keyboard_arrow_down" : "keyboard_arrow_up"} size={14} />
+        </span>
+      )}
     </th>
   );
 

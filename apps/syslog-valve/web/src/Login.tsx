@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, type AuthUser } from "./api";
+import { Icon } from "./Icon";
 
 // Login gates the UI when the deployment wires yard auth (YARD_AUTH_URL):
 // credentials are the user accounts defined in syslog-bucket.
@@ -25,8 +26,11 @@ export function Login({ onLogin }: { onLogin: (u: AuthUser) => void }) {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
-        <h1>
-          <span className="logo">⊶</span> syslog-valve
+        <h1 className="brand">
+          <span className="logo">
+            <Icon name="valve" size={22} />
+          </span>{" "}
+          syslog-valve
         </h1>
         <p className="login-hint">Sign in with your yard account (managed in syslog-bucket).</p>
         <label>
@@ -44,7 +48,7 @@ export function Login({ onLogin }: { onLogin: (u: AuthUser) => void }) {
         </label>
         {error && <div className="login-error">{error}</div>}
         <button className="primary" type="submit" disabled={busy || !username || !password}>
-          Sign in
+          <Icon name="login" size={16} /> Sign in
         </button>
       </form>
     </div>

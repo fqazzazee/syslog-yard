@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Cond, Tag } from "./../types";
+import { Icon } from "./Icon";
 
 // The builder edits the common shape — a flat AND of leaf conditions. Trees
 // with any/not nesting fall back to a raw JSON editor so nothing the backend
@@ -240,7 +241,7 @@ export default function ConditionBuilder({ value, onChange, tags }: Props) {
           )}
 
           <button type="button" className="linkish" onClick={() => setRows(rows.filter((_, j) => j !== i))}>
-            ✕
+            <Icon name="close" size={14} />
           </button>
         </div>
       ))}

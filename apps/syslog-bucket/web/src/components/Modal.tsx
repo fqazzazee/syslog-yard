@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Icon } from "./Icon";
 
 export default function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return (
@@ -6,7 +7,9 @@ export default function Modal({ title, onClose, children }: { title: string; onC
       <div className="modal">
         <div className="modal-head">
           <h2>{title}</h2>
-          <button onClick={onClose}>✕</button>
+          <button onClick={onClose}>
+            <Icon name="close" size={18} />
+          </button>
         </div>
         {children}
       </div>

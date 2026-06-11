@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Job, TailEvent } from "./api";
+import { Icon } from "./Icon";
 
 export function Tail(props: {
   events: TailEvent[];
@@ -25,7 +26,7 @@ export function Tail(props: {
     <div className={props.visible ? "tail open" : "tail"}>
       <div className="tail-bar">
         <button className="quiet" onClick={props.onToggle}>
-          {props.visible ? "▾" : "▴"} Live tail
+          <Icon name={props.visible ? "keyboard_arrow_down" : "keyboard_arrow_up"} size={16} /> Live tail
         </button>
         {props.visible && (
           <>
@@ -45,7 +46,7 @@ export function Tail(props: {
                 props.onPause(p);
               }}
             >
-              {paused ? "▶ Resume" : "⏸ Pause"}
+              <Icon name={paused ? "play_arrow" : "pause"} size={15} /> {paused ? "Resume" : "Pause"}
             </button>
             <button className="quiet" onClick={props.onClear}>
               Clear

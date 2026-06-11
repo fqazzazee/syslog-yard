@@ -92,14 +92,16 @@ through, auto-tagged by rules:
 
 ## Status
 
-S9 complete — notifications ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)): in
-the bucket, a rule's notify action delivers stored entries to webhook,
-Slack/Teams, or SMTP channels (off the ingest path, rate-limited, with a
-delivery log); in the valve, a notify node alerts in-stream on the raw flow
-(webhook / Slack-Teams) before storage. Builds on S8 (MITRE ATT&CK mapping +
-matrix view, sorting, device class;
-[docs/MITRE.md](docs/MITRE.md)), S7 (security review: threat model, CSP +
-hardening headers, login throttling), and S6 (local + OIDC sign-in,
-admin/analyst/viewer roles, per-user bucket sharing; the bucket is the yard's
-identity provider and the hose and valve share one sign-in). Next: clean-up,
-more UI hints, and improved docs (S10).
+S10 complete — UI polish: one icon-driven look across all three tools, with a
+self-hosted [Material Symbols](https://fonts.google.com/icons) set (inline SVG,
+no CDN, so the strict CSP is untouched). Each tool has a garden brand mark — the
+suite is a **yard**, the hose a water-drop, the valve a valve, the bucket an
+inbox — and a shared top bar, account menu, and sign-in page. Every UI now
+carries a built-in **About / Help** (the `?` button): author, source link, what
+each tool does, a short how-to, and links to these docs. Builds on S9
+(notifications; [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)), S8 (MITRE
+ATT&CK mapping + matrix view, sorting, device class; [docs/MITRE.md](docs/MITRE.md)),
+S7 (security review: threat model, CSP + hardening headers, login throttling),
+and S6 (local + OIDC sign-in, admin/analyst/viewer roles, per-user bucket
+sharing; the bucket is the yard's identity provider and the hose and valve share
+one sign-in).

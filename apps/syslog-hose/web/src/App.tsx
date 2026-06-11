@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { About } from "./About";
 import { AccountMenu } from "./AccountMenu";
 import { api, AuthUser, Job, PresetSummary, TailEvent } from "./api";
+import { Icon } from "./Icon";
 import { JobForm } from "./JobForm";
 import { Login } from "./Login";
 import { PresetsView } from "./PresetsView";
@@ -53,6 +55,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   const [editing, setEditing] = useState<Partial<Job> | null>(null);
   const [error, setError] = useState("");
   const [showTail, setShowTail] = useState(true);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [hints, setHints] = useState<Record<string, string>>({});
   const paused = useRef(false);
   const readOnly = user?.role === "viewer";
@@ -98,34 +101,41 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   return (
     <div className="app">
       <header>
-        <h1>
-          <span className="logo">⟫⟫</span> syslog-hose
+        <h1 className="brand">
+          <span className="logo">
+            <Icon name="water_drop" size={22} />
+          </span>{" "}
+          syslog-hose
         </h1>
         <span className="sub">syslog generator</span>
         <YardNav links={hints} current="hose" />
         <nav>
           <button className={tab === "jobs" ? "tab active" : "tab"} onClick={() => setTab("jobs")}>
-            Jobs {running > 0 && <span className="badge">{running} running</span>}
+            <Icon name="bolt" size={16} /> Jobs {running > 0 && <span className="badge">{running} running</span>}
           </button>
           <button
             className={tab === "presets" ? "tab active" : "tab"}
             onClick={() => setTab("presets")}
           >
-            Presets
+            <Icon name="category" size={16} /> Presets
           </button>
         </nav>
         <div className="spacer" />
         {running > 0 && !readOnly && (
           <button className="danger" onClick={() => act(api.stopAll)}>
-            ■ Stop all
+            <Icon name="stop" size={16} /> Stop all
           </button>
         )}
+        <button className="help-btn" title="About & help" onClick={() => setAboutOpen(true)}>
+          <Icon name="help" size={18} />
+        </button>
         {user && <AccountMenu user={user} onSignOut={onSignOut} />}
       </header>
+      {aboutOpen && <About tool="hose" onClose={() => setAboutOpen(false)} />}
 
       {error && (
         <div className="error-bar" onClick={() => setError("")}>
-          {error} ✕
+          {error} <Icon name="close" size={15} />
         </div>
       )}
 
@@ -243,11 +253,11 @@ function JobCard(props: {
         <div className="card-actions">
           {j.running ? (
             <button className="danger" onClick={props.onStop}>
-              ■ Stop
+              <Icon name="stop" size={15} /> Stop
             </button>
           ) : (
             <button className="primary" onClick={props.onStart}>
-              ▶ Start
+              <Icon name="play_arrow" size={15} /> Start
             </button>
           )}
           <button onClick={props.onEdit} disabled={j.running} title={j.running ? "Stop first" : ""}>

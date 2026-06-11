@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createChannel, deleteChannel, fetchNotificationLog, testChannel, updateChannel } from "./../api";
 import type { Channel, ChannelKind, Delivery } from "./../types";
+import { Icon } from "./Icon";
 import Modal from "./Modal";
 
 interface Props {
@@ -95,7 +96,7 @@ export default function ChannelsModal({ channels, onClose }: Props) {
               on
             </label>
             <button type="button" className="linkish" title="Delete channel" onClick={() => remove(c)}>
-              ✕
+              <Icon name="close" size={14} />
             </button>
           </div>
 

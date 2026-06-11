@@ -20,8 +20,10 @@ import {
   type HistoryEntry,
   type TailEvent,
 } from "./api";
+import { About } from "./About";
 import { AccountMenu } from "./AccountMenu";
 import { nodeTypes, rfType, type FlowNode } from "./FlowNodes";
+import { Icon } from "./Icon";
 import { Login } from "./Login";
 import { NodePanel } from "./NodePanel";
 import { YardNav } from "./YardNav";
@@ -128,6 +130,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [preview, setPreview] = useState<{ id: string; conf: string } | null>(null);
   const [tailOn, setTailOn] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const importInput = useRef<HTMLInputElement>(null);
   const readOnly = user?.role === "viewer";
 
@@ -265,25 +268,40 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   return (
     <div className="app">
       <header>
-        <span className="logo">⊶</span> syslog-valve
+        <h1 className="brand">
+          <span className="logo">
+            <Icon name="valve" size={22} />
+          </span>{" "}
+          syslog-valve
+        </h1>
         <YardNav links={hints} current="valve" />
         <div className="toolbar">
           {!readOnly && (
             <>
-              <button onClick={() => addNode("source")}>+ IN port</button>
-              <button onClick={() => addNode("filter")}>+ Filter</button>
-              <button onClick={() => addNode("forward")}>+ OUT port</button>
-              <button onClick={() => addNode("cache")}>+ Cache</button>
-              <button onClick={() => addNode("notify")}>+ Notify</button>
+              <button onClick={() => addNode("source")}>
+                <Icon name="add" size={15} /> IN port
+              </button>
+              <button onClick={() => addNode("filter")}>
+                <Icon name="add" size={15} /> Filter
+              </button>
+              <button onClick={() => addNode("forward")}>
+                <Icon name="add" size={15} /> OUT port
+              </button>
+              <button onClick={() => addNode("cache")}>
+                <Icon name="add" size={15} /> Cache
+              </button>
+              <button onClick={() => addNode("notify")}>
+                <Icon name="add" size={15} /> Notify
+              </button>
             </>
           )}
           <button onClick={exportGraph} title="Download the graph as JSON">
-            ⤓ Export
+            <Icon name="download" size={15} /> Export
           </button>
           {!readOnly && (
             <>
               <button onClick={() => importInput.current?.click()} title="Load a graph JSON file">
-                ⤒ Import
+                <Icon name="upload" size={15} /> Import
               </button>
               <input
                 ref={importInput}
@@ -297,13 +315,17 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
                 }}
               />
               <button className="primary" onClick={apply}>
-                Apply
+                <Icon name="check" size={15} /> Apply
               </button>
             </>
           )}
+          <button className="help-btn" title="About & help" onClick={() => setAboutOpen(true)}>
+            <Icon name="help" size={18} />
+          </button>
           {user && <AccountMenu user={user} onSignOut={onSignOut} />}
         </div>
       </header>
+      {aboutOpen && <About tool="valve" onClose={() => setAboutOpen(false)} />}
       {banner && (
         <div className={`banner ${banner.kind}`} onClick={() => setBanner(null)}>
           {banner.text}
@@ -369,7 +391,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
         {status?.lastError && <span className="err"> — {status.lastError}</span>}
         <span className="spacer" />
         <button className={tailOn ? "tail-toggle on" : "tail-toggle"} onClick={() => setTailOn(!tailOn)}>
-          {tailOn ? "▾ Live tail" : "▸ Live tail"}
+          <Icon name={tailOn ? "keyboard_arrow_down" : "keyboard_arrow_up"} size={16} /> Live tail
         </button>
       </footer>
     </div>
@@ -404,7 +426,9 @@ function TailDrawer() {
       <div className="tail-bar">
         <span className="muted">in-flight messages, newest last</span>
         <span className="spacer" />
-        <button onClick={() => setPaused(!paused)}>{paused ? "▶ resume" : "‖ pause"}</button>
+        <button onClick={() => setPaused(!paused)}>
+          <Icon name={paused ? "play_arrow" : "pause"} size={15} /> {paused ? "resume" : "pause"}
+        </button>
         <button onClick={() => setEvents([])}>clear</button>
       </div>
       <div className="tail-body" ref={bodyRef}>

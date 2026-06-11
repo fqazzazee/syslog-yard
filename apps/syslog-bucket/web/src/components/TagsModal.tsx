@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createTag, deleteTag, updateTag } from "./../api";
 import type { Tag } from "./../types";
+import { Icon } from "./Icon";
 import Modal from "./Modal";
 
 const PALETTE = ["#ff4d4d", "#ffa726", "#ffd54f", "#6ee07a", "#4da3ff", "#b388ff", "#f06292", "#8a94a6"];
@@ -65,7 +66,7 @@ export default function TagsModal({ tags, onClose }: Props) {
               });
             }}
           >
-            ✕
+            <Icon name="close" size={14} />
           </button>
         </div>
       ))}

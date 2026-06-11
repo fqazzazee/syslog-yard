@@ -3,6 +3,7 @@ import { applyRule, createRule, deleteRule, updateRule } from "./../api";
 import type { Action, Channel, Cond, Rule, Tag } from "./../types";
 import { PRIORITY_NAMES } from "./../types";
 import ConditionBuilder from "./ConditionBuilder";
+import { Icon } from "./Icon";
 import Modal from "./Modal";
 
 interface Props {
@@ -128,7 +129,7 @@ export default function RuleModal({ rule, tags, channels, onClose }: Props) {
             ))}
           {a.type === "suppress" && <span className="hint">hidden from views, kept in storage</span>}
           <button type="button" className="linkish" onClick={() => setActions(actions.filter((_, j) => j !== i))}>
-            ✕
+            <Icon name="close" size={14} />
           </button>
         </div>
       ))}

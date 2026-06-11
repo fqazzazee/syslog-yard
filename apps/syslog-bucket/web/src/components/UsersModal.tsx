@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createUser, deleteUser, fetchUsers, updateUser } from "./../api";
 import type { Role, User } from "./../types";
+import { Icon } from "./Icon";
 import Modal from "./Modal";
 
 const ROLES: Role[] = ["admin", "analyst", "viewer"];
@@ -102,7 +103,7 @@ export default function UsersModal({ me, onClose }: Props) {
                 void run(() => deleteUser(u.id));
             }}
           >
-            ✕
+            <Icon name="close" size={14} />
           </button>
         </div>
       ))}

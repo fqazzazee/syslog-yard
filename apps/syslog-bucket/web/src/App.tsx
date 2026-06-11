@@ -13,10 +13,12 @@ import {
   logout,
 } from "./api";
 import type { AuthInfo, Bucket, Channel, Entry, Filters, Rule, Selection, SortKey, Stats, Tag, User } from "./types";
+import { About } from "./components/About";
 import AccountModal from "./components/AccountModal";
 import BucketModal from "./components/BucketModal";
 import ChannelsModal from "./components/ChannelsModal";
 import EntryDetail from "./components/EntryDetail";
+import { Icon } from "./components/Icon";
 import FilterBar from "./components/FilterBar";
 import Login from "./components/Login";
 import LogTable from "./components/LogTable";
@@ -85,6 +87,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [hints, setHints] = useState<Record<string, string>>({});
   const [menuOpen, setMenuOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const entriesRef = useRef<Entry[]>([]);
   entriesRef.current = entries;
@@ -249,7 +252,10 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
   return (
     <div className="app">
       <header className="topbar">
-        <h1>
+        <h1 className="brand">
+          <span className="logo">
+            <Icon name="inbox" size={22} />
+          </span>{" "}
           syslog-bucket <span className="bucket-label">{title}</span>
         </h1>
         <YardNav links={hints} current="bucket" />
@@ -258,29 +264,44 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
             ~{stats.approx_total.toLocaleString()} entries · {stats.last_minute}/min
           </span>
         )}
+        <div className="spacer" />
+        {!isMatrix && (
+          <button className={live && wsOpen ? "live on" : "live"} onClick={() => setLive(!live)}>
+            <Icon name={live ? "sensors" : "pause"} size={15} />{" "}
+            {live ? (wsOpen ? "Live" : "Connecting…") : "Paused"}
+          </button>
+        )}
+        <button className="help-btn" title="About & help" onClick={() => setAboutOpen(true)}>
+          <Icon name="help" size={18} />
+        </button>
         <div className="user-menu" ref={menuRef}>
           <button
             className={`user-btn${menuOpen ? " open" : ""}`}
             title="Account menu"
             onClick={() => setMenuOpen(!menuOpen)}
           >
-            👤 {me.display_name || me.username} <span className={`role-badge role-${me.role}`}>{me.role}</span>{" "}
-            <span className="caret">▾</span>
+            <Icon name="account_circle" size={16} /> {me.display_name || me.username}{" "}
+            <span className={`role-badge role-${me.role}`}>{me.role}</span>
+            <Icon name="keyboard_arrow_down" size={16} className="caret" />
           </button>
           {menuOpen && (
             <div className="user-dropdown" onClick={() => setMenuOpen(false)}>
-              {me.role === "admin" && <button onClick={() => setModal({ kind: "users" })}>Users…</button>}
-              <button onClick={() => setModal({ kind: "account" })}>Account…</button>
-              <button onClick={onSignOut}>⏻ Sign out</button>
+              {me.role === "admin" && (
+                <button onClick={() => setModal({ kind: "users" })}>
+                  <Icon name="manage_accounts" size={16} /> Users…
+                </button>
+              )}
+              <button onClick={() => setModal({ kind: "account" })}>
+                <Icon name="account_circle" size={16} /> Account…
+              </button>
+              <button onClick={onSignOut}>
+                <Icon name="logout" size={16} /> Sign out
+              </button>
             </div>
           )}
         </div>
-        {!isMatrix && (
-          <button className={live && wsOpen ? "live on" : "live"} onClick={() => setLive(!live)}>
-            {live ? (wsOpen ? "● Live" : "● Connecting…") : "‖ Paused"}
-          </button>
-        )}
       </header>
+      {aboutOpen && <About tool="bucket" onClose={() => setAboutOpen(false)} />}
 
       <div className="body">
         <Sidebar

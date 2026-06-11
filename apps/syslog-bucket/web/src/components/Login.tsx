@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { login } from "./../api";
 import type { AuthInfo, User } from "./../types";
+import { Icon } from "./Icon";
 
 interface Props {
   info: AuthInfo | null;
@@ -28,7 +29,12 @@ export default function Login({ info, onLogin }: Props) {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={(e) => void submit(e)}>
-        <h1>syslog-bucket</h1>
+        <h1 className="brand">
+          <span className="logo">
+            <Icon name="inbox" size={22} />
+          </span>{" "}
+          syslog-bucket
+        </h1>
         <p className="hint">Sign in to triage the yard's logs.</p>
         <label>
           Username
@@ -45,7 +51,7 @@ export default function Login({ info, onLogin }: Props) {
         </label>
         {error && <div className="error">{error}</div>}
         <button className="primary" type="submit" disabled={busy || !username || !password}>
-          Sign in
+          <Icon name="login" size={16} /> Sign in
         </button>
         {info?.oidc.enabled && (
           <a className="oidc-btn" href="/api/auth/oidc/login">

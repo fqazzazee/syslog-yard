@@ -1,6 +1,7 @@
 import { patchEntry, tagEntry, untagEntry } from "./../api";
 import type { Entry, Tag } from "./../types";
 import { PRIORITY_NAMES, SEVERITY_NAMES, STATUS_NAMES } from "./../types";
+import { Icon } from "./Icon";
 import { TagChip, TagPicker } from "./Tags";
 
 interface Props {
@@ -27,7 +28,9 @@ export default function EntryDetail({ entry, tags, tagsById, readOnly, onClose, 
           Entry #{entry.id}
           {entry.suppressed && <span className="badge muted">suppressed</span>}
         </h2>
-        <button onClick={onClose}>✕</button>
+        <button onClick={onClose}>
+          <Icon name="close" size={18} />
+        </button>
       </div>
 
       <div className="triage">

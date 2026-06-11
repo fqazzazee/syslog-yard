@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { api, AuthUser, YardUser } from "./api";
+import { Icon } from "./Icon";
 
 // AccountMenu is the yard-wide account dropdown: password change for
 // everyone, user management for admins, sign out. Management calls are
 // proxied to syslog-bucket (the identity provider), which enforces roles.
 // This file is identical in syslog-hose and syslog-valve; keep in sync.
+// syslog-bucket renders the same button/dropdown markup inline in its App.
 
 const ROLES = ["admin", "analyst", "viewer"] as const;
 
@@ -32,14 +34,23 @@ export function AccountMenu({ user, onSignOut }: { user: AuthUser; onSignOut: ()
   return (
     <div className="user-menu" ref={ref}>
       <button className={`user-btn${open ? " open" : ""}`} title="Account menu" onClick={() => setOpen(!open)}>
-        👤 {user.display_name || user.username} <span className="role-tag">{user.role}</span>{" "}
-        <span className="caret">▾</span>
+        <Icon name="account_circle" size={16} /> {user.display_name || user.username}{" "}
+        <span className={`role-badge role-${user.role}`}>{user.role}</span>
+        <Icon name="keyboard_arrow_down" size={16} className="caret" />
       </button>
       {open && (
         <div className="user-dropdown" onClick={() => setOpen(false)}>
-          {user.role === "admin" && <button onClick={() => setModal("users")}>Users…</button>}
-          <button onClick={() => setModal("account")}>Account…</button>
-          <button onClick={onSignOut}>⏻ Sign out</button>
+          {user.role === "admin" && (
+            <button onClick={() => setModal("users")}>
+              <Icon name="manage_accounts" size={16} /> Users…
+            </button>
+          )}
+          <button onClick={() => setModal("account")}>
+            <Icon name="account_circle" size={16} /> Account…
+          </button>
+          <button onClick={onSignOut}>
+            <Icon name="logout" size={16} /> Sign out
+          </button>
         </div>
       )}
       {modal === "account" && <AccountModal user={user} onClose={() => setModal("none")} />}
@@ -76,7 +87,7 @@ function AccountModal({ user, onClose }: { user: AuthUser; onClose: () => void }
         <div className="acct-head">
           <h2>Account — {user.username}</h2>
           <button className="acct-close" onClick={onClose}>
-            ✕
+            <Icon name="close" size={18} />
           </button>
         </div>
         {user.has_password ? (
@@ -166,15 +177,15 @@ function UsersModal({ me, onClose }: { me: AuthUser; onClose: () => void }) {
         <div className="acct-head">
           <h2>Users</h2>
           <button className="acct-close" onClick={onClose}>
-            ✕
+            <Icon name="close" size={18} />
           </button>
         </div>
         {users.map((u) => (
           <div className="acct-row" key={u.id}>
             <span className="acct-name">
               {u.username}
-              {u.oidc && <span className="role-tag">OIDC</span>}
-              {u.disabled && <span className="role-tag">disabled</span>}
+              {u.oidc && <span className="role-badge">OIDC</span>}
+              {u.disabled && <span className="role-badge">disabled</span>}
             </span>
             <select
               value={u.role}
@@ -210,7 +221,7 @@ function UsersModal({ me, onClose }: { me: AuthUser; onClose: () => void }) {
                 if (confirm(`Delete user "${u.username}"?`)) void run(() => api.deleteUser(u.id));
               }}
             >
-              ✕
+              <Icon name="delete" size={15} />
             </button>
           </div>
         ))}

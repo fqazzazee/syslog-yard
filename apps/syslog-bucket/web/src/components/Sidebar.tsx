@@ -1,4 +1,5 @@
 import type { Bucket, Channel, Rule, Selection, Tag, User } from "./../types";
+import { Icon } from "./Icon";
 import { TagChip } from "./Tags";
 
 interface Props {
@@ -35,17 +36,17 @@ export default function Sidebar({
   return (
     <nav className="sidebar">
       <button className={`nav-item${isAll ? " active" : ""}`} onClick={() => onSelect({ kind: "all" })}>
-        📥 All Logs
+        <Icon name="description" size={16} /> All Logs
       </button>
       <button className={`nav-item${isMitre ? " active" : ""}`} onClick={() => onSelect({ kind: "mitre" })}>
-        🎯 ATT&CK matrix
+        <Icon name="crisis_alert" size={16} /> ATT&CK matrix
       </button>
 
       <div className="nav-section">
         <span>Buckets</span>
         {!readOnly && (
           <button className="linkish" title="New bucket" onClick={() => onEditBucket(null)}>
-            ＋
+            <Icon name="add" size={15} />
           </button>
         )}
       </div>
@@ -59,17 +60,17 @@ export default function Sidebar({
               title={foreign && b.owner_name ? `Shared by ${b.owner_name}` : b.description || undefined}
               onClick={() => onSelect({ kind: "bucket", id: b.id })}
             >
-              🗂 {b.name}
+              <Icon name="folder" size={15} /> {b.name}
               {b.shared && b.owner_id === me.id && (
                 <span className="share-mark" title="Shared with others">
-                  ⇄
+                  <Icon name="share" size={12} />
                 </span>
               )}
               {foreign && b.owner_name && <span className="owner-mark">· {b.owner_name}</span>}
             </button>
             {b.can_edit && (
               <button className="nav-edit" title="Edit bucket" onClick={() => onEditBucket(b)}>
-                ✎
+                <Icon name="edit" size={14} />
               </button>
             )}
           </div>
@@ -81,7 +82,7 @@ export default function Sidebar({
         <span>Tags</span>
         {!readOnly && (
           <button className="linkish" title="Manage tags" onClick={onManageTags}>
-            ＋
+            <Icon name="add" size={15} />
           </button>
         )}
       </div>
@@ -104,7 +105,7 @@ export default function Sidebar({
         <span>Rules</span>
         {!readOnly && (
           <button className="linkish" title="New rule" onClick={() => onEditRule(null)}>
-            ＋
+            <Icon name="add" size={15} />
           </button>
         )}
       </div>
@@ -115,7 +116,7 @@ export default function Sidebar({
             disabled={readOnly}
             onClick={() => !readOnly && onEditRule(r)}
           >
-            ⚙ {r.name}
+            <Icon name="rule" size={15} /> {r.name}
           </button>
         </div>
       ))}
@@ -125,13 +126,13 @@ export default function Sidebar({
           <div className="nav-section">
             <span>Notifications</span>
             <button className="linkish" title="Manage channels" onClick={onManageChannels}>
-              ＋
+              <Icon name="add" size={15} />
             </button>
           </div>
           {channels.map((c) => (
             <div key={c.id} className="nav-item">
               <button className={`nav-label${c.enabled ? "" : " disabled"}`} onClick={onManageChannels}>
-                🔔 {c.name}
+                <Icon name="notifications" size={15} /> {c.name}
               </button>
             </div>
           ))}

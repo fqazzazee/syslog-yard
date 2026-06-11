@@ -216,3 +216,54 @@ textarea.yaml {
 .acct-hint { color: var(--dim); font-size: 12px; margin: 12px 0 0; }
 .linkish { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12.5px; padding: 2px 6px; }
 .linkish:disabled { color: var(--dim); cursor: default; }
+
+/* ===== S10: yard chrome — Material icons, brand, account, About overlay ===== */
+.icon { display: inline-block; vertical-align: -0.18em; flex: none; line-height: 0; }
+h1.brand { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+h1.brand .logo { display: inline-flex; color: var(--accent); }
+.help-btn { display: inline-flex; align-items: center; justify-content: center; padding: 6px; color: var(--dim); background: transparent; border-color: transparent; }
+.help-btn:hover:not(:disabled) { color: var(--fg); border-color: var(--border); }
+.user-btn { display: inline-flex; align-items: center; gap: 5px; }
+.user-btn .caret { color: var(--dim); }
+.user-dropdown button { display: inline-flex; align-items: center; gap: 8px; }
+button.tab, button.live, button.danger, button.primary, button.quiet { display: inline-flex; align-items: center; gap: 6px; }
+.role-badge {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  border-radius: 8px; padding: 1px 7px; background: var(--bg3); color: var(--dim);
+}
+.role-badge.role-admin { color: var(--accent); }
+
+.about-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  display: flex; align-items: flex-start; justify-content: center;
+  z-index: 60; padding: 6vh 16px; overflow: auto;
+}
+.about-modal {
+  --a-panel: var(--bg2); --a-fg: var(--fg); --a-dim: var(--dim);
+  --a-border: var(--border); --a-hover: var(--bg3);
+  width: 600px; max-width: 100%; background: var(--a-panel); color: var(--a-fg);
+  border: 1px solid var(--a-border); border-radius: 12px;
+  padding: 20px 24px 24px; box-shadow: 0 16px 50px rgba(0,0,0,0.55);
+}
+.about-head { display: flex; align-items: center; justify-content: space-between; }
+.about-head h2 { margin: 0; font-size: 20px; display: inline-flex; align-items: center; gap: 8px; }
+.about-head h2 .icon { color: var(--accent); }
+.about-close { background: none; border: none; color: var(--a-dim); cursor: pointer; padding: 4px; border-radius: 6px; display: inline-flex; }
+.about-close:hover { color: var(--a-fg); }
+.about-tagline { color: var(--a-dim); font-size: 13px; line-height: 1.5; margin: 6px 0 14px; }
+.about-meta { display: flex; flex-wrap: wrap; gap: 18px; font-size: 13px; margin-bottom: 4px; }
+.about-k { color: var(--a-dim); text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em; margin-right: 6px; }
+.about-modal h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--a-dim); margin: 18px 0 8px; display: inline-flex; align-items: center; gap: 6px; }
+.about-modal a { color: var(--accent); text-decoration: none; }
+.about-modal a:hover { text-decoration: underline; }
+.about-tools { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.about-tools li { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.45; }
+.about-tools li .icon { color: var(--a-dim); margin-top: 1px; }
+.about-tools li.current .icon { color: var(--accent); }
+.about-here { color: var(--accent); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid var(--a-border); border-radius: 8px; padding: 0 6px; margin-left: 6px; }
+.about-steps { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.55; }
+.about-steps li { margin-bottom: 6px; }
+.about-tip { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: var(--a-dim); background: var(--a-hover); border-radius: 8px; padding: 9px 11px; margin: 10px 0 0; }
+.about-tip .icon { color: var(--accent); margin-top: 1px; }
+.about-docs { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.about-foot { color: var(--a-dim); font-size: 12px; margin: 12px 0 0; }
