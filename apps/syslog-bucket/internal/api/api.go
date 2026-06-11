@@ -19,24 +19,26 @@ import (
 	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
 	"github.com/syslog-yard/syslog-bucket/internal/mitre"
+	"github.com/syslog-yard/syslog-bucket/internal/notify"
 	"github.com/syslog-yard/syslog-bucket/internal/rules"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 	"github.com/syslog-yard/syslog-bucket/internal/ws"
 )
 
 type server struct {
-	store  *store.Store
-	engine *engine.Engine
-	hub    *ws.Hub
-	web    fs.FS
-	hints  map[string]string
+	store    *store.Store
+	engine   *engine.Engine
+	hub      *ws.Hub
+	notifier *notify.Dispatcher
+	web      fs.FS
+	hints    map[string]string
 }
 
-func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, web fs.FS, hints map[string]string, authSvc *auth.Service) http.Handler {
+func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Dispatcher, web fs.FS, hints map[string]string, authSvc *auth.Service) http.Handler {
 	if hints == nil {
 		hints = map[string]string{}
 	}
-	s := &server{store: st, engine: eng, hub: hub, web: web, hints: hints}
+	s := &server{store: st, engine: eng, hub: hub, notifier: notifier, web: web, hints: hints}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/healthz", s.healthz)
 	mux.HandleFunc("GET /api/hints", s.getHints)
@@ -75,6 +77,12 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, web fs.FS, hints map[
 	mux.HandleFunc("PUT /api/rules/{id}", s.updateRule)
 	mux.HandleFunc("DELETE /api/rules/{id}", s.deleteRule)
 	mux.HandleFunc("POST /api/rules/{id}/apply", s.applyRule)
+	mux.HandleFunc("GET /api/channels", s.listChannels)
+	mux.HandleFunc("POST /api/channels", s.createChannel)
+	mux.HandleFunc("PUT /api/channels/{id}", s.updateChannel)
+	mux.HandleFunc("DELETE /api/channels/{id}", s.deleteChannel)
+	mux.HandleFunc("POST /api/channels/{id}/test", s.testChannel)
+	mux.HandleFunc("GET /api/notifications/log", s.notificationLog)
 	mux.HandleFunc("GET /api/ws", s.liveTail)
 	mux.HandleFunc("GET /", s.spa)
 	return secureHeaders(authSvc.Middleware(mux))

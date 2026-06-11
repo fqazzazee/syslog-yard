@@ -63,6 +63,7 @@ through, auto-tagged by rules:
 |-----|--------|
 | [docs/AUTH.md](docs/AUTH.md) | bucket sign-in, roles, OIDC, sharing buckets |
 | [docs/MITRE.md](docs/MITRE.md) | ATT&CK mapping, the matrix view, sorting, device class, valve technique filter |
+| [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md) | webhook / Slack-Teams / SMTP channels fired by the notify rule action |
 | [docs/SECURITY.md](docs/SECURITY.md) | threat model, what's defended, production hardening checklist |
 | [docs/SHARES.md](docs/SHARES.md) | external NAS shares (NFS/CIFS) for log storage |
 | [deploy/quadlet](deploy/quadlet) | rootless podman systemd units |
@@ -82,18 +83,19 @@ through, auto-tagged by rules:
   3-pane triage; virtual buckets (saved searches), color-coded tags, a rules
   engine that tags/prioritizes/suppresses at ingest and retroactively;
   **MITRE ATT&CK mapping at ingest with a kill-chain matrix view**, device-class
-  tagging, and sortable/filterable columns; live tail over WebSocket; local
+  tagging, and sortable/filterable columns; **notifications** (webhook, Slack/
+  Teams, SMTP) fired by a notify rule action; live tail over WebSocket; local
   accounts + OIDC sign-in with admin/analyst/viewer roles; buckets shareable
   per-user, view-only or editable.
 
 ## Status
 
-S8 complete — sorting & MITRE ATT&CK ([docs/MITRE.md](docs/MITRE.md)): the
-bucket maps events to ATT&CK techniques at ingest and offers a kill-chain
-matrix view, device-class tagging, and sortable/filterable columns; the valve
-gains a filter condition that matches techniques so flows can route or drop by
-technique. Builds on S7 (security review: threat model, CSP + hardening
-headers, login throttling) and S6 (local + OIDC sign-in, admin/analyst/viewer
-roles, per-user bucket sharing; the bucket is the yard's identity provider and
-the hose and valve share one sign-in). Next: notifications — webhooks and SMTP
-(S9).
+S9 complete — notifications ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)): a
+rule's notify action delivers matching entries to webhook, Slack/Teams, or SMTP
+channels, off the ingest path, with per-channel rate limiting and a delivery
+log. Builds on S8 (MITRE ATT&CK mapping + matrix view, sorting, device class;
+[docs/MITRE.md](docs/MITRE.md)), S7 (security review: threat model, CSP +
+hardening headers, login throttling), and S6 (local + OIDC sign-in,
+admin/analyst/viewer roles, per-user bucket sharing; the bucket is the yard's
+identity provider and the hose and valve share one sign-in). Next: clean-up,
+more UI hints, and improved docs (S10).

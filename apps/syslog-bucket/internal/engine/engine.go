@@ -84,6 +84,11 @@ func (g *Engine) Apply(e *store.Entry) {
 				e.Priority = a.Priority
 			case "suppress":
 				e.Suppressed = true
+			case "notify":
+				// Queue the delivery; the dispatcher fires it after the
+				// entry is stored. Ingest-only — historical apply never
+				// notifies, so editing a rule can't trigger an alert storm.
+				e.Notifies = append(e.Notifies, store.Notify{ChannelID: a.ChannelID, RuleID: r.ID})
 			}
 		}
 	}

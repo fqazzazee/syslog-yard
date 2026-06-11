@@ -17,6 +17,7 @@ import (
 	"github.com/syslog-yard/syslog-bucket/internal/config"
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
 	"github.com/syslog-yard/syslog-bucket/internal/ingest"
+	"github.com/syslog-yard/syslog-bucket/internal/notify"
 	"github.com/syslog-yard/syslog-bucket/internal/parsers"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 	"github.com/syslog-yard/syslog-bucket/internal/ws"
@@ -113,8 +114,14 @@ func run() error {
 
 	hub := ws.NewHub()
 
+	dispatcher := notify.New(st)
+	if err := dispatcher.Reload(ctx); err != nil {
+		return err
+	}
+	go dispatcher.Run(ctx)
+
 	registry := parsers.NewRegistry(parsers.Generic{})
-	ing := ingest.New(st, registry, eng, hub, cfg.IngestAddr)
+	ing := ingest.New(st, registry, eng, hub, dispatcher, cfg.IngestAddr)
 
 	ingestErr := make(chan error, 1)
 	go func() { ingestErr <- ing.Run(ctx) }()
@@ -137,7 +144,7 @@ func run() error {
 	}
 	httpSrv := &http.Server{
 		Addr:    cfg.APIAddr,
-		Handler: api.New(st, eng, hub, dist, hints, authSvc),
+		Handler: api.New(st, eng, hub, dispatcher, dist, hints, authSvc),
 	}
 	httpErr := make(chan error, 1)
 	go func() {

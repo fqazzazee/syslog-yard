@@ -2,12 +2,13 @@ package rules
 
 import "fmt"
 
-// Action is one ordered rule action (PLAN §5). v1 of the engine ships tag,
-// set_priority, and suppress; assign and notify land with M3/M4.
+// Action is one ordered rule action (PLAN §5). The engine ships tag,
+// set_priority, suppress, and notify (S9); assign lands later.
 type Action struct {
-	Type     string `json:"type"` // "tag" | "set_priority" | "suppress"
-	TagID    int64  `json:"tag_id,omitempty"`
-	Priority int16  `json:"priority,omitempty"` // 0 none … 3 high
+	Type      string `json:"type"` // "tag" | "set_priority" | "suppress" | "notify"
+	TagID     int64  `json:"tag_id,omitempty"`
+	Priority  int16  `json:"priority,omitempty"`   // 0 none … 3 high
+	ChannelID int64  `json:"channel_id,omitempty"` // notify: destination channel
 }
 
 func ValidateActions(actions []Action) error {
@@ -25,6 +26,10 @@ func ValidateActions(actions []Action) error {
 				return fmt.Errorf("priority must be 0-3")
 			}
 		case "suppress":
+		case "notify":
+			if a.ChannelID == 0 {
+				return fmt.Errorf("notify action needs channel_id")
+			}
 		default:
 			return fmt.Errorf("unknown action type %q", a.Type)
 		}

@@ -102,9 +102,33 @@ export interface BucketShare {
 }
 
 export interface Action {
-  type: "tag" | "set_priority" | "suppress";
+  type: "tag" | "set_priority" | "suppress" | "notify";
   tag_id?: number;
   priority?: number;
+  channel_id?: number;
+}
+
+// Notification channel (S9). config is kind-specific; the SMTP password is
+// write-only (blanked on read, with has_password flagging whether one is set).
+export type ChannelKind = "webhook" | "slack" | "smtp";
+
+export interface Channel {
+  id: number;
+  name: string;
+  kind: ChannelKind;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  rate_per_min: number;
+}
+
+export interface Delivery {
+  id: number;
+  channel_id: number;
+  entry_id?: number;
+  rule_id?: number;
+  status: string; // ok | error | dropped
+  detail: string;
+  sent_at: string;
 }
 
 export interface Rule {

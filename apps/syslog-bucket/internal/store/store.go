@@ -73,6 +73,10 @@ type Entry struct {
 	// RuleTags carries (tag, rule) attribution from ingest-time rule
 	// evaluation into InsertEntries; not serialized.
 	RuleTags []RuleTag `json:"-"`
+
+	// Notifies carries pending notifications a notify rule queued at ingest;
+	// the dispatcher fires them after the entry is stored. Not serialized.
+	Notifies []Notify `json:"-"`
 }
 
 // RuleTag records that a rule attached a tag, for the audit trail in
@@ -80,6 +84,12 @@ type Entry struct {
 type RuleTag struct {
 	TagID  int64
 	RuleID int64
+}
+
+// Notify records that a notify rule wants this entry delivered to a channel.
+type Notify struct {
+	ChannelID int64
+	RuleID    int64
 }
 
 // FieldValue and HasTag make *Entry a rules.Record so the shared condition

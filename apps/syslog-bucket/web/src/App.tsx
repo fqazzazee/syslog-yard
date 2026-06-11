@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchAuthInfo,
   fetchBuckets,
+  fetchChannels,
   fetchEntries,
   fetchHints,
   fetchMe,
@@ -11,9 +12,10 @@ import {
   liveTailURL,
   logout,
 } from "./api";
-import type { AuthInfo, Bucket, Entry, Filters, Rule, Selection, SortKey, Stats, Tag, User } from "./types";
+import type { AuthInfo, Bucket, Channel, Entry, Filters, Rule, Selection, SortKey, Stats, Tag, User } from "./types";
 import AccountModal from "./components/AccountModal";
 import BucketModal from "./components/BucketModal";
+import ChannelsModal from "./components/ChannelsModal";
 import EntryDetail from "./components/EntryDetail";
 import FilterBar from "./components/FilterBar";
 import Login from "./components/Login";
@@ -45,6 +47,7 @@ type ModalState =
   | { kind: "bucket"; bucket: Bucket | null }
   | { kind: "rule"; rule: Rule | null }
   | { kind: "tags" }
+  | { kind: "channels" }
   | { kind: "users" }
   | { kind: "account" };
 
@@ -78,6 +81,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
+  const [channels, setChannels] = useState<Channel[]>([]);
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [hints, setHints] = useState<Record<string, string>>({});
   const [menuOpen, setMenuOpen] = useState(false);
@@ -112,10 +116,11 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
 
   const reloadMeta = useCallback(async () => {
     try {
-      const [b, t, r] = await Promise.all([fetchBuckets(), fetchTags(), fetchRules()]);
+      const [b, t, r, ch] = await Promise.all([fetchBuckets(), fetchTags(), fetchRules(), fetchChannels()]);
       setBuckets(b);
       setTags(t);
       setRules(r);
+      setChannels(ch);
     } catch (e) {
       setError(String(e));
     }
@@ -282,6 +287,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
           buckets={buckets}
           tags={tags}
           rules={rules}
+          channels={channels}
           selection={selection}
           me={me}
           readOnly={readOnly}
@@ -292,6 +298,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
           onEditBucket={(bucket) => setModal({ kind: "bucket", bucket })}
           onEditRule={(rule) => setModal({ kind: "rule", rule })}
           onManageTags={() => setModal({ kind: "tags" })}
+          onManageChannels={() => setModal({ kind: "channels" })}
         />
 
         <div className="main-pane">
@@ -330,8 +337,9 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
       </div>
 
       {modal.kind === "bucket" && <BucketModal bucket={modal.bucket} tags={tags} me={me} onClose={closeModal} />}
-      {modal.kind === "rule" && <RuleModal rule={modal.rule} tags={tags} onClose={closeModal} />}
+      {modal.kind === "rule" && <RuleModal rule={modal.rule} tags={tags} channels={channels} onClose={closeModal} />}
       {modal.kind === "tags" && <TagsModal tags={tags} onClose={closeModal} />}
+      {modal.kind === "channels" && <ChannelsModal channels={channels} onClose={closeModal} />}
       {modal.kind === "users" && <UsersModal me={me} onClose={() => closeModal(false)} />}
       {modal.kind === "account" && <AccountModal me={me} onClose={() => closeModal(false)} />}
     </div>

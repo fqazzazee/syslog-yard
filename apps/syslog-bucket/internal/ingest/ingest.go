@@ -49,11 +49,18 @@ type Broadcaster interface {
 	Broadcast([]store.Entry)
 }
 
+// Notifier delivers notifications a notify rule queued on stored entries (the
+// notification dispatcher).
+type Notifier interface {
+	Dispatch([]store.Entry)
+}
+
 type Server struct {
 	store    *store.Store
 	registry *parsers.Registry
 	applier  Applier
 	caster   Broadcaster
+	notifier Notifier
 	addr     string
 
 	queue chan store.Entry
@@ -62,12 +69,13 @@ type Server struct {
 	sources map[string]int64 // "hostname|ip" -> source id
 }
 
-func New(st *store.Store, reg *parsers.Registry, applier Applier, caster Broadcaster, addr string) *Server {
+func New(st *store.Store, reg *parsers.Registry, applier Applier, caster Broadcaster, notifier Notifier, addr string) *Server {
 	return &Server{
 		store:    st,
 		registry: reg,
 		applier:  applier,
 		caster:   caster,
+		notifier: notifier,
 		addr:     addr,
 		queue:    make(chan store.Entry, 10_000),
 		sources:  make(map[string]int64),
@@ -210,8 +218,13 @@ func (s *Server) batcher(ctx context.Context) {
 		}
 		if err := s.store.InsertEntries(context.WithoutCancel(ctx), batch); err != nil {
 			slog.Error("ingest: insert batch", "error", err, "count", len(batch))
-		} else if s.caster != nil {
-			s.caster.Broadcast(batch)
+		} else {
+			if s.caster != nil {
+				s.caster.Broadcast(batch)
+			}
+			if s.notifier != nil {
+				s.notifier.Dispatch(batch)
+			}
 		}
 		batch = batch[:0]
 	}

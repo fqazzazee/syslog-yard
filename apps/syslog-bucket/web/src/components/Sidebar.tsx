@@ -1,10 +1,11 @@
-import type { Bucket, Rule, Selection, Tag, User } from "./../types";
+import type { Bucket, Channel, Rule, Selection, Tag, User } from "./../types";
 import { TagChip } from "./Tags";
 
 interface Props {
   buckets: Bucket[];
   tags: Tag[];
   rules: Rule[];
+  channels: Channel[];
   selection: Selection;
   me: User;
   readOnly: boolean; // viewer role: no create/edit affordances
@@ -12,12 +13,14 @@ interface Props {
   onEditBucket: (b: Bucket | null) => void; // null = new
   onEditRule: (r: Rule | null) => void;
   onManageTags: () => void;
+  onManageChannels: () => void;
 }
 
 export default function Sidebar({
   buckets,
   tags,
   rules,
+  channels,
   selection,
   me,
   readOnly,
@@ -25,6 +28,7 @@ export default function Sidebar({
   onEditBucket,
   onEditRule,
   onManageTags,
+  onManageChannels,
 }: Props) {
   const isAll = selection.kind === "all";
   const isMitre = selection.kind === "mitre" || selection.kind === "technique";
@@ -115,6 +119,25 @@ export default function Sidebar({
           </button>
         </div>
       ))}
+
+      {!readOnly && (
+        <>
+          <div className="nav-section">
+            <span>Notifications</span>
+            <button className="linkish" title="Manage channels" onClick={onManageChannels}>
+              ＋
+            </button>
+          </div>
+          {channels.map((c) => (
+            <div key={c.id} className="nav-item">
+              <button className={`nav-label${c.enabled ? "" : " disabled"}`} onClick={onManageChannels}>
+                🔔 {c.name}
+              </button>
+            </div>
+          ))}
+          {channels.length === 0 && <p className="nav-empty">Webhook / Slack / email destinations.</p>}
+        </>
+      )}
     </nav>
   );
 }

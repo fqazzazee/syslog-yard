@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { applyRule, createRule, deleteRule, updateRule } from "./../api";
-import type { Action, Cond, Rule, Tag } from "./../types";
+import type { Action, Channel, Cond, Rule, Tag } from "./../types";
 import { PRIORITY_NAMES } from "./../types";
 import ConditionBuilder from "./ConditionBuilder";
 import Modal from "./Modal";
@@ -8,10 +8,11 @@ import Modal from "./Modal";
 interface Props {
   rule: Rule | null; // null = create
   tags: Tag[];
+  channels: Channel[];
   onClose: (changed: boolean) => void;
 }
 
-export default function RuleModal({ rule, tags, onClose }: Props) {
+export default function RuleModal({ rule, tags, channels, onClose }: Props) {
   const [name, setName] = useState(rule?.name ?? "");
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
   const [condition, setCondition] = useState<Cond>(rule?.condition ?? {});
@@ -89,10 +90,11 @@ export default function RuleModal({ rule, tags, onClose }: Props) {
       <label>Do</label>
       {actions.map((a, i) => (
         <div className="cond-row" key={i}>
-          <select value={a.type} onChange={(e) => patchAction(i, { type: e.target.value as Action["type"], tag_id: tags[0]?.id, priority: 2 })}>
+          <select value={a.type} onChange={(e) => patchAction(i, { type: e.target.value as Action["type"], tag_id: tags[0]?.id, priority: 2, channel_id: channels[0]?.id })}>
             <option value="tag">Add tag</option>
             <option value="set_priority">Set priority</option>
             <option value="suppress">Suppress</option>
+            <option value="notify">Notify</option>
           </select>
           {a.type === "tag" && (
             <select value={a.tag_id ?? 0} onChange={(e) => patchAction(i, { tag_id: Number(e.target.value) })}>
@@ -112,6 +114,18 @@ export default function RuleModal({ rule, tags, onClose }: Props) {
               ))}
             </select>
           )}
+          {a.type === "notify" &&
+            (channels.length > 0 ? (
+              <select value={a.channel_id ?? 0} onChange={(e) => patchAction(i, { channel_id: Number(e.target.value) })}>
+                {channels.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="hint">no channels — add one under Channels</span>
+            ))}
           {a.type === "suppress" && <span className="hint">hidden from views, kept in storage</span>}
           <button type="button" className="linkish" onClick={() => setActions(actions.filter((_, j) => j !== i))}>
             ✕

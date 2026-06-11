@@ -2,6 +2,8 @@ import type {
   AuthInfo,
   Bucket,
   BucketShare,
+  Channel,
+  Delivery,
   Entry,
   Filters,
   MitreCatalog,
@@ -132,6 +134,21 @@ export const fetchBucketShares = (bucketId: number) =>
   request<{ shares: BucketShare[] }>(`/api/buckets/${bucketId}/shares`).then((b) => b.shares);
 export const putBucketShares = (bucketId: number, shares: BucketShare[]) =>
   send<{ shares: BucketShare[] }>("PUT", `/api/buckets/${bucketId}/shares`, { shares });
+
+// --- notification channels (S9) ---
+
+export const fetchChannels = () =>
+  request<{ channels: Channel[] }>("/api/channels").then((b) => b.channels);
+export const createChannel = (c: Omit<Channel, "id">) => send<Channel>("POST", "/api/channels", c);
+export const updateChannel = (c: Channel) => send<Channel>("PUT", `/api/channels/${c.id}`, c);
+export const deleteChannel = (id: number) =>
+  request<void>(`/api/channels/${id}`, { method: "DELETE" });
+export const testChannel = (id: number) =>
+  send<{ ok: boolean }>("POST", `/api/channels/${id}/test`, {});
+export const fetchNotificationLog = (channelId?: number) =>
+  request<{ deliveries: Delivery[] }>(
+    `/api/notifications/log${channelId ? `?channel_id=${channelId}` : ""}`,
+  ).then((b) => b.deliveries);
 
 export const fetchRules = () => request<{ rules: Rule[] }>("/api/rules").then((b) => b.rules);
 export const createRule = (r: Omit<Rule, "id">) => send<Rule>("POST", "/api/rules", r);
