@@ -14,8 +14,8 @@ func TestBuiltinsRender(t *testing.T) {
 		t.Fatalf("loading builtins: %v", err)
 	}
 	all := store.List()
-	if len(all) != 15 {
-		t.Fatalf("expected 15 builtin presets, got %d", len(all))
+	if len(all) != 17 {
+		t.Fatalf("expected 17 builtin presets, got %d", len(all))
 	}
 	pri := regexp.MustCompile(`^<(\d{1,3})>`)
 	for _, p := range all {

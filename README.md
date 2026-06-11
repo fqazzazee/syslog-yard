@@ -62,7 +62,7 @@ through, auto-tagged by rules:
 | Doc | Covers |
 |-----|--------|
 | [docs/AUTH.md](docs/AUTH.md) | bucket sign-in, roles, OIDC, sharing buckets |
-| [docs/MITRE.md](docs/MITRE.md) | ATT&CK mapping, the matrix view, sorting, device class, valve technique filter |
+| [docs/MITRE.md](docs/MITRE.md) | ATT&CK mapping, the matrix view, the Claroty OT alert view, sorting, device class, valve technique filter |
 | [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md) | webhook / Slack-Teams / SMTP channels fired by the notify rule action |
 | [docs/SECURITY.md](docs/SECURITY.md) | threat model, what's defended, production hardening checklist |
 | [docs/SHARES.md](docs/SHARES.md) | external NAS shares (NFS/CIFS) for log storage |
@@ -71,8 +71,9 @@ through, auto-tagged by rules:
 
 ## Features by tool
 
-- **syslog-hose**: vendor presets (FortiGate, Cisco, Linux, …), rate control,
-  multiple concurrent jobs, live tail of what it sends.
+- **syslog-hose**: vendor presets (FortiGate, Cisco, Linux, OT switches,
+  **Claroty CTD & xDome** OT/ICS CEF alerts, …), rate control, multiple
+  concurrent jobs, live tail of what it sends.
 - **syslog-valve**: node-graph canvas compiled to syslog-ng config with
   syntax check, atomic swap, and one-click rollback; UDP/TCP/TLS listeners
   (one-click self-signed certs); facility/severity/host/program/regex and
@@ -84,8 +85,9 @@ through, auto-tagged by rules:
 - **syslog-bucket**: syslog-ng-fronted ingest into Postgres; email-style
   3-pane triage; virtual buckets (saved searches), color-coded tags, a rules
   engine that tags/prioritizes/suppresses at ingest and retroactively;
-  **MITRE ATT&CK mapping at ingest with a kill-chain matrix view**, device-class
-  tagging, and sortable/filterable columns; **notifications** (webhook, Slack/
+  **MITRE ATT&CK mapping at ingest with a kill-chain matrix view** and a
+  parallel **Claroty-style OT alert view** (Security / Integrity alert types),
+  device-class tagging, and sortable/filterable columns; **notifications** (webhook, Slack/
   Teams, SMTP) fired by a notify rule action; live tail over WebSocket; local
   accounts + OIDC sign-in with admin/analyst/viewer roles; buckets shareable
   per-user, view-only or editable.

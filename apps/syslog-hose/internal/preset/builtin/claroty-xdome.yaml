@@ -1,0 +1,76 @@
+name: claroty-xdome
+vendor: Claroty
+description: Claroty xDome — cloud OT/IoT/IoMT asset & threat detection (CEF alerts; Security + Integrity types across IoT/medical/building assets)
+format: rfc5424
+facility: 16
+appname: xDome
+hostname: xdome-collector
+# xDome is Claroty's cloud platform (OT + enterprise IoT + healthcare IoMT).
+# Same CEF shape as CTD — the Name field (6th pipe) is the alert type that
+# syslog-bucket's internal/otmap keys off. Asset mix leans IoT/IoMT/building.
+events:
+  # --- Security ---
+  - weight: 13
+    severity: 2
+    template: >-
+      CEF:0|Claroty|xDome|2.9|CL-KT|Known Threat|9|cat=Security
+      src={{randIP "rfc1918"}} dst={{randIP "public"}} spt={{randPort}} dpt={{oneOf "443" "8080" "1883" "5683"}}
+      proto=TCP cs1Label=Site cs1={{oneOf "HQ" "Hospital-Wing-B" "DC-East"}}
+      cs3Label=AssetType cs3={{oneOf "IP Camera" "Infusion Pump" "VoIP Phone" "Building Controller"}}
+      msg={{oneOf "Device communicating with known-malicious domain" "Threat intel match on outbound IoT connection" "Known exploit signature against embedded device"}}
+  - weight: 11
+    severity: 3
+    template: >-
+      CEF:0|Claroty|xDome|2.9|CL-SUS|Suspicious Activity|7|cat=Security
+      src={{randIP "rfc1918"}} dst={{randIP "rfc1918"}} spt={{randPort}} dpt={{oneOf "445" "3389" "1883"}}
+      proto=TCP cs3Label=AssetType cs3={{oneOf "IP Camera" "Patient Monitor" "Access Control" "Printer"}}
+      msg={{oneOf "IoT device initiating unexpected lateral connections" "Abnormal data exfil pattern from embedded asset" "Device behaving outside its profile"}}
+  - weight: 9
+    severity: 3
+    template: >-
+      CEF:0|Claroty|xDome|2.9|CL-MAL|Malware / Exploit|8|cat=Security
+      src={{randIP "rfc1918"}} dst={{randIP "public"}} spt={{randPort}} dpt={{oneOf "443" "80" "4444"}}
+      proto=TCP cs3Label=AssetType cs3={{oneOf "Workstation" "Infusion Pump" "Building Controller"}}
+      msg={{oneOf "Exploit attempt against unpatched embedded OS" "Ripple20/URGENT11 style exploit detected" "Malware dropper observed on managed device"}}
+  - weight: 8
+    severity: 4
+    template: >-
+      CEF:0|Claroty|xDome|2.9|CL-POL|Policy Violation|6|cat=Security
+      src={{randIP "rfc1918"}} dst={{randIP "rfc1918"}} spt={{randPort}} dpt={{oneOf "23" "21" "80"}}
+      proto=TCP cs3Label=AssetType cs3={{oneOf "IP Camera" "VoIP Phone" "Printer"}}
+      msg={{oneOf "Cleartext protocol use violates segmentation policy" "Device crossed prohibited VLAN boundary" "Disallowed service exposed by IoT asset"}}
+  - weight: 9
+    severity: 4
+    template: >-
+      CEF:0|Claroty|xDome|2.9|CL-SCAN|Network Scan|6|cat=Security
+      src={{randIP "rfc1918"}} dst={{randIP "rfc1918"}} spt={{randPort}} dpt={{oneOf "445" "3389" "80" "23"}}
+      proto=TCP cs1Label=Site cs1={{oneOf "HQ" "Hospital-Wing-B"}}
+      msg={{oneOf "Host scanning IoT subnet" "Port sweep against medical device VLAN" "Discovery scan from compromised endpoint"}}
+  - weight: 8
+    severity: 3
+    template: >-
+      CEF:0|Claroty|xDome|2.9|CL-UA|Unauthorized Access|7|cat=Security
+      src={{randIP "rfc1918"}} dst={{randIP "rfc1918"}} spt={{randPort}} dpt={{oneOf "22" "3389" "443"}}
+      proto=TCP cs3Label=AssetType cs3={{oneOf "Patient Monitor" "Access Control" "Building Controller"}}
+      msg={{oneOf "Access to medical device from unapproved subnet" "Default-credential login to IoT device" "Remote session to restricted asset"}}
+  # --- Integrity ---
+  - weight: 10
+    severity: 6
+    template: >-
+      CEF:0|Claroty|xDome|2.9|CL-NEWA|New Asset|4|cat=Integrity
+      src={{randIP "rfc1918"}} cs1Label=Site cs1={{oneOf "HQ" "Hospital-Wing-B" "DC-East"}}
+      cs3Label=AssetType cs3={{oneOf "IP Camera" "Infusion Pump" "VoIP Phone" "Smart TV" "Building Sensor"}}
+      msg={{oneOf "Newly discovered IoT asset on the network" "Unmanaged device fingerprinted" "First-seen device joined segment"}}
+  - weight: 8
+    severity: 5
+    template: >-
+      CEF:0|Claroty|xDome|2.9|CL-CHG|Asset Change|5|cat=Integrity
+      src={{randIP "rfc1918"}} cs3Label=AssetType cs3={{oneOf "IP Camera" "Infusion Pump" "Patient Monitor"}}
+      msg={{oneOf "Firmware version changed on device" "Asset property (OS/role) changed" "Device moved to a new VLAN"}}
+  - weight: 8
+    severity: 5
+    template: >-
+      CEF:0|Claroty|xDome|2.9|CL-BASE|Baseline Deviation|5|cat=Integrity
+      src={{randIP "rfc1918"}} dst={{randIP "rfc1918"}} spt={{randPort}} dpt={{oneOf "1883" "5683" "443"}}
+      proto={{oneOf "TCP" "UDP"}} cs3Label=AssetType cs3={{oneOf "IP Camera" "Building Controller" "Patient Monitor"}}
+      msg={{oneOf "Communication not in device baseline" "First-seen destination for asset" "Traffic pattern deviates from learned profile"}}

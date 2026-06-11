@@ -72,3 +72,30 @@ program. The catalog is served at the valve's `GET /api/mitre`.
 > (condition-AST detections over parsed fields) and
 > `apps/syslog-valve/internal/mitre` (syslog-ng patterns over the raw line)
 > share the same IDs, names, and tactics by convention.
+
+## OT alerts (Claroty CTD / xDome)
+
+Industrial/OT monitoring tools — **Claroty CTD** (Continuous Threat Detection)
+and **Claroty xDome** — raise alerts rather than raw flow logs, and group them
+into two classes: **Security** (threat-oriented) and **Integrity** (changes to
+asset/network/operational state). syslog-bucket mirrors that with a second
+mapping alongside ATT&CK.
+
+- **Generate** — syslog-hose ships `claroty-ctd` and `claroty-xdome` presets
+  that emit CEF over syslog the way the real sensors do (ICS ports/protocols —
+  Modbus, EtherNet/IP, S7comm, DNP3, BACnet — and OT/IoT/IoMT asset types),
+  spanning the alert types below.
+- **Map** — at ingest, `internal/otmap` stamps each entry with the Claroty
+  alert-type codes it matches (stored in `entries.ot`), keyed off the CEF alert
+  name. `internal/classify` marks these entries `device_class = ot`.
+- **View** — the sidebar's **OT alerts** opens a matrix with a **Security** and
+  an **Integrity** column; each alert type shows its count in the current
+  window and drills into the matching entries. An `ot` condition leaf makes the
+  codes usable in buckets, rules and search, exactly like `mitre`.
+
+| Class | Alert types |
+|-------|-------------|
+| **Security** | Known Threat · Suspicious Activity · Network Scan · Unauthorized Access · Policy Violation · Malware / Exploit |
+| **Integrity** | New Asset · Asset Change · Baseline Deviation · Configuration Download · PLC Mode Change · IP/MAC Conflict |
+
+Endpoints: `GET /api/ot` (catalog) and `GET /api/ot/summary` (per-alert counts).

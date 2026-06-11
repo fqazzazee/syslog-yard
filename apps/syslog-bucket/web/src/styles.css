@@ -1069,3 +1069,10 @@ h1.brand .logo { display: inline-flex; color: var(--accent); }
 .about-tip .icon { color: var(--accent); margin-top: 1px; }
 .about-docs { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
 .about-foot { color: var(--a-dim); font-size: 12px; margin: 12px 0 0; }
+
+/* OT view — reuses the ATT&CK matrix layout (OTView.tsx); category accents */
+.ot-cat.ot-security { color: var(--sev-crit); }
+.ot-cat.ot-integrity { color: var(--sev-notice); }
+.ot-matrix .mitre-col { min-width: 240px; }
+.mitre-chip.ot-chip { color: var(--sev-warn); border-color: #5b4a1c; cursor: default; }
+.mitre-chip.ot-chip:hover { border-color: #6d5a22; color: var(--sev-warn); }

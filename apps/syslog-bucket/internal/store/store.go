@@ -68,6 +68,7 @@ type Entry struct {
 	Suppressed  bool            `json:"suppressed"`
 	DeviceClass string          `json:"device_class"`
 	Mitre       []string        `json:"mitre"`
+	OT          []string        `json:"ot"`
 	TagIDs      []int64         `json:"tag_ids"`
 
 	// RuleTags carries (tag, rule) attribution from ingest-time rule
@@ -108,6 +109,8 @@ func (e *Entry) FieldValue(name string) (any, bool) {
 		return e.DeviceClass, true
 	case "mitre":
 		return e.Mitre, true
+	case "ot":
+		return e.OT, true
 	case "severity":
 		return int64(e.Severity), true
 	case "priority":
@@ -179,10 +182,10 @@ func (s *Store) InsertEntries(ctx context.Context, entries []Entry) error {
 	if len(entries) == 0 {
 		return nil
 	}
-	const cols = 14
+	const cols = 15
 	var sb strings.Builder
 	sb.WriteString(`INSERT INTO entries
-		(received_at, device_time, source_id, facility, severity, app_name, host, msg, structured, priority, status, suppressed, device_class, mitre) VALUES `)
+		(received_at, device_time, source_id, facility, severity, app_name, host, msg, structured, priority, status, suppressed, device_class, mitre, ot) VALUES `)
 	args := make([]any, 0, len(entries)*cols)
 	for i := range entries {
 		e := &entries[i]
@@ -193,6 +196,10 @@ func (s *Store) InsertEntries(ctx context.Context, entries []Entry) error {
 		mitre := e.Mitre
 		if mitre == nil {
 			mitre = []string{}
+		}
+		ot := e.OT
+		if ot == nil {
+			ot = []string{}
 		}
 		if i > 0 {
 			sb.WriteByte(',')
@@ -206,7 +213,7 @@ func (s *Store) InsertEntries(ctx context.Context, entries []Entry) error {
 		}
 		sb.WriteByte(')')
 		args = append(args, e.ReceivedAt, e.DeviceTime, e.SourceID, e.Facility, e.Severity,
-			e.AppName, e.Host, e.Msg, structured, e.Priority, e.Status, e.Suppressed, e.DeviceClass, mitre)
+			e.AppName, e.Host, e.Msg, structured, e.Priority, e.Status, e.Suppressed, e.DeviceClass, mitre, ot)
 	}
 	// RETURNING rows come back in VALUES order for a plain INSERT.
 	sb.WriteString(" RETURNING id")
@@ -333,7 +340,7 @@ func (s *Store) ListEntries(ctx context.Context, f EntryFilter) ([]Entry, error)
 
 	sql := `SELECT e.id, e.received_at, e.device_time, e.source_id, COALESCE(s.ip, ''),
 	               e.facility, e.severity, e.app_name, e.host, e.msg, e.structured, e.priority, e.status, e.suppressed,
-	               e.device_class, e.mitre,
+	               e.device_class, e.mitre, e.ot,
 	               COALESCE((SELECT array_agg(et.tag_id ORDER BY et.tag_id) FROM entry_tags et WHERE et.entry_id = e.id), '{}')
 	        FROM entries e LEFT JOIN sources s ON s.id = e.source_id`
 	if len(conds) > 0 {
@@ -352,7 +359,7 @@ func (s *Store) ListEntries(ctx context.Context, f EntryFilter) ([]Entry, error)
 		var e Entry
 		if err := rows.Scan(&e.ID, &e.ReceivedAt, &e.DeviceTime, &e.SourceID, &e.SourceIP,
 			&e.Facility, &e.Severity, &e.AppName, &e.Host, &e.Msg, &e.Structured, &e.Priority, &e.Status,
-			&e.Suppressed, &e.DeviceClass, &e.Mitre, &e.TagIDs); err != nil {
+			&e.Suppressed, &e.DeviceClass, &e.Mitre, &e.OT, &e.TagIDs); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
@@ -379,6 +386,42 @@ func (s *Store) MitreSummary(ctx context.Context, f EntryFilter) (map[string]int
 		conds = append(conds, "NOT e.suppressed")
 	}
 	sql := `SELECT t, count(*) FROM entries e, unnest(e.mitre) t WHERE ` +
+		strings.Join(conds, " AND ") + ` GROUP BY t`
+	rows, err := s.Pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var id string
+		var n int64
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}
+
+// OTSummary counts entries per Claroty alert-type code, scoped by the filter.
+// It mirrors MitreSummary over the e.ot array.
+func (s *Store) OTSummary(ctx context.Context, f EntryFilter) (map[string]int64, error) {
+	var conds []string
+	var args []any
+	arg := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	condSQL, err := f.Cond.CompileSQL(arg)
+	if err != nil {
+		return nil, fmt.Errorf("compile condition: %w", err)
+	}
+	conds = append(conds, condSQL)
+	if !f.IncludeSuppressed {
+		conds = append(conds, "NOT e.suppressed")
+	}
+	sql := `SELECT t, count(*) FROM entries e, unnest(e.ot) t WHERE ` +
 		strings.Join(conds, " AND ") + ` GROUP BY t`
 	rows, err := s.Pool.Query(ctx, sql, args...)
 	if err != nil {

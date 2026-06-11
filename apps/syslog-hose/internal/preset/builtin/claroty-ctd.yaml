@@ -1,0 +1,84 @@
+name: claroty-ctd
+vendor: Claroty
+description: Claroty CTD — OT/ICS continuous threat detection (CEF alerts; Security + Integrity types over Modbus/EtherNet-IP/S7/DNP3)
+format: rfc5424
+facility: 16
+appname: CTD
+hostname: ctd-sensor
+# Claroty CTD emits CEF over syslog. The CEF Name field (6th pipe) is the
+# alert type — syslog-bucket's internal/otmap keys off "|<Name>|". Security
+# alerts run hot (so they pass a severity filter to the bucket); integrity
+# alerts span notice/info. ICS ports: Modbus 502, EtherNet/IP 44818,
+# S7comm 102, DNP3 20000, BACnet 47808.
+events:
+  # --- Security ---
+  - weight: 14
+    severity: 2
+    template: >-
+      CEF:0|Claroty|CTD|4.12.1|CL-KT|Known Threat|9|cat=Security
+      src={{randIP "rfc1918"}} dst={{randIP "rfc1918"}} spt={{randPort}}
+      dpt={{oneOf "502" "44818" "102" "20000"}} proto={{oneOf "TCP" "UDP"}}
+      cs1Label=Site cs1={{oneOf "Plant-A" "Plant-B" "Substation-3"}}
+      cs2Label=Protocol cs2={{oneOf "Modbus" "EtherNet/IP" "S7comm" "DNP3"}}
+      cs3Label=AssetType cs3={{oneOf "PLC" "RTU" "HMI"}}
+      msg={{oneOf "Threat intel match - malicious host communicating with PLC" "Snort 1:2024897 - known ICS exploit attempt" "Known malware C2 beacon from OT asset"}}
+  - weight: 12
+    severity: 3
+    template: >-
+      CEF:0|Claroty|CTD|4.12.1|CL-SUS|Suspicious Activity|7|cat=Security
+      src={{randIP "rfc1918"}} dst={{randIP "rfc1918"}} spt={{randPort}}
+      dpt={{oneOf "502" "44818" "102"}} proto=TCP cs1Label=Site cs1={{oneOf "Plant-A" "Plant-B"}}
+      cs2Label=Protocol cs2={{oneOf "Modbus" "EtherNet/IP" "S7comm"}}
+      msg={{oneOf "Unusual write to controller outside maintenance window" "Engineering command from non-engineering host" "Anomalous function code volume to PLC"}}
+  - weight: 10
+    severity: 4
+    template: >-
+      CEF:0|Claroty|CTD|4.12.1|CL-SCAN|Network Scan|6|cat=Security
+      src={{randIP "rfc1918"}} dst={{randIP "rfc1918"}} spt={{randPort}}
+      dpt={{oneOf "502" "102" "44818" "20000"}} proto=TCP cs1Label=Site cs1={{oneOf "Plant-A" "Substation-3"}}
+      msg={{oneOf "Sweep across OT subnet - 64 hosts probed" "Sequential port scan against control network" "Modbus device enumeration detected"}}
+  - weight: 9
+    severity: 3
+    template: >-
+      CEF:0|Claroty|CTD|4.12.1|CL-UA|Unauthorized Access|7|cat=Security
+      src={{randIP "rfc1918"}} dst={{randIP "rfc1918"}} spt={{randPort}}
+      dpt={{oneOf "22" "23" "3389" "502"}} proto=TCP cs1Label=Site cs1={{oneOf "Plant-A" "Plant-B"}}
+      cs3Label=AssetType cs3={{oneOf "PLC" "HMI" "Engineering Workstation"}}
+      msg={{oneOf "Login to controller from unapproved IT host" "Remote access to OT asset outside allowed list" "Failed auth burst against HMI"}}
+  # --- Integrity ---
+  - weight: 11
+    severity: 4
+    template: >-
+      CEF:0|Claroty|CTD|4.12.1|CL-BASE|Baseline Deviation|5|cat=Integrity
+      src={{randIP "rfc1918"}} dst={{randIP "rfc1918"}} spt={{randPort}}
+      dpt={{oneOf "502" "44818" "102" "47808"}} proto={{oneOf "TCP" "UDP"}}
+      cs2Label=Protocol cs2={{oneOf "Modbus" "EtherNet/IP" "BACnet"}}
+      msg={{oneOf "New conversation not in learned baseline" "First-seen protocol between assets" "Connection violates baseline policy"}}
+  - weight: 9
+    severity: 5
+    template: >-
+      CEF:0|Claroty|CTD|4.12.1|CL-CFG|Configuration Download|6|cat=Integrity
+      src={{randIP "rfc1918"}} dst={{randIP "rfc1918"}} spt={{randPort}}
+      dpt={{oneOf "102" "44818" "502"}} proto=TCP cs1Label=Site cs1={{oneOf "Plant-A" "Plant-B"}}
+      cs3Label=AssetType cs3={{oneOf "PLC" "RTU"}}
+      msg={{oneOf "Code download to controller (program changed)" "Configuration write to PLC by engineering station" "Firmware transfer to RTU"}}
+  - weight: 8
+    severity: 4
+    template: >-
+      CEF:0|Claroty|CTD|4.12.1|CL-MODE|PLC Mode Change|6|cat=Integrity
+      src={{randIP "rfc1918"}} dst={{randIP "rfc1918"}} spt={{randPort}}
+      dpt={{oneOf "102" "44818"}} proto=TCP cs3Label=AssetType cs3=PLC
+      msg={{oneOf "PLC key switch changed Run to Program" "Controller stopped (Run to Stop)" "PLC mode set to Remote"}}
+  - weight: 9
+    severity: 6
+    template: >-
+      CEF:0|Claroty|CTD|4.12.1|CL-NEWA|New Asset|4|cat=Integrity
+      src={{randIP "rfc1918"}} cs3Label=AssetType cs3={{oneOf "PLC" "HMI" "RTU" "IO Module" "Drive"}}
+      cs1Label=Site cs1={{oneOf "Plant-A" "Plant-B" "Substation-3"}}
+      msg={{oneOf "Previously unseen asset discovered on OT network" "New device joined control segment" "Unmanaged asset detected"}}
+  - weight: 6
+    severity: 4
+    template: >-
+      CEF:0|Claroty|CTD|4.12.1|CL-CONF|IP/MAC Conflict|5|cat=Integrity
+      src={{randIP "rfc1918"}} dst={{randIP "rfc1918"}} cs1Label=Site cs1={{oneOf "Plant-A" "Plant-B"}}
+      msg={{oneOf "Duplicate IP detected between two assets" "MAC/IP binding changed for controller" "Address conflict on control VLAN"}}

@@ -37,6 +37,9 @@ type Cond struct {
 	// Entry was mapped to this MITRE ATT&CK technique at ingest.
 	Mitre string `json:"mitre,omitempty"`
 
+	// Entry was mapped to this Claroty OT alert-type code at ingest.
+	OT string `json:"ot,omitempty"`
+
 	// Entry was received within the trailing window.
 	LastSeconds int64 `json:"last_seconds,omitempty"`
 }
@@ -82,7 +85,7 @@ func (c Cond) kindCount() int {
 	n := 0
 	for _, set := range []bool{
 		len(c.All) > 0, len(c.Any) > 0, c.Not != nil,
-		c.Field != "", c.Text != "", c.TagID != 0, c.Mitre != "", c.LastSeconds != 0,
+		c.Field != "", c.Text != "", c.TagID != 0, c.Mitre != "", c.OT != "", c.LastSeconds != 0,
 	} {
 		if set {
 			n++
@@ -174,6 +177,8 @@ func (c Cond) compile(arg func(any) string) string {
 		return "EXISTS (SELECT 1 FROM entry_tags ct WHERE ct.entry_id = e.id AND ct.tag_id = " + arg(c.TagID) + ")"
 	case c.Mitre != "":
 		return arg(c.Mitre) + " = ANY(e.mitre)"
+	case c.OT != "":
+		return arg(c.OT) + " = ANY(e.ot)"
 	case c.LastSeconds > 0:
 		return "e.received_at > now() - make_interval(secs => " + arg(c.LastSeconds) + ")"
 	default:
@@ -279,6 +284,18 @@ func (c Cond) Match(rec Record) bool {
 		}
 		for _, id := range ids {
 			if id == c.Mitre {
+				return true
+			}
+		}
+		return false
+	case c.OT != "":
+		v, ok := rec.FieldValue("ot")
+		ids, _ := v.([]string)
+		if !ok {
+			return false
+		}
+		for _, id := range ids {
+			if id == c.OT {
 				return true
 			}
 		}

@@ -132,6 +132,19 @@ export default function EntryDetail({ entry, tags, tagsById, readOnly, onClose, 
         </>
       )}
 
+      {(entry.ot ?? []).length > 0 && (
+        <>
+          <h3>OT alerts</h3>
+          <div className="detail-mitre">
+            {entry.ot.map((id) => (
+              <span key={id} className="mitre-chip ot-chip" title="Claroty OT alert type">
+                {id}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+
       <h3>Message</h3>
       <pre className="raw">{entry.msg}</pre>
 

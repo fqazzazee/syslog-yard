@@ -19,6 +19,7 @@ import (
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
 	"github.com/syslog-yard/syslog-bucket/internal/mitre"
 	"github.com/syslog-yard/syslog-bucket/internal/notify"
+	"github.com/syslog-yard/syslog-bucket/internal/otmap"
 	"github.com/syslog-yard/syslog-bucket/internal/rules"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 	"github.com/syslog-yard/syslog-bucket/internal/ws"
@@ -43,6 +44,8 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Disp
 	mux.HandleFunc("GET /api/hints", s.getHints)
 	mux.HandleFunc("GET /api/mitre", s.getMitre)
 	mux.HandleFunc("GET /api/mitre/summary", s.getMitreSummary)
+	mux.HandleFunc("GET /api/ot", s.getOT)
+	mux.HandleFunc("GET /api/ot/summary", s.getOTSummary)
 	mux.HandleFunc("POST /api/auth/login", authSvc.HandleLogin)
 	mux.HandleFunc("POST /api/auth/logout", authSvc.HandleLogout)
 	mux.HandleFunc("GET /api/auth/me", authSvc.HandleMe)
@@ -126,6 +129,30 @@ func (s *server) getMitreSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"counts": counts})
 }
 
+// getOT returns the Claroty-style OT alert catalog served at /api/ot.
+func (s *server) getOT(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, otmap.Get())
+}
+
+// getOTSummary counts entries per OT alert-type code, scoped by the same
+// filter query the entry list uses.
+func (s *server) getOTSummary(w http.ResponseWriter, r *http.Request) {
+	cond, err := s.condFromRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	counts, err := s.store.OTSummary(r.Context(), store.EntryFilter{
+		Cond:              cond,
+		IncludeSuppressed: r.URL.Query().Get("include_suppressed") == "true",
+	})
+	if err != nil {
+		s.internalError(w, "ot summary", err)
+		return
+	}
+	writeJSON(w, map[string]any{"counts": counts})
+}
+
 // condFromRequest translates the SPA's filter query parameters — plus an
 // optional bucket — into one condition tree, the same grammar buckets and
 // rules use — one grammar, three uses.
@@ -193,6 +220,25 @@ func (s *server) condFromRequest(r *http.Request) (rules.Cond, error) {
 		}
 		if len(any) == 0 {
 			return rules.Cond{}, errors.New("unknown tactic")
+		}
+		all = append(all, rules.Cond{Any: any})
+	}
+	if v := q.Get("ot"); v != "" {
+		all = append(all, rules.Cond{OT: v})
+	}
+	if v := q.Get("otcat"); v != "" {
+		// A category matches any of its alert types known to this build.
+		var any []rules.Cond
+		for _, a := range otmap.Get().AlertTypes {
+			for _, c := range a.Categories {
+				if c == v {
+					any = append(any, rules.Cond{OT: a.ID})
+					break
+				}
+			}
+		}
+		if len(any) == 0 {
+			return rules.Cond{}, errors.New("unknown ot category")
 		}
 		all = append(all, rules.Cond{Any: any})
 	}

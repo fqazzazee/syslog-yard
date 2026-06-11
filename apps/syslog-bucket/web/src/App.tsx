@@ -23,6 +23,7 @@ import FilterBar from "./components/FilterBar";
 import Login from "./components/Login";
 import LogTable from "./components/LogTable";
 import MitreView from "./components/MitreView";
+import OTView from "./components/OTView";
 import RuleModal from "./components/RuleModal";
 import Sidebar from "./components/Sidebar";
 import TagsModal from "./components/TagsModal";
@@ -133,8 +134,9 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
     void reloadMeta();
   }, [reloadMeta]);
 
-  // The ATT&CK matrix renders its own data; the entry list/tail pause there.
-  const isMatrix = selection.kind === "mitre";
+  // The matrix views (ATT&CK / OT) render their own data; the entry list and
+  // live tail pause while one is open.
+  const isMatrix = selection.kind === "mitre" || selection.kind === "ot";
   // A column sort returns one ranked page; time sort streams + paginates.
   const pageLimit = filters.sort === "time" ? 200 : 1000;
 
@@ -187,6 +189,11 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
 
   const onSelectTechnique = (id: string) => {
     setSelection({ kind: "technique", id });
+    setSelected(null);
+  };
+
+  const onSelectAlert = (id: string) => {
+    setSelection({ kind: "otalert", id });
     setSelected(null);
   };
 
@@ -247,7 +254,11 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
           ? "ATT&CK matrix"
           : selection.kind === "technique"
             ? `ATT&CK ${selection.id}`
-            : `Tag: ${tagsById.get(selection.id)?.name ?? selection.id}`;
+            : selection.kind === "ot"
+              ? "OT alerts"
+              : selection.kind === "otalert"
+                ? `OT ${selection.id}`
+                : `Tag: ${tagsById.get(selection.id)?.name ?? selection.id}`;
 
   return (
     <div className="app">
@@ -326,7 +337,9 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
           <FilterBar filters={filters} onChange={setFilters} />
           {error && <div className="error">{error}</div>}
           <main className="content">
-            {isMatrix ? (
+            {selection.kind === "ot" ? (
+              <OTView filters={filters} selection={selection} onSelectAlert={onSelectAlert} />
+            ) : isMatrix ? (
               <MitreView filters={filters} selection={selection} onSelectTechnique={onSelectTechnique} />
             ) : (
               <>

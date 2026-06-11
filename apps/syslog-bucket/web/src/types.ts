@@ -15,6 +15,7 @@ export interface Entry {
   suppressed: boolean;
   device_class: string;
   mitre: string[]; // ATT&CK technique IDs mapped at ingest
+  ot: string[]; // Claroty OT alert-type codes mapped at ingest
   tag_ids: number[];
 }
 
@@ -33,6 +34,23 @@ export interface MitreTechnique {
 export interface MitreCatalog {
   tactics: MitreTactic[];
   techniques: MitreTechnique[];
+}
+
+// Claroty-style OT alert catalog served by /api/ot. Categories (Security,
+// Integrity) are the columns; alert types are the cells.
+export interface OTCategory {
+  id: string;
+  short: string;
+  name: string;
+}
+export interface OTAlertType {
+  id: string; // short code, e.g. "CL-KT"
+  name: string;
+  categories: string[]; // category short names
+}
+export interface OTCatalog {
+  categories: OTCategory[];
+  alert_types: OTAlertType[];
 }
 
 // Sort key for the log table. "time" is the default (newest first).
@@ -159,7 +177,9 @@ export type Selection =
   | { kind: "bucket"; id: number }
   | { kind: "tag"; id: number }
   | { kind: "mitre" }
-  | { kind: "technique"; id: string };
+  | { kind: "technique"; id: string }
+  | { kind: "ot" }
+  | { kind: "otalert"; id: string };
 
 export const SEVERITY_NAMES = [
   "emerg",

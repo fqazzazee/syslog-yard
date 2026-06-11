@@ -28,6 +28,7 @@ var appHints = []struct {
 	{"pfsense", Firewall}, {"opnsense", Firewall}, {"filterlog", Firewall},
 	{"mikrotik", Network}, {"unifi", Network}, {"routeros", Network}, {"switch", Network},
 	{"moxa", OT}, {"hirschmann", OT}, {"plc", OT}, {"scada", OT},
+	{"claroty", OT}, {"ctd", OT}, {"xdome", OT}, {"medigate", OT},
 	{"snare", Windows}, {"nxlog", Windows}, {"microsoft-windows", Windows}, {"winlogon", Windows},
 	{"sshd", Host}, {"sudo", Host}, {"cron", Host}, {"systemd", Host},
 	{"kernel", Host}, {"pam_unix", Host},
@@ -40,6 +41,7 @@ var msgHints = []struct {
 	sub   string
 	class string
 }{
+	{"cef:0|claroty", OT},    // Claroty CTD / xDome CEF
 	{`devid="fgt`, Firewall}, // FortiGate
 	{"%asa-", Firewall},      // Cisco ASA
 	{"%pan-", Firewall},      // Palo Alto PAN-OS

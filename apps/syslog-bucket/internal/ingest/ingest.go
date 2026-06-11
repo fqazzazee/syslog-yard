@@ -15,6 +15,7 @@ import (
 
 	"github.com/syslog-yard/syslog-bucket/internal/classify"
 	"github.com/syslog-yard/syslog-bucket/internal/mitre"
+	"github.com/syslog-yard/syslog-bucket/internal/otmap"
 	"github.com/syslog-yard/syslog-bucket/internal/parsers"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
@@ -181,6 +182,7 @@ func (s *Server) toEntry(ctx context.Context, rec record) (store.Entry, error) {
 	// MITRE technique: parsers have populated structured fields by now.
 	e.DeviceClass = classify.Class(e.AppName, e.Msg)
 	e.Mitre = mitre.Map(&e)
+	e.OT = otmap.Map(&e)
 	if s.applier != nil {
 		s.applier.Apply(&e)
 	}

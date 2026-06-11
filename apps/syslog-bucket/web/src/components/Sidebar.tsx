@@ -33,6 +33,7 @@ export default function Sidebar({
 }: Props) {
   const isAll = selection.kind === "all";
   const isMitre = selection.kind === "mitre" || selection.kind === "technique";
+  const isOT = selection.kind === "ot" || selection.kind === "otalert";
   return (
     <nav className="sidebar">
       <button className={`nav-item${isAll ? " active" : ""}`} onClick={() => onSelect({ kind: "all" })}>
@@ -40,6 +41,9 @@ export default function Sidebar({
       </button>
       <button className={`nav-item${isMitre ? " active" : ""}`} onClick={() => onSelect({ kind: "mitre" })}>
         <Icon name="crisis_alert" size={16} /> ATT&CK matrix
+      </button>
+      <button className={`nav-item${isOT ? " active" : ""}`} onClick={() => onSelect({ kind: "ot" })}>
+        <Icon name="factory" size={16} /> OT alerts
       </button>
 
       <div className="nav-section">

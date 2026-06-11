@@ -7,6 +7,7 @@ import type {
   Entry,
   Filters,
   MitreCatalog,
+  OTCatalog,
   Rule,
   Selection,
   Stats,
@@ -19,6 +20,7 @@ export function filterParams(f: Filters, sel: Selection): URLSearchParams {
   if (sel.kind === "bucket") params.set("bucket_id", String(sel.id));
   if (sel.kind === "tag") params.set("tag_id", String(sel.id));
   if (sel.kind === "technique") params.set("mitre", sel.id);
+  if (sel.kind === "otalert") params.set("ot", sel.id);
   if (f.q) params.set("q", f.q);
   if (f.host) params.set("host", f.host);
   if (f.app) params.set("app", f.app);
@@ -89,6 +91,12 @@ export const fetchMitreSummary = (f: Filters, sel: Selection) =>
   request<{ counts: Record<string, number> }>(`/api/mitre/summary?${filterParams(f, sel)}`).then(
     (b) => b.counts,
   );
+
+export const fetchOt = () => request<OTCatalog>("/api/ot");
+
+// Per-alert-type counts under the current filters (drives the OT view).
+export const fetchOtSummary = (f: Filters, sel: Selection) =>
+  request<{ counts: Record<string, number> }>(`/api/ot/summary?${filterParams(f, sel)}`).then((b) => b.counts);
 
 export const patchEntry = (id: number, patch: { status?: string; priority?: number }) =>
   send<Entry>("PATCH", `/api/entries/${id}`, patch);
