@@ -89,6 +89,12 @@ export default function EntryDetail({ entry, tags, tagsById, readOnly, onClose, 
         </dd>
         <dt>App</dt>
         <dd>{entry.app_name || "—"}</dd>
+        {entry.device_class && (
+          <>
+            <dt>Device class</dt>
+            <dd>{entry.device_class}</dd>
+          </>
+        )}
         <dt>Severity</dt>
         <dd>
           <span className={`badge sev-${entry.severity}`}>
@@ -102,6 +108,26 @@ export default function EntryDetail({ entry, tags, tagsById, readOnly, onClose, 
           </>
         )}
       </dl>
+
+      {(entry.mitre ?? []).length > 0 && (
+        <>
+          <h3>ATT&CK techniques</h3>
+          <div className="detail-mitre">
+            {entry.mitre.map((id) => (
+              <a
+                key={id}
+                className="mitre-chip"
+                href={`https://attack.mitre.org/techniques/${id.replace(".", "/")}/`}
+                target="_blank"
+                rel="noreferrer"
+                title="Open on attack.mitre.org"
+              >
+                {id}
+              </a>
+            ))}
+          </div>
+        </>
+      )}
 
       <h3>Message</h3>
       <pre className="raw">{entry.msg}</pre>

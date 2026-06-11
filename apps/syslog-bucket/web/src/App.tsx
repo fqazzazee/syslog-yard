@@ -11,13 +11,14 @@ import {
   liveTailURL,
   logout,
 } from "./api";
-import type { AuthInfo, Bucket, Entry, Filters, Rule, Selection, Stats, Tag, User } from "./types";
+import type { AuthInfo, Bucket, Entry, Filters, Rule, Selection, SortKey, Stats, Tag, User } from "./types";
 import AccountModal from "./components/AccountModal";
 import BucketModal from "./components/BucketModal";
 import EntryDetail from "./components/EntryDetail";
 import FilterBar from "./components/FilterBar";
 import Login from "./components/Login";
 import LogTable from "./components/LogTable";
+import MitreView from "./components/MitreView";
 import RuleModal from "./components/RuleModal";
 import Sidebar from "./components/Sidebar";
 import TagsModal from "./components/TagsModal";
@@ -27,7 +28,17 @@ import { useLiveTail } from "./hooks";
 
 const MAX_ROWS = 2000;
 
-const initialFilters: Filters = { q: "", host: "", app: "", severity: "", status: "", range: "60" };
+const initialFilters: Filters = {
+  q: "",
+  host: "",
+  app: "",
+  severity: "",
+  status: "",
+  deviceClass: "",
+  range: "60",
+  sort: "time",
+  desc: true,
+};
 
 type ModalState =
   | { kind: "none" }
@@ -114,10 +125,16 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
     void reloadMeta();
   }, [reloadMeta]);
 
-  // Full reload when filters or the selected bucket/tag change.
+  // The ATT&CK matrix renders its own data; the entry list/tail pause there.
+  const isMatrix = selection.kind === "mitre";
+  // A column sort returns one ranked page; time sort streams + paginates.
+  const pageLimit = filters.sort === "time" ? 200 : 1000;
+
+  // Full reload when filters or the selected bucket/tag/technique change.
   useEffect(() => {
+    if (isMatrix) return;
     let stale = false;
-    fetchEntries(filters, selection)
+    fetchEntries(filters, selection, { limit: pageLimit })
       .then((rows) => {
         if (stale) return;
         setEntries(rows);
@@ -127,11 +144,50 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
     return () => {
       stale = true;
     };
-  }, [filters, selection]);
+  }, [filters, selection, isMatrix, pageLimit]);
+
+  // Display order is computed client-side so live arrivals slot into the
+  // chosen sort without a refetch (the server still decides which rows the
+  // page contains).
+  const sortedEntries = useMemo(() => {
+    const dir = filters.desc ? -1 : 1;
+    const tiebreak = (a: Entry, b: Entry) => b.id - a.id;
+    const arr = [...entries];
+    arr.sort((a, b) => {
+      switch (filters.sort) {
+        case "severity":
+          return (a.severity - b.severity) * dir || tiebreak(a, b);
+        case "priority":
+          return (a.priority - b.priority) * dir || tiebreak(a, b);
+        case "host":
+          return a.host.localeCompare(b.host) * dir || tiebreak(a, b);
+        case "app":
+          return a.app_name.localeCompare(b.app_name) * dir || tiebreak(a, b);
+        case "device_class":
+          return a.device_class.localeCompare(b.device_class) * dir || tiebreak(a, b);
+        default:
+          return (a.id - b.id) * dir;
+      }
+    });
+    return arr;
+  }, [entries, filters.sort, filters.desc]);
+
+  // Clicking a column header sorts by it; clicking the active column flips
+  // the direction.
+  const onSort = (key: SortKey) =>
+    setFilters((f) => (f.sort === key ? { ...f, desc: !f.desc } : { ...f, sort: key, desc: true }));
+
+  const onSelectTechnique = (id: string) => {
+    setSelection({ kind: "technique", id });
+    setSelected(null);
+  };
 
   // Live tail: the server pushes entries matching the same condition the
   // list query uses; prepend them as they arrive.
-  const wsURL = useMemo(() => (live ? liveTailURL(filters, selection) : null), [live, filters, selection]);
+  const wsURL = useMemo(
+    () => (live && !isMatrix ? liveTailURL(filters, selection) : null),
+    [live, filters, selection, isMatrix],
+  );
   const wsOpen = useLiveTail(
     wsURL,
     useCallback((e: Entry) => {
@@ -179,7 +235,11 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
       ? "All Logs"
       : selection.kind === "bucket"
         ? (buckets.find((b) => b.id === selection.id)?.name ?? "Bucket")
-        : `Tag: ${tagsById.get(selection.id)?.name ?? selection.id}`;
+        : selection.kind === "mitre"
+          ? "ATT&CK matrix"
+          : selection.kind === "technique"
+            ? `ATT&CK ${selection.id}`
+            : `Tag: ${tagsById.get(selection.id)?.name ?? selection.id}`;
 
   return (
     <div className="app">
@@ -210,9 +270,11 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
             </div>
           )}
         </div>
-        <button className={live && wsOpen ? "live on" : "live"} onClick={() => setLive(!live)}>
-          {live ? (wsOpen ? "● Live" : "● Connecting…") : "‖ Paused"}
-        </button>
+        {!isMatrix && (
+          <button className={live && wsOpen ? "live on" : "live"} onClick={() => setLive(!live)}>
+            {live ? (wsOpen ? "● Live" : "● Connecting…") : "‖ Paused"}
+          </button>
+        )}
       </header>
 
       <div className="body">
@@ -236,22 +298,32 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
           <FilterBar filters={filters} onChange={setFilters} />
           {error && <div className="error">{error}</div>}
           <main className="content">
-            <LogTable
-              entries={entries}
-              tagsById={tagsById}
-              selectedId={selected?.id ?? null}
-              onSelect={setSelected}
-              onLoadOlder={() => void loadOlder()}
-            />
-            {selected && (
-              <EntryDetail
-                entry={selected}
-                tags={tags}
-                tagsById={tagsById}
-                readOnly={readOnly}
-                onClose={() => setSelected(null)}
-                onUpdated={onEntryUpdated}
-              />
+            {isMatrix ? (
+              <MitreView filters={filters} selection={selection} onSelectTechnique={onSelectTechnique} />
+            ) : (
+              <>
+                <LogTable
+                  entries={sortedEntries}
+                  tagsById={tagsById}
+                  selectedId={selected?.id ?? null}
+                  sort={filters.sort}
+                  desc={filters.desc}
+                  onSort={onSort}
+                  onSelect={setSelected}
+                  onSelectTechnique={onSelectTechnique}
+                  onLoadOlder={() => void loadOlder()}
+                />
+                {selected && (
+                  <EntryDetail
+                    entry={selected}
+                    tags={tags}
+                    tagsById={tagsById}
+                    readOnly={readOnly}
+                    onClose={() => setSelected(null)}
+                    onUpdated={onEntryUpdated}
+                  />
+                )}
+              </>
             )}
           </main>
         </div>

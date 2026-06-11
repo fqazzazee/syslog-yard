@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Filters } from "./../types";
+import { DEVICE_CLASSES } from "./../types";
 
 const SEVERITY_OPTIONS = [
   { value: "", label: "Any severity" },
@@ -81,6 +82,14 @@ export default function FilterBar({ filters, onChange }: Props) {
         {STATUS_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
+          </option>
+        ))}
+      </select>
+      <select value={draft.deviceClass} onChange={(e) => setAndApply({ deviceClass: e.target.value })}>
+        <option value="">Any device</option>
+        {DEVICE_CLASSES.map((c) => (
+          <option key={c} value={c}>
+            {c}
           </option>
         ))}
       </select>

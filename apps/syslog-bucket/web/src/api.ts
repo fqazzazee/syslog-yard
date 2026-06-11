@@ -1,17 +1,35 @@
-import type { AuthInfo, Bucket, BucketShare, Entry, Filters, Rule, Selection, Stats, Tag, User } from "./types";
+import type {
+  AuthInfo,
+  Bucket,
+  BucketShare,
+  Entry,
+  Filters,
+  MitreCatalog,
+  Rule,
+  Selection,
+  Stats,
+  Tag,
+  User,
+} from "./types";
 
 export function filterParams(f: Filters, sel: Selection): URLSearchParams {
   const params = new URLSearchParams();
   if (sel.kind === "bucket") params.set("bucket_id", String(sel.id));
   if (sel.kind === "tag") params.set("tag_id", String(sel.id));
+  if (sel.kind === "technique") params.set("mitre", sel.id);
   if (f.q) params.set("q", f.q);
   if (f.host) params.set("host", f.host);
   if (f.app) params.set("app", f.app);
   if (f.severity) params.set("severity", f.severity);
   if (f.status) params.set("status", f.status);
+  if (f.deviceClass) params.set("device_class", f.deviceClass);
   if (f.range) {
     const from = new Date(Date.now() - Number(f.range) * 60_000);
     params.set("from", from.toISOString());
+  }
+  if (f.sort && f.sort !== "time") {
+    params.set("sort", f.sort);
+    params.set("dir", f.desc ? "desc" : "asc");
   }
   return params;
 }
@@ -61,6 +79,14 @@ export function liveTailURL(f: Filters, sel: Selection): string {
 export const fetchStats = () => request<Stats>("/api/stats");
 
 export const fetchHints = () => request<Record<string, string>>("/api/hints");
+
+export const fetchMitre = () => request<MitreCatalog>("/api/mitre");
+
+// Per-technique counts under the current filters (drives the MITRE view).
+export const fetchMitreSummary = (f: Filters, sel: Selection) =>
+  request<{ counts: Record<string, number> }>(`/api/mitre/summary?${filterParams(f, sel)}`).then(
+    (b) => b.counts,
+  );
 
 export const patchEntry = (id: number, patch: { status?: string; priority?: number }) =>
   send<Entry>("PATCH", `/api/entries/${id}`, patch);

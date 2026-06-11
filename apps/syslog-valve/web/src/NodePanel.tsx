@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, SEVERITIES, type CertStatus, type GraphNode } from "./api";
+import { api, SEVERITIES, type CertStatus, type GraphNode, type MitreCatalog } from "./api";
 
 const TITLES: Record<GraphNode["type"], string> = {
   source: "IN port",
@@ -122,6 +122,10 @@ export function NodePanel({
               onChange={(e) => set({ match: e.target.value })}
             />
           </label>
+          <TechniqueSelect
+            value={node.config.technique ?? ""}
+            onChange={(technique) => set({ technique: technique || undefined })}
+          />
           <p className="muted">
             Conditions are ANDed. Matching messages leave via <b>match</b>, the
             rest via <b>else</b>.
@@ -193,6 +197,39 @@ export function NodePanel({
 
       <p className="muted">Changes take effect on Apply.</p>
     </div>
+  );
+}
+
+// TechniqueSelect lets a filter match a MITRE ATT&CK technique, which the
+// backend compiles to the matching syslog-ng pattern (S8). Options are
+// grouped by tactic.
+function TechniqueSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  const [catalog, setCatalog] = useState<MitreCatalog | null>(null);
+
+  useEffect(() => {
+    api.mitre().then(setCatalog).catch(() => {});
+  }, []);
+
+  return (
+    <label>
+      MITRE ATT&CK technique
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">— none —</option>
+        {catalog?.tactics.map((tac) => {
+          const techs = catalog.techniques.filter((t) => t.tactics.includes(tac.short));
+          if (techs.length === 0) return null;
+          return (
+            <optgroup key={tac.id} label={tac.name}>
+              {techs.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.id} · {t.name}
+                </option>
+              ))}
+            </optgroup>
+          );
+        })}
+      </select>
+    </label>
   );
 }
 

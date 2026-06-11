@@ -34,6 +34,9 @@ type Cond struct {
 	// Entry carries this tag.
 	TagID int64 `json:"tag_id,omitempty"`
 
+	// Entry was mapped to this MITRE ATT&CK technique at ingest (S8).
+	Mitre string `json:"mitre,omitempty"`
+
 	// Entry was received within the trailing window.
 	LastSeconds int64 `json:"last_seconds,omitempty"`
 }
@@ -60,15 +63,16 @@ var fields = map[string]struct {
 	col  string
 	kind fieldKind
 }{
-	"host":        {"e.host", kindStr},
-	"app_name":    {"e.app_name", kindStr},
-	"msg":         {"e.msg", kindStr},
-	"status":      {"e.status", kindStr},
-	"severity":    {"e.severity", kindNum},
-	"facility":    {"e.facility", kindNum},
-	"priority":    {"e.priority", kindNum},
-	"source_id":   {"e.source_id", kindNum},
-	"received_at": {"e.received_at", kindTime},
+	"host":         {"e.host", kindStr},
+	"app_name":     {"e.app_name", kindStr},
+	"device_class": {"e.device_class", kindStr},
+	"msg":          {"e.msg", kindStr},
+	"status":       {"e.status", kindStr},
+	"severity":     {"e.severity", kindNum},
+	"facility":     {"e.facility", kindNum},
+	"priority":     {"e.priority", kindNum},
+	"source_id":    {"e.source_id", kindNum},
+	"received_at":  {"e.received_at", kindTime},
 }
 
 var strOps = map[string]bool{"eq": true, "ne": true, "contains": true, "prefix": true}
@@ -78,7 +82,7 @@ func (c Cond) kindCount() int {
 	n := 0
 	for _, set := range []bool{
 		len(c.All) > 0, len(c.Any) > 0, c.Not != nil,
-		c.Field != "", c.Text != "", c.TagID != 0, c.LastSeconds != 0,
+		c.Field != "", c.Text != "", c.TagID != 0, c.Mitre != "", c.LastSeconds != 0,
 	} {
 		if set {
 			n++
@@ -168,6 +172,8 @@ func (c Cond) compile(arg func(any) string) string {
 		return "e.msg_tsv @@ websearch_to_tsquery('simple', " + arg(c.Text) + ")"
 	case c.TagID != 0:
 		return "EXISTS (SELECT 1 FROM entry_tags ct WHERE ct.entry_id = e.id AND ct.tag_id = " + arg(c.TagID) + ")"
+	case c.Mitre != "":
+		return arg(c.Mitre) + " = ANY(e.mitre)"
 	case c.LastSeconds > 0:
 		return "e.received_at > now() - make_interval(secs => " + arg(c.LastSeconds) + ")"
 	default:
@@ -265,6 +271,18 @@ func (c Cond) Match(rec Record) bool {
 		return textMatch(s, c.Text)
 	case c.TagID != 0:
 		return rec.HasTag(c.TagID)
+	case c.Mitre != "":
+		v, ok := rec.FieldValue("mitre")
+		ids, _ := v.([]string)
+		if !ok {
+			return false
+		}
+		for _, id := range ids {
+			if id == c.Mitre {
+				return true
+			}
+		}
+		return false
 	case c.LastSeconds > 0:
 		v, ok := rec.FieldValue("received_at")
 		t, isTime := v.(time.Time)

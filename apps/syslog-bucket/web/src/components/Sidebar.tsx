@@ -27,10 +27,14 @@ export default function Sidebar({
   onManageTags,
 }: Props) {
   const isAll = selection.kind === "all";
+  const isMitre = selection.kind === "mitre" || selection.kind === "technique";
   return (
     <nav className="sidebar">
       <button className={`nav-item${isAll ? " active" : ""}`} onClick={() => onSelect({ kind: "all" })}>
         📥 All Logs
+      </button>
+      <button className={`nav-item${isMitre ? " active" : ""}`} onClick={() => onSelect({ kind: "mitre" })}>
+        🎯 ATT&CK matrix
       </button>
 
       <div className="nav-section">

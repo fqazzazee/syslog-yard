@@ -18,6 +18,7 @@ import (
 
 	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
+	"github.com/syslog-yard/syslog-bucket/internal/mitre"
 	"github.com/syslog-yard/syslog-bucket/internal/rules"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 	"github.com/syslog-yard/syslog-bucket/internal/ws"
@@ -39,6 +40,8 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, web fs.FS, hints map[
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/healthz", s.healthz)
 	mux.HandleFunc("GET /api/hints", s.getHints)
+	mux.HandleFunc("GET /api/mitre", s.getMitre)
+	mux.HandleFunc("GET /api/mitre/summary", s.getMitreSummary)
 	mux.HandleFunc("POST /api/auth/login", authSvc.HandleLogin)
 	mux.HandleFunc("POST /api/auth/logout", authSvc.HandleLogout)
 	mux.HandleFunc("GET /api/auth/me", authSvc.HandleMe)
@@ -91,6 +94,31 @@ func (s *server) getHints(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.hints)
 }
 
+// getMitre returns the ATT&CK catalog this build maps to (tactics in matrix
+// order + techniques), so the UI can group and label entries. Static data.
+func (s *server) getMitre(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, mitre.Get())
+}
+
+// getMitreSummary counts entries per technique under the current filters
+// (time range, host, bucket, …) — the data behind the MITRE view's counts.
+func (s *server) getMitreSummary(w http.ResponseWriter, r *http.Request) {
+	cond, err := s.condFromRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	counts, err := s.store.MitreSummary(r.Context(), store.EntryFilter{
+		Cond:              cond,
+		IncludeSuppressed: r.URL.Query().Get("include_suppressed") == "true",
+	})
+	if err != nil {
+		s.internalError(w, "mitre summary", err)
+		return
+	}
+	writeJSON(w, map[string]any{"counts": counts})
+}
+
 // condFromRequest translates the SPA's filter query parameters — plus an
 // optional bucket — into one condition tree, the same grammar buckets and
 // rules use (PLAN §5: one grammar, three uses).
@@ -139,6 +167,28 @@ func (s *server) condFromRequest(r *http.Request) (rules.Cond, error) {
 	if v := q.Get("status"); v != "" {
 		all = append(all, rules.Cond{Field: "status", Op: "eq", Value: v})
 	}
+	if v := q.Get("device_class"); v != "" {
+		all = append(all, rules.Cond{Field: "device_class", Op: "eq", Value: v})
+	}
+	if v := q.Get("mitre"); v != "" {
+		all = append(all, rules.Cond{Mitre: v})
+	}
+	if v := q.Get("tactic"); v != "" {
+		// A tactic matches any of its techniques known to this build.
+		var any []rules.Cond
+		for _, t := range mitre.Get().Techniques {
+			for _, tac := range t.Tactics {
+				if tac == v {
+					any = append(any, rules.Cond{Mitre: t.ID})
+					break
+				}
+			}
+		}
+		if len(any) == 0 {
+			return rules.Cond{}, errors.New("unknown tactic")
+		}
+		all = append(all, rules.Cond{Any: any})
+	}
 	if v := q.Get("tag_id"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
@@ -172,6 +222,14 @@ func (s *server) listEntries(w http.ResponseWriter, r *http.Request) {
 	f := store.EntryFilter{
 		Cond:              cond,
 		IncludeSuppressed: q.Get("include_suppressed") == "true",
+		Sort:              q.Get("sort"),
+		Desc:              q.Get("dir") != "asc", // default newest/highest first
+	}
+	switch f.Sort {
+	case "", "time", "severity", "priority", "host", "app", "device_class":
+	default:
+		http.Error(w, "unknown sort", http.StatusBadRequest)
+		return
 	}
 	for param, dst := range map[string]**int64{"before_id": &f.BeforeID, "after_id": &f.AfterID} {
 		if v := q.Get(param); v != "" {

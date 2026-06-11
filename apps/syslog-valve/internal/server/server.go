@@ -16,6 +16,7 @@ import (
 	"github.com/syslog-yard/syslog-valve/internal/certs"
 	"github.com/syslog-yard/syslog-valve/internal/codegen"
 	"github.com/syslog-yard/syslog-valve/internal/graph"
+	"github.com/syslog-yard/syslog-valve/internal/mitre"
 	"github.com/syslog-yard/syslog-valve/internal/rotate"
 	"github.com/syslog-yard/syslog-valve/internal/supervisor"
 	"github.com/syslog-yard/syslog-valve/internal/tap"
@@ -55,6 +56,9 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 	s.mux.HandleFunc("GET /api/config", s.config)
 	s.mux.HandleFunc("GET /api/status", s.status)
 	s.mux.HandleFunc("GET /api/hints", s.getHints)
+	s.mux.HandleFunc("GET /api/mitre", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, mitre.Get())
+	})
 	s.mux.HandleFunc("GET /api/certs", s.certStatus)
 	s.mux.HandleFunc("POST /api/certs/selfsigned", s.certGenerate)
 	s.mux.HandleFunc("GET /api/tail", s.tail)

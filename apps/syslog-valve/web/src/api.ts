@@ -10,6 +10,7 @@ export interface NodeConfig {
   severityMax?: number; // pass if syslog severity <= this (0 emerg .. 7 debug)
   program?: string;
   match?: string;
+  technique?: string; // MITRE ATT&CK technique id (S8)
   // cache
   location?: string; // "" local, else share name
   dir?: string;
@@ -100,6 +101,22 @@ export interface YardUser extends AuthUser {
   oidc: boolean;
 }
 
+// MITRE ATT&CK catalog the valve can filter on (served by /api/mitre).
+export interface MitreTactic {
+  id: string;
+  short: string;
+  name: string;
+}
+export interface MitreTechnique {
+  id: string;
+  name: string;
+  tactics: string[];
+}
+export interface MitreCatalog {
+  tactics: MitreTactic[];
+  techniques: MitreTechnique[];
+}
+
 async function check(res: Response): Promise<Response> {
   if (!res.ok) {
     // A 401 outside the auth endpoints means the session died mid-use;
@@ -137,6 +154,8 @@ export const api = {
     fetch("/api/config").then(check).then((r) => r.text()),
   hints: (): Promise<Record<string, string>> =>
     fetch("/api/hints").then(check).then((r) => r.json()),
+  mitre: (): Promise<MitreCatalog> =>
+    fetch("/api/mitre").then(check).then((r) => r.json()),
   historyConfig: (id: string): Promise<string> =>
     fetch(`/api/history/${id}/config`).then(check).then((r) => r.text()),
   certs: (): Promise<CertStatus> =>

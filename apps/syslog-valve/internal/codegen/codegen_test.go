@@ -93,6 +93,34 @@ func TestGenerateMultiConditionFilter(t *testing.T) {
 	}
 }
 
+func TestGenerateTechniqueFilter(t *testing.T) {
+	// A message-pattern technique (T1190) compiles to message(); a
+	// program-based one (T1548) compiles to program().
+	g := filteredGraph()
+	g.Nodes[1].Config = graph.Config{Technique: "T1190"}
+	conf, err := Generate(g, "4.8", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `message("Code\\.Execution")`; !strings.Contains(conf, want) {
+		t.Errorf("missing technique message filter %q:\n%s", want, conf)
+	}
+
+	g.Nodes[1].Config = graph.Config{Technique: "T1548"}
+	conf, err = Generate(g, "4.8", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `program("sudo")`; !strings.Contains(conf, want) {
+		t.Errorf("missing technique program filter %q:\n%s", want, conf)
+	}
+
+	g.Nodes[1].Config = graph.Config{Technique: "T9999"}
+	if _, err := Generate(g, "4.8", nil); err == nil {
+		t.Fatal("expected error for unknown technique")
+	}
+}
+
 func TestCacheShares(t *testing.T) {
 	g := filteredGraph()
 	g.Nodes[3].Config.Location = "archive"

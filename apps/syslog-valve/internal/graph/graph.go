@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/syslog-yard/syslog-valve/internal/mitre"
 )
 
 const (
@@ -38,7 +40,8 @@ type Config struct {
 	// filter: conditions are ANDed; at least one must be set
 	SeverityMax *int   `json:"severityMax,omitempty"` // pass if severity <= this
 	Program     string `json:"program,omitempty"`
-	Match       string `json:"match,omitempty"` // regex on the message text
+	Match       string `json:"match,omitempty"`     // regex on the message text
+	Technique   string `json:"technique,omitempty"` // MITRE ATT&CK technique id (S8)
 
 	// cache: file destination with logrotate retention
 	Location   string `json:"location,omitempty"` // "" = local /data, else share name
@@ -138,7 +141,7 @@ func validateNode(n Node) error {
 		return checkPort(n)
 	case TypeFilter:
 		c := n.Config
-		if c.SeverityMax == nil && strings.TrimSpace(c.Program) == "" && strings.TrimSpace(c.Match) == "" {
+		if c.SeverityMax == nil && strings.TrimSpace(c.Program) == "" && strings.TrimSpace(c.Match) == "" && c.Technique == "" {
 			return fmt.Errorf("node %q: filter needs at least one condition", label(n))
 		}
 		if c.SeverityMax != nil && (*c.SeverityMax < 0 || *c.SeverityMax > 7) {
@@ -147,6 +150,11 @@ func validateNode(n Node) error {
 		if c.Match != "" {
 			if _, err := regexp.Compile(c.Match); err != nil {
 				return fmt.Errorf("node %q: bad match regex: %v", label(n), err)
+			}
+		}
+		if c.Technique != "" {
+			if _, ok := mitre.Lookup(c.Technique); !ok {
+				return fmt.Errorf("node %q: unknown MITRE technique %q", label(n), c.Technique)
 			}
 		}
 		return nil

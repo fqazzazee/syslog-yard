@@ -13,8 +13,30 @@ export interface Entry {
   priority: number;
   status: string;
   suppressed: boolean;
+  device_class: string;
+  mitre: string[]; // ATT&CK technique IDs mapped at ingest
   tag_ids: number[];
 }
+
+// MITRE ATT&CK catalog served by /api/mitre (the subset this build maps).
+export interface MitreTactic {
+  id: string;
+  short: string;
+  name: string;
+}
+export interface MitreTechnique {
+  id: string;
+  name: string;
+  tactics: string[]; // tactic short names
+  url: string;
+}
+export interface MitreCatalog {
+  tactics: MitreTactic[];
+  techniques: MitreTechnique[];
+}
+
+// Sort key for the log table. "time" is the default (newest first).
+export type SortKey = "time" | "severity" | "priority" | "host" | "app" | "device_class";
 
 export interface Stats {
   approx_total: number;
@@ -100,14 +122,20 @@ export interface Filters {
   app: string;
   severity: string; // "" = any, otherwise "0".."7" meaning "this level or worse"
   status: string; // "" = any
+  deviceClass: string; // "" = any, else a device class
   range: string; // "" = all time, otherwise minutes
+  sort: SortKey;
+  desc: boolean;
 }
 
-// What the middle pane is showing: the inbox, a bucket, or one tag.
+// What the middle pane is showing: the inbox, a bucket, one tag, the ATT&CK
+// matrix, or the entries for one technique.
 export type Selection =
   | { kind: "all" }
   | { kind: "bucket"; id: number }
-  | { kind: "tag"; id: number };
+  | { kind: "tag"; id: number }
+  | { kind: "mitre" }
+  | { kind: "technique"; id: string };
 
 export const SEVERITY_NAMES = [
   "emerg",
@@ -121,5 +149,8 @@ export const SEVERITY_NAMES = [
 ] as const;
 
 export const PRIORITY_NAMES = ["—", "Low", "Med", "High"] as const;
+
+// Coarse device classes from internal/classify (server-side).
+export const DEVICE_CLASSES = ["firewall", "network", "host", "windows", "ot"] as const;
 
 export const STATUS_NAMES = ["new", "reviewing", "resolved"] as const;

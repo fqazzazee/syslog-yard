@@ -894,3 +894,89 @@ button.nav-item {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* --- S8: sorting + MITRE ATT&CK --- */
+
+.col-pri { width: 56px; }
+.col-class { width: 84px; color: var(--fg-dim); }
+
+.logtable th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.logtable th.sortable:hover { color: var(--fg); }
+.logtable th.sorted { color: var(--accent); }
+.sort-arrow { font-size: 10px; }
+
+/* MITRE technique chip, reused in the table and the detail pane. */
+.mitre-chip {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid #5a4a7a;
+  background: #2a2440;
+  color: #c4b5f0;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  cursor: pointer;
+  text-decoration: none;
+  vertical-align: middle;
+}
+.mitre-chip:hover { border-color: #8a6fd6; color: #e0d6ff; }
+
+.detail-mitre { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* The ATT&CK matrix view in the main pane. */
+.mitre-view { flex: 1; overflow: auto; padding: 16px; }
+.mitre-view.empty { color: var(--fg-dim); }
+.mitre-intro { color: var(--fg-dim); font-size: 13px; margin: 0 0 14px; }
+
+.mitre-matrix {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  overflow-x: auto;
+}
+.mitre-col {
+  flex: 1 0 150px;
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mitre-tactic {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-dim);
+  padding: 6px 4px;
+  border-bottom: 2px solid var(--border);
+}
+.mitre-tech {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 8px;
+  cursor: pointer;
+  color: var(--fg-dim);
+}
+.mitre-tech:hover { border-color: var(--accent); color: var(--fg); }
+.mitre-tech.hit { color: var(--fg); border-color: #5a4a7a; }
+.mitre-tech-name { font-size: 12px; font-weight: 600; }
+.mitre-tech-meta { display: flex; justify-content: space-between; align-items: center; }
+.mitre-tech-id { font-size: 10.5px; font-family: ui-monospace, Menlo, Consolas, monospace; opacity: 0.7; }
+.mitre-count {
+  background: #5a4a7a;
+  color: #e0d6ff;
+  border-radius: 9px;
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 700;
+}

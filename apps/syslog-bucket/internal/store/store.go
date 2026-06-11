@@ -52,21 +52,23 @@ func (s *Store) Close() { s.Pool.Close() }
 
 // Entry mirrors the entries table. Structured holds parser-extracted fields.
 type Entry struct {
-	ID         int64           `json:"id"`
-	ReceivedAt time.Time       `json:"received_at"`
-	DeviceTime *time.Time      `json:"device_time,omitempty"`
-	SourceID   *int64          `json:"source_id,omitempty"`
-	SourceIP   string          `json:"source_ip,omitempty"`
-	Facility   *int16          `json:"facility,omitempty"`
-	Severity   int16           `json:"severity"`
-	AppName    string          `json:"app_name"`
-	Host       string          `json:"host"`
-	Msg        string          `json:"msg"`
-	Structured json.RawMessage `json:"structured"`
-	Priority   int16           `json:"priority"`
-	Status     string          `json:"status"`
-	Suppressed bool            `json:"suppressed"`
-	TagIDs     []int64         `json:"tag_ids"`
+	ID          int64           `json:"id"`
+	ReceivedAt  time.Time       `json:"received_at"`
+	DeviceTime  *time.Time      `json:"device_time,omitempty"`
+	SourceID    *int64          `json:"source_id,omitempty"`
+	SourceIP    string          `json:"source_ip,omitempty"`
+	Facility    *int16          `json:"facility,omitempty"`
+	Severity    int16           `json:"severity"`
+	AppName     string          `json:"app_name"`
+	Host        string          `json:"host"`
+	Msg         string          `json:"msg"`
+	Structured  json.RawMessage `json:"structured"`
+	Priority    int16           `json:"priority"`
+	Status      string          `json:"status"`
+	Suppressed  bool            `json:"suppressed"`
+	DeviceClass string          `json:"device_class"`
+	Mitre       []string        `json:"mitre"`
+	TagIDs      []int64         `json:"tag_ids"`
 
 	// RuleTags carries (tag, rule) attribution from ingest-time rule
 	// evaluation into InsertEntries; not serialized.
@@ -92,6 +94,10 @@ func (e *Entry) FieldValue(name string) (any, bool) {
 		return e.Msg, true
 	case "status":
 		return e.Status, true
+	case "device_class":
+		return e.DeviceClass, true
+	case "mitre":
+		return e.Mitre, true
 	case "severity":
 		return int64(e.Severity), true
 	case "priority":
@@ -163,23 +169,34 @@ func (s *Store) InsertEntries(ctx context.Context, entries []Entry) error {
 	if len(entries) == 0 {
 		return nil
 	}
+	const cols = 14
 	var sb strings.Builder
 	sb.WriteString(`INSERT INTO entries
-		(received_at, device_time, source_id, facility, severity, app_name, host, msg, structured, priority, status, suppressed) VALUES `)
-	args := make([]any, 0, len(entries)*12)
+		(received_at, device_time, source_id, facility, severity, app_name, host, msg, structured, priority, status, suppressed, device_class, mitre) VALUES `)
+	args := make([]any, 0, len(entries)*cols)
 	for i := range entries {
 		e := &entries[i]
 		structured := e.Structured
 		if len(structured) == 0 {
 			structured = json.RawMessage(`{}`)
 		}
+		mitre := e.Mitre
+		if mitre == nil {
+			mitre = []string{}
+		}
 		if i > 0 {
 			sb.WriteByte(',')
 		}
-		fmt.Fprintf(&sb, "($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
-			i*12+1, i*12+2, i*12+3, i*12+4, i*12+5, i*12+6, i*12+7, i*12+8, i*12+9, i*12+10, i*12+11, i*12+12)
+		sb.WriteByte('(')
+		for j := 0; j < cols; j++ {
+			if j > 0 {
+				sb.WriteByte(',')
+			}
+			fmt.Fprintf(&sb, "$%d", i*cols+j+1)
+		}
+		sb.WriteByte(')')
 		args = append(args, e.ReceivedAt, e.DeviceTime, e.SourceID, e.Facility, e.Severity,
-			e.AppName, e.Host, e.Msg, structured, e.Priority, e.Status, e.Suppressed)
+			e.AppName, e.Host, e.Msg, structured, e.Priority, e.Status, e.Suppressed, e.DeviceClass, mitre)
 	}
 	// RETURNING rows come back in VALUES order for a plain INSERT.
 	sb.WriteString(" RETURNING id")
@@ -227,9 +244,32 @@ func (s *Store) insertRuleTags(ctx context.Context, entries []Entry) error {
 type EntryFilter struct {
 	Cond              rules.Cond
 	IncludeSuppressed bool
-	BeforeID          *int64 // paginate older
-	AfterID           *int64 // fetch newer; results ascend
+	BeforeID          *int64 // paginate older (time sort only)
+	AfterID           *int64 // fetch newer; results ascend (time sort only)
+	Sort              string // "" or "time" = received order; else a column key
+	Desc              bool   // sort direction (time defaults to newest-first)
 	Limit             int
+}
+
+// sortColumn maps a sort key to its SQL ordering expression. The default
+// (time) orders by id, which is monotonic with received_at and lets the
+// keyset pagination below stay on the primary key.
+func sortColumn(key string) (expr string, isTime bool, ok bool) {
+	switch key {
+	case "", "time":
+		return "e.id", true, true
+	case "severity":
+		return "e.severity", false, true
+	case "priority":
+		return "e.priority", false, true
+	case "host":
+		return "lower(e.host)", false, true
+	case "app":
+		return "lower(e.app_name)", false, true
+	case "device_class":
+		return "e.device_class", false, true
+	}
+	return "", false, false
 }
 
 func (s *Store) ListEntries(ctx context.Context, f EntryFilter) ([]Entry, error) {
@@ -248,13 +288,30 @@ func (s *Store) ListEntries(ctx context.Context, f EntryFilter) ([]Entry, error)
 	if !f.IncludeSuppressed {
 		conds = append(conds, "NOT e.suppressed")
 	}
-	if f.BeforeID != nil {
-		conds = append(conds, "e.id < "+arg(*f.BeforeID))
+	expr, isTime, ok := sortColumn(f.Sort)
+	if !ok {
+		return nil, fmt.Errorf("unknown sort %q", f.Sort)
 	}
-	order := "ORDER BY e.id DESC"
-	if f.AfterID != nil {
-		conds = append(conds, "e.id > "+arg(*f.AfterID))
-		order = "ORDER BY e.id ASC"
+	var order string
+	if isTime {
+		// Keyset pagination on the primary key (the original behaviour).
+		if f.BeforeID != nil {
+			conds = append(conds, "e.id < "+arg(*f.BeforeID))
+		}
+		order = "ORDER BY e.id DESC"
+		if f.AfterID != nil {
+			conds = append(conds, "e.id > "+arg(*f.AfterID))
+			order = "ORDER BY e.id ASC"
+		}
+	} else {
+		// A column sort returns one ranked page (the UI requests a wide
+		// limit and re-sorts live arrivals client-side); id breaks ties so
+		// the order is deterministic.
+		dir := "ASC"
+		if f.Desc {
+			dir = "DESC"
+		}
+		order = fmt.Sprintf("ORDER BY %s %s, e.id DESC", expr, dir)
 	}
 
 	limit := f.Limit
@@ -267,6 +324,7 @@ func (s *Store) ListEntries(ctx context.Context, f EntryFilter) ([]Entry, error)
 
 	sql := `SELECT e.id, e.received_at, e.device_time, e.source_id, COALESCE(s.ip, ''),
 	               e.facility, e.severity, e.app_name, e.host, e.msg, e.structured, e.priority, e.status, e.suppressed,
+	               e.device_class, e.mitre,
 	               COALESCE((SELECT array_agg(et.tag_id ORDER BY et.tag_id) FROM entry_tags et WHERE et.entry_id = e.id), '{}')
 	        FROM entries e LEFT JOIN sources s ON s.id = e.source_id`
 	if len(conds) > 0 {
@@ -285,12 +343,49 @@ func (s *Store) ListEntries(ctx context.Context, f EntryFilter) ([]Entry, error)
 		var e Entry
 		if err := rows.Scan(&e.ID, &e.ReceivedAt, &e.DeviceTime, &e.SourceID, &e.SourceIP,
 			&e.Facility, &e.Severity, &e.AppName, &e.Host, &e.Msg, &e.Structured, &e.Priority, &e.Status,
-			&e.Suppressed, &e.TagIDs); err != nil {
+			&e.Suppressed, &e.DeviceClass, &e.Mitre, &e.TagIDs); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
+}
+
+// MitreSummary counts entries per ATT&CK technique under the given filter
+// (the same condition the entry list uses), so the MITRE view can show live
+// counts per technique. Returns a technique-id → count map.
+func (s *Store) MitreSummary(ctx context.Context, f EntryFilter) (map[string]int64, error) {
+	var conds []string
+	var args []any
+	arg := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	condSQL, err := f.Cond.CompileSQL(arg)
+	if err != nil {
+		return nil, fmt.Errorf("compile condition: %w", err)
+	}
+	conds = append(conds, condSQL)
+	if !f.IncludeSuppressed {
+		conds = append(conds, "NOT e.suppressed")
+	}
+	sql := `SELECT t, count(*) FROM entries e, unnest(e.mitre) t WHERE ` +
+		strings.Join(conds, " AND ") + ` GROUP BY t`
+	rows, err := s.Pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var id string
+		var n int64
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) GetEntry(ctx context.Context, id int64) (*Entry, error) {

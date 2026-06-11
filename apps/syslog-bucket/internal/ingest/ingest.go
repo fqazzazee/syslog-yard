@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/syslog-yard/syslog-bucket/internal/classify"
+	"github.com/syslog-yard/syslog-bucket/internal/mitre"
 	"github.com/syslog-yard/syslog-bucket/internal/parsers"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
@@ -56,8 +58,8 @@ type Server struct {
 
 	queue chan store.Entry
 
-	mu       sync.Mutex
-	sources  map[string]int64 // "hostname|ip" -> source id
+	mu      sync.Mutex
+	sources map[string]int64 // "hostname|ip" -> source id
 }
 
 func New(st *store.Store, reg *parsers.Registry, applier Applier, caster Broadcaster, addr string) *Server {
@@ -167,6 +169,10 @@ func (s *Server) toEntry(ctx context.Context, rec record) (store.Entry, error) {
 	e.SourceID = &id
 
 	s.registry.Apply(&e)
+	// Enrich before the rule engine so rules can match on device class and
+	// MITRE technique (S8): parsers have populated structured fields by now.
+	e.DeviceClass = classify.Class(e.AppName, e.Msg)
+	e.Mitre = mitre.Map(&e)
 	if s.applier != nil {
 		s.applier.Apply(&e)
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/syslog-yard/syslog-valve/internal/graph"
+	"github.com/syslog-yard/syslog-valve/internal/mitre"
 )
 
 // Shares maps a share name to its mount point (e.g. archive -> /shares/archive).
@@ -188,6 +189,20 @@ func filterExpr(n graph.Node) (string, error) {
 	}
 	if m := strings.TrimSpace(n.Config.Match); m != "" {
 		conds = append(conds, fmt.Sprintf("message(%q)", m))
+	}
+	// A MITRE technique compiles to its syslog-ng pattern (message regex
+	// and/or program), so a flow can route or drop by technique (S8).
+	if tid := n.Config.Technique; tid != "" {
+		t, ok := mitre.Lookup(tid)
+		if !ok {
+			return "", fmt.Errorf("filter %q: unknown MITRE technique %q", name(n), tid)
+		}
+		if t.Program != "" {
+			conds = append(conds, fmt.Sprintf("program(%q)", t.Program))
+		}
+		if t.Message != "" {
+			conds = append(conds, fmt.Sprintf("message(%q)", t.Message))
+		}
 	}
 	if len(conds) == 0 {
 		return "", fmt.Errorf("filter %q has no conditions", name(n))

@@ -62,6 +62,7 @@ through, auto-tagged by rules:
 | Doc | Covers |
 |-----|--------|
 | [docs/AUTH.md](docs/AUTH.md) | bucket sign-in, roles, OIDC, sharing buckets |
+| [docs/MITRE.md](docs/MITRE.md) | ATT&CK mapping, the matrix view, sorting, device class, valve technique filter |
 | [docs/SECURITY.md](docs/SECURITY.md) | threat model, what's defended, production hardening checklist |
 | [docs/SHARES.md](docs/SHARES.md) | external NAS shares (NFS/CIFS) for log storage |
 | [deploy/quadlet](deploy/quadlet) | rootless podman systemd units |
@@ -73,23 +74,26 @@ through, auto-tagged by rules:
   multiple concurrent jobs, live tail of what it sends.
 - **syslog-valve**: node-graph canvas compiled to syslog-ng config with
   syntax check, atomic swap, and one-click rollback; UDP/TCP/TLS listeners
-  (one-click self-signed certs); facility/severity/host/program/regex
-  filters with if/else routing; disk cache nodes with retention compiled to
-  logrotate; live tail of everything entering the valve; config version
-  history with previews; graph import/export.
+  (one-click self-signed certs); facility/severity/host/program/regex and
+  **MITRE ATT&CK technique** filters with if/else routing; disk cache nodes
+  with retention compiled to logrotate; live tail of everything entering the
+  valve; config version history with previews; graph import/export.
 - **syslog-bucket**: syslog-ng-fronted ingest into Postgres; email-style
   3-pane triage; virtual buckets (saved searches), color-coded tags, a rules
-  engine that tags/prioritizes/suppresses at ingest and retroactively; live
-  tail over WebSocket; local accounts + OIDC sign-in with admin/analyst/viewer
-  roles; buckets shareable per-user, view-only or editable.
+  engine that tags/prioritizes/suppresses at ingest and retroactively;
+  **MITRE ATT&CK mapping at ingest with a kill-chain matrix view**, device-class
+  tagging, and sortable/filterable columns; live tail over WebSocket; local
+  accounts + OIDC sign-in with admin/analyst/viewer roles; buckets shareable
+  per-user, view-only or editable.
 
 ## Status
 
-S7 complete — security review across the suite: a documented threat model
-([docs/SECURITY.md](docs/SECURITY.md)), a Content-Security-Policy and
-hardening headers on all three tools, and per-account login brute-force
-throttling. Builds on S6 (sign-in with local accounts and optional OIDC,
-admin/analyst/viewer roles, per-user bucket ownership and sharing; the
-bucket is the yard's identity provider and the hose and valve are guarded
-by the same accounts with one shared sign-in). Next: sorting & MITRE
-ATT&CK (S8).
+S8 complete — sorting & MITRE ATT&CK ([docs/MITRE.md](docs/MITRE.md)): the
+bucket maps events to ATT&CK techniques at ingest and offers a kill-chain
+matrix view, device-class tagging, and sortable/filterable columns; the valve
+gains a filter condition that matches techniques so flows can route or drop by
+technique. Builds on S7 (security review: threat model, CSP + hardening
+headers, login throttling) and S6 (local + OIDC sign-in, admin/analyst/viewer
+roles, per-user bucket sharing; the bucket is the yard's identity provider and
+the hose and valve share one sign-in). Next: notifications — webhooks and SMTP
+(S9).
