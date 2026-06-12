@@ -2,7 +2,8 @@
 Description=syslog-valve — visual syslog router/filter
 
 [Container]
-Image=ghcr.io/syslog-yard/syslog-valve:latest
+# Built locally with podman (see this dir's README); no registry is used.
+Image=localhost/syslog-valve:latest
 ContainerName=syslog-valve
 Network=yard.network
 PublishPort=8081:8081

@@ -2,7 +2,8 @@
 Description=syslog-hose — syslog traffic generator
 
 [Container]
-Image=ghcr.io/syslog-yard/syslog-hose:latest
+# Built locally with podman (see this dir's README); no registry is used.
+Image=localhost/syslog-hose:latest
 ContainerName=syslog-hose
 Network=yard.network
 PublishPort=8080:8080

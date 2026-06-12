@@ -29,15 +29,17 @@ loginctl enable-linger $USER
 
 ## Images
 
-Units reference `ghcr.io/syslog-yard/<tool>:latest`. To run locally built
-images instead, build and retag, then change `Image=` (or add a
-`.container.d` drop-in):
+The units reference locally built images (`localhost/syslog-<tool>:latest`) —
+no registry. Build them once from the repo root before starting the units:
 
 ```sh
-podman build -t ghcr.io/syslog-yard/syslog-hose:latest apps/syslog-hose
-podman build -t ghcr.io/syslog-yard/syslog-valve:latest apps/syslog-valve
-podman build -t ghcr.io/syslog-yard/syslog-bucket:latest apps/syslog-bucket
+podman build -t localhost/syslog-hose:latest apps/syslog-hose
+podman build -t localhost/syslog-valve:latest apps/syslog-valve
+podman build -t localhost/syslog-bucket:latest apps/syslog-bucket
 ```
+
+(`scripts/yardctl up` builds the same images under compose; the quadlet units
+reuse them.)
 
 ## Notes for real syslog sources
 
@@ -54,8 +56,10 @@ podman build -t ghcr.io/syslog-yard/syslog-bucket:latest apps/syslog-bucket
 
 ## Updating
 
+Rebuild the image(s) from updated source, then restart:
+
 ```sh
-podman pull ghcr.io/syslog-yard/syslog-hose:latest   # etc.
+podman build -t localhost/syslog-hose:latest apps/syslog-hose   # etc.
 systemctl --user restart syslog-hose syslog-valve syslog-bucket bucket-syslog
 ```
 

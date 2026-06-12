@@ -4,7 +4,8 @@ Requires=bucket-db.service
 After=bucket-db.service
 
 [Container]
-Image=ghcr.io/syslog-yard/syslog-bucket:latest
+# Built locally with podman (see this dir's README); no registry is used.
+Image=localhost/syslog-bucket:latest
 ContainerName=syslog-bucket
 Network=yard.network
 PublishPort=8082:8080

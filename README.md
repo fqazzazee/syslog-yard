@@ -37,6 +37,40 @@ ports. Note: VM-based runtimes (Rancher/Docker Desktop, Colima) forward TCP
 but not UDP across the VM boundary — `yardctl smoke` probes both and tells
 you which arrived.
 
+## Install on a clean Linux server or WSL (Podman)
+
+Everything builds and runs **from source** — there is no registry to pull from.
+Rootless Podman is enough: the suite uses ports 8080–8082 and 6514, all above
+1024, so no privileged binding is needed.
+
+**Prerequisites:** `git`, `podman` (≥ 4.6), a compose provider
+(`podman-compose`, or `podman compose` with a docker-compose binary), and
+`curl` (for the health/smoke checks).
+
+```sh
+# Fedora / RHEL / CentOS Stream
+sudo dnf install -y git podman podman-compose curl
+
+# Debian / Ubuntu (including WSL Ubuntu)
+sudo apt update && sudo apt install -y git podman podman-compose curl
+```
+
+`scripts/yardctl prereqs` will do this for you on dnf/apt hosts. Then:
+
+```sh
+git clone https://github.com/fqazzazee/syslog-yard
+cd syslog-yard
+scripts/yardctl up         # builds the three images locally with podman, starts the suite
+scripts/yardctl firewall   # optional: open 8080-8082 + 6514 (firewalld/ufw, needs sudo)
+scripts/yardctl status     # health checks — also: down / restart / logs / smoke
+```
+
+**WSL notes:** run `wsl --update` first and use a recent Ubuntu/Fedora distro.
+Like other VM runtimes, WSL forwards TCP but not UDP across the boundary — send
+external syslog over **TCP** to host port 6514 (`yardctl smoke` reports which
+transport arrived). To start the yard at boot as rootless systemd services
+(no compose), see [deploy/quadlet](deploy/quadlet).
+
 ## The demo loop
 
 The hose streams FortiGate traffic at the valve; the valve forwards
