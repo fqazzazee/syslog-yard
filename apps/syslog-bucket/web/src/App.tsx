@@ -268,7 +268,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
           : selection.kind === "technique"
             ? `ATT&CK ${selection.id}`
             : selection.kind === "ot"
-              ? "OT alerts"
+              ? "ICS/OT Alerts"
               : selection.kind === "otalert"
                 ? `OT ${selection.id}`
                 : selection.kind === "framework"

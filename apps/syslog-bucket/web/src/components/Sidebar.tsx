@@ -41,34 +41,30 @@ export default function Sidebar({
       <button className={`nav-item${isAll ? " active" : ""}`} onClick={() => onSelect({ kind: "all" })}>
         <Icon name="description" size={16} /> All Logs
       </button>
+
+      <div className="nav-section">
+        <span>Frameworks</span>
+      </div>
       <button className={`nav-item${isMitre ? " active" : ""}`} onClick={() => onSelect({ kind: "mitre" })}>
-        <Icon name="crisis_alert" size={16} /> ATT&CK matrix
+        <Icon name="crisis_alert" size={16} /> MITRE ATT&CK
       </button>
       <button className={`nav-item${isOT ? " active" : ""}`} onClick={() => onSelect({ kind: "ot" })}>
-        <Icon name="factory" size={16} /> OT alerts
+        <Icon name="factory" size={16} /> ICS/OT Alerts
       </button>
-
-      {frameworks.length > 0 && (
-        <>
-          <div className="nav-section">
-            <span>Frameworks</span>
-          </div>
-          {frameworks.map((f) => {
-            const active =
-              (selection.kind === "framework" || selection.kind === "frameworkitem") && selection.fw === f.id;
-            return (
-              <button
-                key={f.id}
-                className={`nav-item${active ? " active" : ""}`}
-                title={f.desc}
-                onClick={() => onSelect({ kind: "framework", fw: f.id })}
-              >
-                <Icon name="shield" size={16} /> {f.short}
-              </button>
-            );
-          })}
-        </>
-      )}
+      {frameworks.map((f) => {
+        const active =
+          (selection.kind === "framework" || selection.kind === "frameworkitem") && selection.fw === f.id;
+        return (
+          <button
+            key={f.id}
+            className={`nav-item${active ? " active" : ""}`}
+            title={f.desc}
+            onClick={() => onSelect({ kind: "framework", fw: f.id })}
+          >
+            <Icon name="shield" size={16} /> {f.short}
+          </button>
+        );
+      })}
 
       <div className="nav-section">
         <span>Buckets</span>

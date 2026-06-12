@@ -35,7 +35,7 @@ anything mapped to T1190".
 
 ### The ATT&CK matrix view
 
-The sidebar's **🎯 ATT&CK matrix** lays the mapped techniques out as the
+The sidebar's **MITRE ATT&CK** (under **Frameworks**) lays the mapped techniques out as the
 familiar kill-chain: one column per tactic, technique cards showing how many
 entries matched in the current time window (the matrix respects the filter
 bar). Click a technique to open its entries. The catalog is served at
@@ -88,7 +88,7 @@ mapping alongside ATT&CK.
 - **Map** — at ingest, `internal/otmap` stamps each entry with the Claroty
   alert-type codes it matches (stored in `entries.ot`), keyed off the CEF alert
   name. `internal/classify` marks these entries `device_class = ot`.
-- **View** — the sidebar's **OT alerts** opens a matrix with a **Security** and
+- **View** — the sidebar's **ICS/OT Alerts** (under **Frameworks**) opens a matrix with a **Security** and
   an **Integrity** column; each alert type shows its count in the current
   window and drills into the matching entries. An `ot` condition leaf makes the
   codes usable in buckets, rules and search, exactly like `mitre`.
@@ -120,7 +120,8 @@ Shipped:
   into Access/Integrity/Monitoring themes; OT-centric, so mostly fed by the
   Claroty alerts.
 
-Each opens from the sidebar's **Frameworks** section as a matrix (counts in the
+Each opens from the sidebar's **Frameworks** section — alongside MITRE ATT&CK
+and ICS/OT Alerts — as a matrix (counts in the
 current window; click a cell for the entries). The crosswalks are opinionated
 and coarse — a standards-aligned overview of what the sensors see, not an
 audit-grade control assessment. Catalogs are served at `GET /api/frameworks`.
