@@ -106,6 +106,69 @@ management stays at the IdP. OIDC users sign in **at the bucket**; on a
 same-host deployment the resulting session covers the hose and valve too
 (their own login forms take local credentials only).
 
+### Walkthrough: SSO with authentik
+
+A concrete end-to-end example. Replace `https://authentik.example.com` with
+your authentik URL and `https://bucket.example.com` with the externally visible
+bucket URL (for a local lab, `http://localhost:8082`).
+
+**1. Create the provider in authentik.** Admin interface →
+**Applications → Providers → Create → OAuth2/OpenID Provider**:
+
+- **Name:** `syslog-bucket`
+- **Authorization flow:** `default-provider-authorization-explicit-consent`
+  (or the implicit-consent flow if you don't want a consent screen)
+- **Client type:** `Confidential`
+- **Client ID / Client Secret:** authentik generates these; copy both for step 3
+- **Redirect URIs/Origins** (Strict): `https://bucket.example.com/api/auth/oidc/callback`
+  (it must match the redirect URL you give the bucket exactly)
+- **Signing Key:** the authentik self-signed key (the default)
+- Leave the default scopes (`openid`, `profile`, `email`); the bucket reads
+  `preferred_username`, `email`, and `name` from them.
+
+**2. Create the application.** **Applications → Applications → Create**: name it
+`syslog-bucket`, set the slug to `syslog-bucket`, and pick the provider from
+step 1. Bind the users or groups who should get access under the application's
+bindings.
+
+**3. Note the issuer URL.** authentik issues per-application, so the issuer is:
+
+```
+https://authentik.example.com/application/o/syslog-bucket/
+```
+
+(the trailing slash matters; the provider page lists it, and discovery lives at
+`<issuer>.well-known/openid-configuration`).
+
+**4. Configure the bucket.** Sign in as an admin →
+**Settings → Single sign-on (OIDC)**:
+
+| Field | Value |
+|-------|-------|
+| Enable OIDC | on |
+| Issuer URL | `https://authentik.example.com/application/o/syslog-bucket/` |
+| Client ID | from step 1 |
+| Client secret | from step 1 |
+| Redirect URL | `https://bucket.example.com/api/auth/oidc/callback` |
+| Button label | `authentik` |
+| Default role | `analyst` (promote specific users to admin afterwards) |
+
+Save. The bucket probes discovery and warns if the issuer isn't reachable; a
+clean save means it resolved.
+
+**5. Sign in.** Sign out, then click **Sign in with authentik** on the login
+page. First sign-in creates the local account (role = the default above);
+an existing admin can change its role under Users.
+
+**Gotchas.**
+
+- The redirect URL must match the provider's registered URI character-for-
+  character (authentik's Strict mode), including scheme, host, port, and path.
+- Serving over HTTPS? Set `BUCKET_COOKIE_SECURE=true` on the bucket (and
+  `YARD_COOKIE_SECURE=true` on hose/valve) so the session cookie is `Secure`.
+- If you run the bucket behind a reverse proxy, the redirect URL is the public
+  URL the browser sees, not the internal container address.
+
 ## Sessions & deployment notes
 
 - Sessions are opaque cookies (`HttpOnly`, `SameSite=Lax`); only a SHA-256 of

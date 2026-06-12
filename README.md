@@ -151,7 +151,7 @@ auto-tagged by rules:
 
 | Doc | Covers |
 |-----|--------|
-| [docs/AUTH.md](docs/AUTH.md) | bucket sign-in, roles, OIDC, sharing buckets |
+| [docs/AUTH.md](docs/AUTH.md) | bucket sign-in, roles, OIDC (with an authentik SSO walkthrough), sharing buckets |
 | [docs/MITRE.md](docs/MITRE.md) | ATT&CK mapping, the matrix view, the Claroty OT alert view, sorting, device class, valve technique filter |
 | [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md) | webhook / Slack-Teams / SMTP channels fired by the notify rule action |
 | [docs/SECURITY.md](docs/SECURITY.md) | threat model, what's defended, production hardening checklist |
