@@ -7,6 +7,7 @@ import { JobForm } from "./JobForm";
 import { Login } from "./Login";
 import { PresetsView } from "./PresetsView";
 import { Tail } from "./Tail";
+import { getTheme, toggleTheme } from "./theme";
 import { YardNav } from "./YardNav";
 
 type TabName = "jobs" | "presets";
@@ -56,6 +57,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   const [error, setError] = useState("");
   const [showTail, setShowTail] = useState(true);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [theme, setTheme] = useState(getTheme());
   const [hints, setHints] = useState<Record<string, string>>({});
   const paused = useRef(false);
   const readOnly = user?.role === "viewer";
@@ -126,6 +128,13 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
             <Icon name="stop" size={16} /> Stop all
           </button>
         )}
+        <button
+          className="help-btn"
+          title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+          onClick={() => setTheme(toggleTheme())}
+        >
+          <Icon name={theme === "dark" ? "light_mode" : "dark_mode"} size={18} />
+        </button>
         <button className="help-btn" title="About & help" onClick={() => setAboutOpen(true)}>
           <Icon name="help" size={18} />
         </button>

@@ -165,6 +165,27 @@ func (s *Store) DeleteSession(ctx context.Context, tokenHash string) error {
 	return err
 }
 
+// SlideSession pushes a session's idle expiry forward to now()+idle, for the
+// inactivity timeout. It only writes when the expiry is within (idle - 60s) of
+// now, so a busy session is touched at most ~once a minute rather than on every
+// request. Returns whether a row was updated (so the caller can refresh the
+// cookie's Max-Age to match).
+func (s *Store) SlideSession(ctx context.Context, tokenHash string, idle time.Duration) (bool, error) {
+	secs := int64(idle.Seconds())
+	// Touch at most once per minute, but never more than every half-window so a
+	// deliberately short idle (e.g. for testing) still slides before it lapses.
+	throttle := int64(60)
+	if secs/2 < throttle {
+		throttle = secs / 2
+	}
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE sessions
+		SET expires_at = now() + make_interval(secs => $2)
+		WHERE token_hash = $1 AND expires_at < now() + make_interval(secs => $3)`,
+		tokenHash, secs, secs-throttle)
+	return tag.RowsAffected() > 0, err
+}
+
 // DeleteUserSessions logs a user out everywhere (password change, disable).
 func (s *Store) DeleteUserSessions(ctx context.Context, userID int64) error {
 	_, err := s.Pool.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, userID)

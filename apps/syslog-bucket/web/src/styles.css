@@ -15,6 +15,25 @@
   --sev-debug: #607080;
 }
 
+/* Light theme: toggled via <html data-theme="light"> (see theme.ts). Only the
+   palette changes; everything else is built on these variables. */
+:root[data-theme="light"] {
+  --bg: #f4f6fa;
+  --bg-panel: #ffffff;
+  --bg-hover: #e9eef5;
+  --border: #d3dbe6;
+  --fg: #1b2431;
+  --fg-dim: #586273;
+  --accent: #1a73e8;
+  --sev-emerg: #d32f2f;
+  --sev-crit: #e64a19;
+  --sev-err: #ef6c00;
+  --sev-warn: #b8860b;
+  --sev-notice: #1976d2;
+  --sev-info: #5a6b78;
+  --sev-debug: #78909c;
+}
+
 * {
   box-sizing: border-box;
 }

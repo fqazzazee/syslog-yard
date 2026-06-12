@@ -31,6 +31,13 @@ type OIDC struct {
 	provider *oidc.Provider
 }
 
+// Probe forces discovery now so the settings UI can flag an unreachable issuer
+// immediately, rather than only at the first sign-in attempt.
+func (o *OIDC) Probe(ctx context.Context) error {
+	_, err := o.discover(ctx)
+	return err
+}
+
 func (o *OIDC) discover(ctx context.Context) (*oidc.Provider, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -57,11 +64,12 @@ func (o *OIDC) oauthConfig(p *oidc.Provider) *oauth2.Config {
 // HandleOIDCLogin starts the code flow: random state in a short-lived
 // cookie, then redirect to the provider.
 func (s *Service) HandleOIDCLogin(w http.ResponseWriter, r *http.Request) {
-	if s.oidc == nil {
+	o := s.currentOIDC()
+	if o == nil {
 		http.Error(w, "OIDC is not configured", http.StatusNotFound)
 		return
 	}
-	p, err := s.oidc.discover(r.Context())
+	p, err := o.discover(r.Context())
 	if err != nil {
 		http.Error(w, "identity provider unreachable: "+err.Error(), http.StatusBadGateway)
 		return
@@ -72,13 +80,14 @@ func (s *Service) HandleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 		MaxAge: int((10 * time.Minute).Seconds()), HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, Secure: s.cookieSecure,
 	})
-	http.Redirect(w, r, s.oidc.oauthConfig(p).AuthCodeURL(state), http.StatusFound)
+	http.Redirect(w, r, o.oauthConfig(p).AuthCodeURL(state), http.StatusFound)
 }
 
 // HandleOIDCCallback finishes the flow: verify state and ID token, map the
 // subject to a user (auto-provisioning on first sign-in), issue a session.
 func (s *Service) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
-	if s.oidc == nil {
+	o := s.currentOIDC()
+	if o == nil {
 		http.Error(w, "OIDC is not configured", http.StatusNotFound)
 		return
 	}
@@ -89,12 +98,12 @@ func (s *Service) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: stateCookie, Value: "", Path: "/api/auth/oidc", MaxAge: -1})
 
-	p, err := s.oidc.discover(r.Context())
+	p, err := o.discover(r.Context())
 	if err != nil {
 		http.Error(w, "identity provider unreachable: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	token, err := s.oidc.oauthConfig(p).Exchange(r.Context(), r.URL.Query().Get("code"))
+	token, err := o.oauthConfig(p).Exchange(r.Context(), r.URL.Query().Get("code"))
 	if err != nil {
 		http.Error(w, "OIDC code exchange failed: "+err.Error(), http.StatusBadGateway)
 		return
@@ -104,7 +113,7 @@ func (s *Service) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "provider returned no id_token", http.StatusBadGateway)
 		return
 	}
-	idToken, err := p.Verifier(&oidc.Config{ClientID: s.oidc.ClientID}).Verify(r.Context(), rawID)
+	idToken, err := p.Verifier(&oidc.Config{ClientID: o.ClientID}).Verify(r.Context(), rawID)
 	if err != nil {
 		http.Error(w, "ID token verification failed: "+err.Error(), http.StatusBadGateway)
 		return
@@ -119,7 +128,7 @@ func (s *Service) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u, err := s.userForSubject(r.Context(), idToken.Subject, claims.PreferredUsername, claims.Email, claims.Name)
+	u, err := s.userForSubject(r.Context(), o, idToken.Subject, claims.PreferredUsername, claims.Email, claims.Name)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -139,7 +148,7 @@ func (s *Service) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 // on first sign-in (OIDC subject mapping). Username collisions
 // with existing local accounts get a subject-derived suffix rather than
 // silently hijacking the local account.
-func (s *Service) userForSubject(ctx context.Context, subject, preferred, email, name string) (*store.User, error) {
+func (s *Service) userForSubject(ctx context.Context, o *OIDC, subject, preferred, email, name string) (*store.User, error) {
 	if u, err := s.store.GetUserByOIDCSubject(ctx, subject); err != nil || u != nil {
 		return u, err
 	}
@@ -150,7 +159,7 @@ func (s *Service) userForSubject(ctx context.Context, subject, preferred, email,
 	if username == "" {
 		username = "oidc-" + subject
 	}
-	role := s.oidc.DefaultRole
+	role := o.DefaultRole
 	if !store.ValidRole(role) {
 		role = store.RoleAnalyst
 	}

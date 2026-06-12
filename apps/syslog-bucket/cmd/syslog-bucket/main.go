@@ -100,14 +100,9 @@ func run() error {
 	if _, err := st.SeedDefaultBuckets(ctx); err != nil {
 		return err
 	}
-	var oidc *auth.OIDC
-	if cfg.OIDCIssuer != "" {
-		oidc = &auth.OIDC{
-			Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCClientSecret,
-			RedirectURL: cfg.OIDCRedirectURL, Name: cfg.OIDCName, DefaultRole: cfg.OIDCDefaultRole,
-		}
-	}
-	authSvc := auth.New(st, oidc, cfg.CookieSecure)
+	// OIDC and the session idle timeout are loaded from the DB (falling back to
+	// env) and applied inside api.New, so they can be reconfigured at runtime.
+	authSvc := auth.New(st, cfg.CookieSecure)
 
 	eng := engine.New(st)
 	if err := eng.Reload(ctx); err != nil {
@@ -147,7 +142,7 @@ func run() error {
 	}
 	httpSrv := &http.Server{
 		Addr:    cfg.APIAddr,
-		Handler: api.New(st, eng, hub, dispatcher, dist, hints, authSvc),
+		Handler: api.New(st, eng, hub, dispatcher, dist, hints, authSvc, cfg),
 	}
 	httpErr := make(chan error, 1)
 	go func() {

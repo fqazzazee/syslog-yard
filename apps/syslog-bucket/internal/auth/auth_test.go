@@ -13,7 +13,7 @@ import (
 // viewer role need no database — no cookie means no session lookup.
 func TestMiddlewareGating(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	svc := New(nil, nil, false)
+	svc := New(nil, false)
 	h := svc.Middleware(next)
 
 	cases := []struct {

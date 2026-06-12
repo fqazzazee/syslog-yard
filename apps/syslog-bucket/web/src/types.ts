@@ -138,6 +138,25 @@ export interface AuthInfo {
   oidc: { enabled: boolean; name?: string };
 }
 
+// Admin-editable runtime settings (OIDC + session), served by /api/settings.
+export interface OIDCSettings {
+  enabled: boolean;
+  issuer: string;
+  client_id: string;
+  redirect_url: string;
+  name: string;
+  default_role: Role;
+  has_secret: boolean; // the secret itself is never sent to the client
+  source: "db" | "env" | "none"; // where the effective config comes from
+}
+export interface SessionSettings {
+  idle_minutes: number;
+}
+export interface Settings {
+  oidc: OIDCSettings;
+  session: SessionSettings;
+}
+
 export interface BucketShare {
   user_id: number;
   username: string;

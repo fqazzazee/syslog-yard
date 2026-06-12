@@ -246,7 +246,10 @@ a real lab or a small deployment today. What's in place:
 - Notifications to webhook, Slack/Teams, and SMTP, from the bucket and in-stream
   on the valve ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)).
 - A unified, icon-driven UI across the three tools, with a built-in About/Help
-  panel (the `?` button) in every top bar.
+  panel (the `?` button) and a dark/light theme toggle (remembered per browser)
+  in every top bar.
+- Admin-configurable OIDC single sign-on and session idle-timeout, set from the
+  bucket's Settings panel and applied without a restart ([docs/AUTH.md](docs/AUTH.md)).
 
 A few things are still on the radar:
 

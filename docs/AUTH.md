@@ -70,7 +70,21 @@ see their effects.
 
 Any standard OIDC provider works (Keycloak, Authentik, Entra ID, Google,
 …). Register a confidential client whose redirect URI is
-`<bucket-url>/api/auth/oidc/callback`, then set:
+`<bucket-url>/api/auth/oidc/callback`.
+
+You can configure it two ways:
+
+- **In the UI (recommended):** sign in as an admin and open the account menu →
+  **Settings → Single sign-on (OIDC)**. Fill in the issuer, client id/secret,
+  redirect URL, button label, and default role, then Save. It takes effect
+  immediately, no restart: the login page's "Sign in with …" button appears (or
+  disappears) right away. The client secret is stored but never sent back to the
+  browser, so leaving the secret field blank on a later save keeps the existing
+  one. On save the bucket probes the issuer's discovery document and warns (non
+  fatally) if it can't be reached yet.
+- **By environment variable** (legacy / infrastructure-as-code): set the vars
+  below. They seed the config when nothing has been saved in the UI; once you
+  save in the UI, the stored config takes over (it wins over the env vars).
 
 | Env | Meaning |
 |------------------------------|--------------------------------------------|
@@ -80,6 +94,9 @@ Any standard OIDC provider works (Keycloak, Authentik, Entra ID, Google,
 | `BUCKET_OIDC_REDIRECT_URL` | the externally visible callback URL |
 | `BUCKET_OIDC_NAME` | login-button label (default `SSO`) |
 | `BUCKET_OIDC_DEFAULT_ROLE` | role for first-time OIDC users (default `analyst`) |
+
+The settings live in the bucket's `app_settings` table, so they survive
+restarts and are shared by every bucket replica pointed at the same database.
 
 The bucket's login page gains a "Sign in with …" button. First sign-in
 auto-provisions an account bound to the OIDC subject (username from
@@ -91,10 +108,16 @@ same-host deployment the resulting session covers the hose and valve too
 
 ## Sessions & deployment notes
 
-- Sessions are opaque cookies (`HttpOnly`, `SameSite=Lax`), valid 30 days;
-  only a SHA-256 of the token is stored server-side. Password changes and
-  account disables revoke existing sessions; the hose/valve verification
-  cache means revocation reaches them within ~30 seconds.
+- Sessions are opaque cookies (`HttpOnly`, `SameSite=Lax`); only a SHA-256 of
+  the token is stored server-side. Password changes and account disables revoke
+  existing sessions; the hose/valve verification cache means revocation reaches
+  them within ~30 seconds.
+- **Idle timeout (login timeout).** A session expires after a configurable
+  period of inactivity (default 30 days). Admins set it under **Settings →
+  Session**. Any authenticated request slides the expiry forward, so the timeout
+  effectively starts once a browser tab is closed or left idle. Note that an open
+  tab polling the UI counts as activity. The expiry is throttled to at most one
+  write per minute per session, so it adds no meaningful load.
 - Serving over HTTPS (recommended outside a lab)? Set
   `BUCKET_COOKIE_SECURE=true` on the bucket and `YARD_COOKIE_SECURE=true`
   on the hose/valve so cookies are marked `Secure`.

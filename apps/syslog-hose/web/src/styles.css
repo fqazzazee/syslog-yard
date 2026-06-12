@@ -12,6 +12,20 @@
   --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
+/* Light theme: toggled via <html data-theme="light"> (see theme.ts). */
+:root[data-theme="light"] {
+  --bg: #f4f6fa;
+  --bg2: #ffffff;
+  --bg3: #e9eef5;
+  --border: #d3dbe6;
+  --fg: #1b2431;
+  --dim: #586273;
+  --accent: #0f766e;
+  --accent-dark: #0a5851;
+  --red: #c9382e;
+  --amber: #b8860b;
+}
+
 * { box-sizing: border-box; }
 body {
   margin: 0;

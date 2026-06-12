@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -16,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/syslog-yard/syslog-bucket/internal/auth"
+	"github.com/syslog-yard/syslog-bucket/internal/config"
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
 	"github.com/syslog-yard/syslog-bucket/internal/mitre"
 	"github.com/syslog-yard/syslog-bucket/internal/notify"
@@ -32,13 +34,18 @@ type server struct {
 	notifier *notify.Dispatcher
 	web      fs.FS
 	hints    map[string]string
+	authSvc  *auth.Service
+	cfg      config.Config // env fallback for settings not yet stored in the DB
 }
 
-func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Dispatcher, web fs.FS, hints map[string]string, authSvc *auth.Service) http.Handler {
+func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Dispatcher, web fs.FS, hints map[string]string, authSvc *auth.Service, cfg config.Config) http.Handler {
 	if hints == nil {
 		hints = map[string]string{}
 	}
-	s := &server{store: st, engine: eng, hub: hub, notifier: notifier, web: web, hints: hints}
+	s := &server{store: st, engine: eng, hub: hub, notifier: notifier, web: web, hints: hints, authSvc: authSvc, cfg: cfg}
+	// Apply stored (or env-fallback) OIDC + session settings to the auth service
+	// before the server starts handling requests.
+	s.applyStoredSettings(context.Background())
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/healthz", s.healthz)
 	mux.HandleFunc("GET /api/hints", s.getHints)
@@ -59,6 +66,9 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Disp
 	mux.HandleFunc("PUT /api/auth/password", authSvc.HandlePassword)
 	mux.HandleFunc("GET /api/auth/oidc/login", authSvc.HandleOIDCLogin)
 	mux.HandleFunc("GET /api/auth/oidc/callback", authSvc.HandleOIDCCallback)
+	mux.HandleFunc("GET /api/settings", s.getSettings)
+	mux.HandleFunc("PUT /api/settings/oidc", s.putOIDCSettings)
+	mux.HandleFunc("PUT /api/settings/session", s.putSessionSettings)
 	mux.HandleFunc("GET /api/users", s.listUsers)
 	mux.HandleFunc("POST /api/users", s.createUser)
 	mux.HandleFunc("PUT /api/users/{id}", s.updateUser)

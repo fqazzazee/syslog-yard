@@ -47,10 +47,12 @@ import FrameworkView from "./components/FrameworkView";
 import MitreView from "./components/MitreView";
 import OTView from "./components/OTView";
 import RuleModal from "./components/RuleModal";
+import SettingsModal from "./components/SettingsModal";
 import Sidebar from "./components/Sidebar";
 import TagsModal from "./components/TagsModal";
 import UsersModal from "./components/UsersModal";
 import { YardNav } from "./components/YardNav";
+import { getTheme, toggleTheme } from "./theme";
 import { useLiveTail } from "./hooks";
 
 // Seed for a rule pre-filled from an entry ("promote to detection").
@@ -82,6 +84,7 @@ type ModalState =
   | { kind: "tags" }
   | { kind: "channels" }
   | { kind: "users" }
+  | { kind: "settings" }
   | { kind: "account" };
 
 // App gates the workspace behind a session: no user → login screen. The
@@ -122,6 +125,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
   const [hints, setHints] = useState<Record<string, string>>({});
   const [menuOpen, setMenuOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [theme, setTheme] = useState(getTheme());
   const menuRef = useRef<HTMLDivElement>(null);
   const entriesRef = useRef<Entry[]>([]);
   entriesRef.current = entries;
@@ -355,6 +359,13 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
             {live ? (wsOpen ? "Live" : "Connecting…") : "Paused"}
           </button>
         )}
+        <button
+          className="help-btn"
+          title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+          onClick={() => setTheme(toggleTheme())}
+        >
+          <Icon name={theme === "dark" ? "light_mode" : "dark_mode"} size={18} />
+        </button>
         <button className="help-btn" title="About & help" onClick={() => setAboutOpen(true)}>
           <Icon name="help" size={18} />
         </button>
@@ -371,9 +382,14 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
           {menuOpen && (
             <div className="user-dropdown" onClick={() => setMenuOpen(false)}>
               {me.role === "admin" && (
-                <button onClick={() => setModal({ kind: "users" })}>
-                  <Icon name="manage_accounts" size={16} /> Users…
-                </button>
+                <>
+                  <button onClick={() => setModal({ kind: "users" })}>
+                    <Icon name="manage_accounts" size={16} /> Users…
+                  </button>
+                  <button onClick={() => setModal({ kind: "settings" })}>
+                    <Icon name="tune" size={16} /> Settings…
+                  </button>
+                </>
               )}
               <button onClick={() => setModal({ kind: "account" })}>
                 <Icon name="account_circle" size={16} /> Account…
@@ -485,6 +501,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
       {modal.kind === "tags" && <TagsModal tags={tags} onClose={closeModal} />}
       {modal.kind === "channels" && <ChannelsModal channels={channels} onClose={closeModal} />}
       {modal.kind === "users" && <UsersModal me={me} onClose={() => closeModal(false)} />}
+      {modal.kind === "settings" && <SettingsModal onClose={() => closeModal(false)} />}
       {modal.kind === "account" && <AccountModal me={me} onClose={() => closeModal(false)} />}
     </div>
   );

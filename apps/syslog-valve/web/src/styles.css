@@ -10,6 +10,18 @@
   --err: #f85149;
 }
 
+/* Light theme: toggled via <html data-theme="light"> (see theme.ts). */
+:root[data-theme="light"] {
+  --bg: #f4f6fa;
+  --panel: #ffffff;
+  --border: #d3dbe6;
+  --text: #1b2431;
+  --muted: #586273;
+  --accent: #1a73e8;
+  --ok: #1a7f37;
+  --err: #c9382e;
+}
+
 * { box-sizing: border-box; }
 
 body {

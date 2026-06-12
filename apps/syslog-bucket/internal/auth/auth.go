@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -24,8 +25,10 @@ import (
 
 const (
 	sessionCookie = "bucket_session"
-	sessionTTL    = 30 * 24 * time.Hour
-	minPassword   = 8
+	// defaultIdleTTL applies until an admin sets one; generous so existing
+	// deployments aren't logged out before they configure it.
+	defaultIdleTTL = 30 * 24 * time.Hour
+	minPassword    = 8
 
 	// Brute-force throttle: lock an account's login for loginWindow after
 	// loginMaxFails consecutive bad passwords.
@@ -35,18 +38,54 @@ const (
 
 type Service struct {
 	store        *store.Store
-	oidc         *OIDC // nil = OIDC disabled
 	cookieSecure bool
 	loginLimiter *throttle
+
+	// oidc and idleTTL are runtime-configurable from the admin settings UI, so
+	// they're guarded rather than fixed at construction.
+	mu      sync.RWMutex
+	oidc    *OIDC // nil = OIDC disabled
+	idleTTL time.Duration
 }
 
-func New(st *store.Store, oidc *OIDC, cookieSecure bool) *Service {
+func New(st *store.Store, cookieSecure bool) *Service {
 	return &Service{
 		store:        st,
-		oidc:         oidc,
 		cookieSecure: cookieSecure,
 		loginLimiter: newThrottle(loginMaxFails, loginWindow),
+		idleTTL:      defaultIdleTTL,
 	}
+}
+
+// SetOIDC swaps the live identity-provider config (nil disables SSO). The next
+// sign-in and the login page's /api/auth/info pick it up immediately.
+func (s *Service) SetOIDC(o *OIDC) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.oidc = o
+}
+
+// SetIdleTTL sets how long a session survives without activity. Applies to
+// sessions issued or slid after the change.
+func (s *Service) SetIdleTTL(d time.Duration) {
+	if d <= 0 {
+		d = defaultIdleTTL
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.idleTTL = d
+}
+
+func (s *Service) currentOIDC() *OIDC {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.oidc
+}
+
+func (s *Service) currentIdle() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.idleTTL
 }
 
 // Bootstrap creates the initial admin account on an empty users table.
@@ -169,13 +208,21 @@ var viewerWritable = map[string]bool{
 func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if c, err := r.Cookie(sessionCookie); err == nil {
-			u, err := s.store.GetSessionUser(r.Context(), hashToken(c.Value))
+			tokenHash := hashToken(c.Value)
+			u, err := s.store.GetSessionUser(r.Context(), tokenHash)
 			if err != nil {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}
 			if u != nil {
 				r = r.WithContext(context.WithValue(r.Context(), ctxKey{}, u))
+				// Inactivity timeout: a request is activity, so push the expiry
+				// forward (throttled in the store). Refresh the cookie's Max-Age
+				// to match when it actually moved.
+				idle := s.currentIdle()
+				if slid, _ := s.store.SlideSession(r.Context(), tokenHash, idle); slid {
+					s.setSessionCookie(w, c.Value, idle)
+				}
 			}
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") && !publicAPI[r.URL.Path] {
@@ -197,16 +244,21 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 // --- session plumbing ---
 
 func (s *Service) issueSession(ctx context.Context, w http.ResponseWriter, userID int64) error {
+	idle := s.currentIdle()
 	token := randHex(32)
-	if err := s.store.CreateSession(ctx, hashToken(token), userID, time.Now().Add(sessionTTL)); err != nil {
+	if err := s.store.CreateSession(ctx, hashToken(token), userID, time.Now().Add(idle)); err != nil {
 		return err
 	}
+	s.setSessionCookie(w, token, idle)
+	return nil
+}
+
+func (s *Service) setSessionCookie(w http.ResponseWriter, token string, idle time.Duration) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: token, Path: "/",
-		MaxAge: int(sessionTTL.Seconds()), HttpOnly: true,
+		MaxAge: int(idle.Seconds()), HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, Secure: s.cookieSecure,
 	})
-	return nil
 }
 
 // --- handlers (mounted by the api package) ---
@@ -269,9 +321,10 @@ func (s *Service) HandleMe(w http.ResponseWriter, r *http.Request) {
 
 // HandleInfo tells the (pre-auth) login page which sign-in methods exist.
 func (s *Service) HandleInfo(w http.ResponseWriter, _ *http.Request) {
-	info := map[string]any{"oidc": map[string]any{"enabled": s.oidc != nil}}
-	if s.oidc != nil {
-		info["oidc"] = map[string]any{"enabled": true, "name": s.oidc.Name}
+	o := s.currentOIDC()
+	info := map[string]any{"oidc": map[string]any{"enabled": false}}
+	if o != nil {
+		info["oidc"] = map[string]any{"enabled": true, "name": o.Name}
 	}
 	writeJSON(w, info)
 }

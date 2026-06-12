@@ -12,6 +12,7 @@ import type {
   OTCatalog,
   Rule,
   Selection,
+  Settings,
   Stats,
   Tag,
   User,
@@ -165,6 +166,22 @@ export const login = (username: string, password: string) =>
 export const logout = () => request<void>("/api/auth/logout", { method: "POST" });
 export const changePassword = (oldPw: string, newPw: string) =>
   send<void>("PUT", "/api/auth/password", { old: oldPw, new: newPw });
+
+// --- admin settings (OIDC + session) ---
+
+export const fetchSettings = () => request<Settings>("/api/settings");
+// client_secret is only included when the admin actually entered a new one.
+export const saveOIDCSettings = (o: {
+  enabled: boolean;
+  issuer: string;
+  client_id: string;
+  redirect_url: string;
+  name: string;
+  default_role: string;
+  client_secret?: string;
+}) => send<{ ok: boolean; warning?: string }>("PUT", "/api/settings/oidc", o);
+export const saveSessionSettings = (idle_minutes: number) =>
+  send<{ ok: boolean }>("PUT", "/api/settings/session", { idle_minutes });
 
 export const fetchUsers = () => request<{ users: User[] }>("/api/users").then((b) => b.users);
 export const createUser = (u: { username: string; display_name: string; email: string; role: string; password: string }) =>
