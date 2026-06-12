@@ -12,6 +12,58 @@ Each tool runs standalone; together they form a complete loop —
 generate → route/filter → store — on one internal bridge network, with UIs on
 ports 8080 / 8081 / 8082.
 
+## Mission
+
+**Make syslog approachable — generate it, shape it, and triage it from a UI
+instead of hand-edited config files and `grep`.** syslog-yard is a self-hosted,
+open-source toolkit a single engineer can stand up in minutes: to *learn* how
+syslog actually flows, to *test* a pipeline before it touches production, and to
+*cut the noise* that would otherwise be paid for downstream. No agents to
+license, no per-GB bill, no SaaS account — just three small containers and a
+browser.
+
+## Why syslog-yard (and how it compares)
+
+**Easy to learn, easy to use.** The whole point is that you don't memorise a
+config language. You draw a flow on a canvas — drag an IN port, a filter, an OUT
+port; wire them; click **Apply** — and the valve compiles it to a syslog-ng
+config, syntax-checks it, swaps it in atomically, and keeps every version for
+one-click rollback. The bucket is a familiar email-style 3-pane inbox: search,
+tag, prioritise, mark benign. The hose generates realistic traffic from vendor
+presets at a rate you set, so you can exercise a pipeline end-to-end **without
+wiring up real devices**. One sign-in covers all three UIs.
+
+**UI-based syslog testing & manipulation.** Need to reproduce a FortiGate burst,
+a Cisco ASA login storm, or a Claroty OT alert to validate a detection or a
+forwarding rule? Pick the preset, set the rate, watch it flow through the valve's
+live per-wire counters into the bucket — all from the browser. Change a filter
+and re-apply in seconds; roll back if it's wrong.
+
+**Send your SOC less — pay for less.** Most SIEMs and log platforms (Splunk,
+Datadog, Microsoft Sentinel, Elastic) bill by **ingested volume or events/sec**,
+and raw syslog is mostly low-value noise. The valve sits in front of them as a
+visual filter/router: forward only the critical/high events to the expensive
+tier, drop or branch the rest, and cache the bulk to cheap local disk (or a NAS
+share) with logrotate retention. Trimming noise *before* it reaches the billed
+tier is exactly how you lower a per-GB SIEM bill — the same data-reduction idea
+sold as a commercial pipeline (e.g. **Cribl Stream**), here as an open graph you
+draw and apply yourself.
+
+**How it compares:**
+
+| Instead of… | syslog-yard gives you |
+|---|---|
+| Hand-editing `syslog-ng.conf` / `rsyslog.conf` and reloading | A visual node graph compiled to syslog-ng — syntax-checked, applied atomically, one-click rollback |
+| A paid routing/reduction pipeline (Cribl Stream, syslog-ng Premium Edition) | The same route / filter / drop / cache-to-disk, open-source and self-hosted |
+| A paid syslog server (e.g. SolarWinds Kiwi) | A multi-user, email-style triage server with rules, tags, and MITRE ATT&CK / OT mapping |
+| `logger` or throwaway scripts to fake traffic | A UI generator with realistic vendor presets (FortiGate, Cisco, Claroty CTD/xDome, …) at a set rate |
+| Paying your SIEM to ingest everything | Filtering and caching noise out before it ever reaches the billed tier |
+
+It is deliberately **not** an enterprise SIEM or a managed service. It's an
+opinionated, single-compose-file toolkit aimed at labs, training, pipeline
+prototyping, and small deployments — where being free, self-hosted, and quick to
+learn matters more than scale-out clustering and vendor support.
+
 ## Quick start
 
 ```sh
