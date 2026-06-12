@@ -9,6 +9,8 @@
 #   yardctl logs [svc] follow logs (all services or one)
 #   yardctl firewall   open the yard's ports (firewalld or ufw; needs sudo)
 #   yardctl firewall-remove   close them again
+#   yardctl service-install   start the suite at boot (systemd unit)
+#   yardctl service-remove    stop starting at boot (suite keeps running)
 #   yardctl smoke      send a test message through valve -> bucket
 #   yardctl reset-admin   set a fresh random syslog-bucket admin password
 #
@@ -82,6 +84,76 @@ firewall() {
     fi
 }
 
+SERVICE=syslog-yard.service
+
+# service_install makes the suite survive reboots: a oneshot systemd unit
+# runs `compose up -d` at boot. Docker (and podman run as root) get a
+# system unit; rootless podman gets a user unit plus lingering, since
+# without a daemon its restart policies don't outlive a reboot.
+service_install() {
+    command -v systemctl >/dev/null || die "systemd not found"
+    local docker_dep="" tmp
+    if command -v docker >/dev/null && docker compose version >/dev/null 2>&1; then
+        docker_dep=$'After=docker.service\nRequires=docker.service'
+    fi
+    tmp=$(mktemp)
+    cat >"$tmp" <<EOF
+[Unit]
+Description=syslog-yard suite (hose / valve / bucket)
+Wants=network-online.target
+After=network-online.target
+$docker_dep
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=600
+ExecStart=$YARD_DIR/scripts/yardctl service-up
+ExecStop=$YARD_DIR/scripts/yardctl down
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    if [ -n "$docker_dep" ] || [ "$(id -u)" -eq 0 ]; then
+        info "installing system unit /etc/systemd/system/$SERVICE"
+        sudo install -m 0644 "$tmp" "/etc/systemd/system/$SERVICE"
+        sudo systemctl daemon-reload
+        sudo systemctl enable --now "$SERVICE"
+        if [ -z "$docker_dep" ] && [ "$(id -u)" -eq 0 ]; then
+            info "note: the unit runs podman as root — keep doing manual ops as"
+            info "root too, or you'd be driving a second rootless instance"
+        fi
+    else
+        info "installing user unit (~/.config/systemd/user/$SERVICE)"
+        sed -i 's/^WantedBy=.*/WantedBy=default.target/' "$tmp"
+        mkdir -p "$HOME/.config/systemd/user"
+        install -m 0644 "$tmp" "$HOME/.config/systemd/user/$SERVICE"
+        systemctl --user daemon-reload
+        systemctl --user enable --now "$SERVICE"
+        # Lingering lets the user unit start at boot, before any login.
+        loginctl enable-linger "$USER" 2>/dev/null \
+            || sudo loginctl enable-linger "$USER"
+    fi
+    rm -f "$tmp"
+    info "service installed — the suite now starts at boot"
+}
+
+service_remove() {
+    if [ -f "/etc/systemd/system/$SERVICE" ]; then
+        sudo systemctl disable "$SERVICE" || true
+        sudo rm "/etc/systemd/system/$SERVICE"
+        sudo systemctl daemon-reload
+    elif [ -f "$HOME/.config/systemd/user/$SERVICE" ]; then
+        systemctl --user disable "$SERVICE" || true
+        rm "$HOME/.config/systemd/user/$SERVICE"
+        systemctl --user daemon-reload
+    else
+        info "no $SERVICE installed"
+        return
+    fi
+    info "boot service removed (suite untouched; 'yardctl down' stops it)"
+}
+
 status() {
     compose ps
     echo
@@ -146,6 +218,9 @@ case "${1:-}" in
     logs)             shift; compose logs -f "$@" ;;
     firewall)         firewall add ;;
     firewall-remove)  firewall remove ;;
+    service-install)  service_install ;;
+    service-remove)   service_remove ;;
+    service-up)       compose up -d ;; # systemd ExecStart hook (no build/curl)
     smoke)            smoke ;;
     reset-admin)      reset_admin ;;
     *)                grep '^#   yardctl' "$0" | sed 's/^# *//'; exit 1 ;;

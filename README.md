@@ -76,6 +76,7 @@ scripts/yardctl prereqs    # fresh system: install container runtime
 scripts/yardctl up         # build + start the suite
 scripts/yardctl firewall   # open ports (firewalld/ufw, needs sudo)
 scripts/yardctl status     # health check; also: down / restart / logs / smoke
+scripts/yardctl service-install  # optional: start the suite at boot (systemd)
 ```
 
 The UIs live at hose http://localhost:8080, valve http://localhost:8081, and
@@ -119,6 +120,7 @@ cd syslog-yard
 scripts/yardctl up         # builds the three images locally with podman, starts the suite
 scripts/yardctl firewall   # optional: open 8080-8082 + 6514 (firewalld/ufw, needs sudo)
 scripts/yardctl status     # health checks; also: down / restart / logs / smoke
+scripts/yardctl service-install  # optional: start the suite at boot (systemd)
 ```
 
 On WSL, run `wsl --update` first and use a recent Ubuntu or Fedora distro. Like
