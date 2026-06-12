@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchOt, fetchOtSummary } from "./../api";
-import type { Filters, OTCatalog, Selection } from "./../types";
+import { fetchCoverage, fetchOt, fetchOtSummary } from "./../api";
+import type { Coverage, Filters, OTCatalog, Selection } from "./../types";
+import { CoverageBanner } from "./CoverageBanner";
 
 interface Props {
   filters: Filters;
@@ -15,6 +16,7 @@ interface Props {
 export default function OTView({ filters, selection, onSelectAlert }: Props) {
   const [catalog, setCatalog] = useState<OTCatalog | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -29,6 +31,9 @@ export default function OTView({ filters, selection, onSelectAlert }: Props) {
     fetchOtSummary(filters, base)
       .then((c) => !stale && setCounts(c))
       .catch((e) => !stale && setError(String(e)));
+    fetchCoverage(filters, base)
+      .then((c) => !stale && setCoverage(c))
+      .catch(() => {});
     return () => {
       stale = true;
     };
@@ -56,6 +61,7 @@ export default function OTView({ filters, selection, onSelectAlert }: Props) {
         OT/ICS events mapped to Claroty-style alert types at ingest — {total.toLocaleString()} alerts in this window
         (CTD &amp; xDome). Click an alert type to see the entries.
       </p>
+      {coverage && <CoverageBanner covered={coverage.ot} total={coverage.total} noun="mapped to OT alerts" />}
       <div className="mitre-matrix ot-matrix">
         {byCategory.map(({ category, alerts }) => (
           <div key={category.id} className="mitre-col">

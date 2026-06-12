@@ -147,16 +147,23 @@ cd apps/syslog-bucket && go test ./...   # repeat for syslog-hose / syslog-valve
   import/export.
 - **syslog-bucket**: syslog-ng-fronted ingest into Postgres; email-style
   3-pane triage; virtual buckets (saved searches), color-coded tags, a rules
-  engine that tags/prioritizes/suppresses at ingest and retroactively;
-  **MITRE ATT&CK mapping at ingest with a kill-chain matrix view**, a
-  parallel **Claroty-style OT alert view** (Security / Integrity alert types),
-  and **compliance-framework views** (NIST CSF, CIS v8, IEC 62443) crosswalked
-  from them; curated default buckets for a SOC triage workload; rules that
+  engine that tags/prioritizes/suppresses/classifies at ingest and
+  retroactively; **MITRE ATT&CK mapping at ingest with a kill-chain matrix
+  view**, a parallel **Claroty-style OT alert view** (Security / Integrity
+  alert types), and **compliance-framework views** — NIST CSF, CIS v8,
+  IEC 62443, the **Cyber Kill Chain**, **NIST 800-53**, and a
+  **data-sensitivity** view — crosswalked from the ATT&CK/OT mappings (and the
+  device class), plus **custom org-defined frameworks** you create in the UI;
+  every mapping shows an **"unclassified" coverage gap**; **analyst
+  classification** — a `benign` triage outcome, hand-adding/removing ATT&CK and
+  OT codes on entries the packs missed, and **"Create rule from this entry"**
+  to promote a manual call into a reusable detection (`set_mitre`/`set_ot`
+  rule actions); curated default buckets for a SOC triage workload; rules that
   condition/tag on MITRE techniques; device-class tagging and
-  sortable/filterable columns; **notifications** (webhook, Slack/
-  Teams, SMTP) fired by a notify rule action; live tail over WebSocket; local
-  accounts + OIDC sign-in with admin/analyst/viewer roles; buckets shareable
-  per-user, view-only or editable.
+  sortable/filterable columns; **notifications** (webhook, Slack/Teams, SMTP)
+  fired by a notify rule action; live tail over WebSocket; local accounts +
+  OIDC sign-in with admin/analyst/viewer roles; buckets shareable per-user,
+  view-only or editable.
 
 ## Status
 
@@ -171,10 +178,15 @@ a real lab or small deployment today. What's in place:
   ([docs/SECURITY.md](docs/SECURITY.md)).
 - MITRE ATT&CK mapping with a kill-chain matrix, a Claroty-style OT alert view,
   sorting/filtering, and device classification ([docs/MITRE.md](docs/MITRE.md)).
-- **Compliance-framework views** — NIST CSF, CIS Controls v8 and IEC 62443
-  matrices, crosswalked from the ATT&CK / OT mappings; rules can condition (and
-  tag) on a MITRE technique; curated default buckets reflect a SOC triage
-  workload.
+- **Compliance-framework views** — NIST CSF, CIS Controls v8, IEC 62443, the
+  Cyber Kill Chain, NIST 800-53 and a data-sensitivity matrix, crosswalked from
+  the ATT&CK / OT mappings (and device class), plus custom org frameworks you
+  define in the UI; each view shows an "unclassified" coverage gap. Rules can
+  condition (and tag/classify) on a MITRE technique; curated default buckets
+  reflect a SOC triage workload.
+- **Analyst classification** — a `benign` triage outcome, hand-adding ATT&CK and
+  OT codes to entries the automated packs missed, and "Create rule from this
+  entry" to promote that manual call into a reusable detection.
 - Notifications to webhook / Slack-Teams / SMTP, from the bucket and in-stream
   on the valve ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)).
 - A unified, icon-driven UI across the three tools with a built-in About/Help
@@ -182,8 +194,6 @@ a real lab or small deployment today. What's in place:
 
 Possible improvements on the radar:
 
-- More framework crosswalks (Cyber Kill Chain, NIST 800-53, data-sensitivity,
-  custom org labels) and a visible "unclassified" coverage gap per mapping.
-- **Analyst classification** — hand-classify what the automated packs miss,
-  mark entries benign, and promote a manual call into a reusable detection.
 - Per-edge throughput rendered on the valve's wires from `syslog-ng-ctl stats`.
+- More crosswalk depth (sub-techniques, NIST 800-53 control enhancements) and a
+  one-click export of a framework's coverage as a report.

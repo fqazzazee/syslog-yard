@@ -119,19 +119,65 @@ Shipped:
 - **IEC 62443-3-3** — the seven Foundational Requirements (FR1–FR7), grouped
   into Access/Integrity/Monitoring themes; OT-centric, so mostly fed by the
   Claroty alerts.
+- **Cyber Kill Chain** — the seven Lockheed Martin intrusion stages
+  (Reconnaissance → Actions on Objectives), crosswalked to the techniques/alerts
+  that tend to surface in each.
+- **NIST 800-53 rev5** — a subset of control families as columns (AC, AU, SI,
+  CM, SC, IR) with representative controls.
+- **Data sensitivity** — unlike the others, this crosswalks the coarse
+  **device class** (not ATT&CK/OT codes) into sensitivity tiers
+  (Safety-critical → Low), so you can see how much of the stream comes from
+  OT/ICS vs. lower-sensitivity sources.
 
 Each opens from the sidebar's **Frameworks** section — alongside MITRE ATT&CK
-and ICS/OT Alerts — as a matrix (counts in the
-current window; click a cell for the entries). The crosswalks are opinionated
-and coarse — a standards-aligned overview of what the sensors see, not an
-audit-grade control assessment. Catalogs are served at `GET /api/frameworks`.
+and ICS/OT Alerts — as a matrix (counts in the current window; click a cell for
+the entries). The crosswalks are opinionated and coarse — a standards-aligned
+overview of what the sensors see, not an audit-grade control assessment.
+Catalogs are served at `GET /api/frameworks`.
 
-## Rules: condition & tag by technique
+### Custom org frameworks
+
+Admins can define their own framework in the UI (the **+** on the Frameworks
+sidebar section): a name, a flat list of items, and per item the ATT&CK
+techniques / OT codes / device classes it covers, with a free-text group label
+for its column. Custom frameworks are stored in Postgres (`custom_frameworks`,
+one JSON document per framework) and merged with the built-ins under a
+`custom-<id>` id — they behave identically in the matrix view and as filters.
+Managed at `POST/PUT/DELETE /api/frameworks` (admin only); submitted codes are
+validated against the catalogs, same integrity the built-ins are unit-tested for.
+
+### Coverage gap ("unclassified")
+
+Every matrix view — ATT&CK, OT, and each framework — shows a coverage banner:
+how many events in the window the mapping classifies, and how many it doesn't.
+It's a quick read on blind spots (e.g. "ATT&CK maps 18 of 6,077 — the rest is
+unclassified noise, or detections worth adding"). Served at `GET /api/coverage`
+(`?framework=<id>` adds the per-framework `covered` count); per-device-class
+counts at `GET /api/class/summary`.
+
+## Rules: condition, tag & classify by technique
 
 A rule's condition builder has a **MITRE technique** row: pick a technique and
 the rule matches entries mapped to it at ingest — so you can, e.g., auto-tag
-everything mapped to **T1190** or page on **T1071**. Combine it with the tag /
-priority / suppress / notify actions like any other condition.
+everything mapped to **T1190** or page on **T1071**. Beyond tag / priority /
+suppress / notify, two actions **stamp a classification**: **Set ATT&CK
+technique** (`set_mitre`) and **Set OT code** (`set_ot`) add codes to matching
+entries — at ingest and, via *Save + run on history*, retroactively.
+
+## Hand-classification & promoting to detections
+
+The automated packs miss things. From an entry's detail pane an analyst can:
+
+- **Mark it `benign`** — a fourth triage status alongside new / reviewing /
+  resolved, so a reviewed false positive drops out of the "new" queue.
+- **Hand-add or remove ATT&CK / OT codes** — the technique and OT-alert sections
+  are editable; pick a code from the catalog to classify what ingest missed, or
+  remove a wrong one (`PUT`/`DELETE /api/entries/{id}/mitre|ot/{code}`).
+- **Create rule from this entry** — seeds a new rule whose condition matches
+  similar entries (same app) and whose actions re-stamp any codes you just
+  added. *Save + run on history* applies it to past and future entries, turning
+  a one-off manual call into a reusable detection — and shrinking the coverage
+  gap.
 
 ## Default buckets
 

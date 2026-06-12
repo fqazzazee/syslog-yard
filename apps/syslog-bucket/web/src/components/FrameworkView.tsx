@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchMitreSummary, fetchOtSummary } from "./../api";
-import type { Filters, Framework, Selection } from "./../types";
+import { fetchClassSummary, fetchCoverage, fetchMitreSummary, fetchOtSummary } from "./../api";
+import type { Coverage, Filters, Framework, Selection } from "./../types";
+import { CoverageBanner } from "./CoverageBanner";
 
 interface Props {
   framework: Framework;
@@ -17,21 +18,28 @@ interface Props {
 export default function FrameworkView({ framework, filters, selection, onSelectItem }: Props) {
   const [mitre, setMitre] = useState<Record<string, number>>({});
   const [ot, setOt] = useState<Record<string, number>>({});
+  const [klass, setKlass] = useState<Record<string, number>>({});
+  const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Counts follow the filter bar but ignore any framework selection so the
-  // whole matrix stays populated.
+  // whole matrix stays populated. Coverage uses the framework selection so the
+  // server reports how much of the window this framework covers.
   useEffect(() => {
     const base: Selection =
       selection.kind === "framework" || selection.kind === "frameworkitem" ? { kind: "all" } : selection;
     let stale = false;
-    Promise.all([fetchMitreSummary(filters, base), fetchOtSummary(filters, base)])
-      .then(([m, o]) => {
+    Promise.all([fetchMitreSummary(filters, base), fetchOtSummary(filters, base), fetchClassSummary(filters, base)])
+      .then(([m, o, c]) => {
         if (stale) return;
         setMitre(m);
         setOt(o);
+        setKlass(c);
       })
       .catch((e) => !stale && setError(String(e)));
+    fetchCoverage(filters, { kind: "framework", fw: framework.id })
+      .then((c) => !stale && setCoverage(c))
+      .catch(() => {});
     return () => {
       stale = true;
     };
@@ -43,10 +51,11 @@ export default function FrameworkView({ framework, filters, selection, onSelectI
       let n = 0;
       for (const m of it.mitre ?? []) n += mitre[m] ?? 0;
       for (const o of it.ot ?? []) n += ot[o] ?? 0;
+      for (const c of it.class ?? []) n += klass[c] ?? 0;
       out[it.id] = n;
     }
     return out;
-  }, [framework, mitre, ot]);
+  }, [framework, mitre, ot, klass]);
 
   const byGroup = useMemo(
     () =>
@@ -68,8 +77,11 @@ export default function FrameworkView({ framework, filters, selection, onSelectI
     <div className="mitre-view">
       <p className="mitre-intro">
         {framework.name} — {framework.desc}. {total.toLocaleString()} mapped hits in this window (crosswalked from
-        ATT&CK techniques &amp; OT alerts). Click a cell to see the entries.
+        ATT&CK techniques, OT alerts &amp; device classes). Click a cell to see the entries.
       </p>
+      {coverage && (
+        <CoverageBanner covered={coverage.covered ?? 0} total={coverage.total} noun={`covered by ${framework.short}`} />
+      )}
       <div className="mitre-matrix">
         {byGroup.map(({ group, items }) => (
           <div key={group.id} className="mitre-col">

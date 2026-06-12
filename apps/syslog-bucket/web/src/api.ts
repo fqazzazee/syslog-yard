@@ -3,6 +3,7 @@ import type {
   Bucket,
   BucketShare,
   Channel,
+  Coverage,
   Delivery,
   Entry,
   Filters,
@@ -101,10 +102,28 @@ export const fetchOt = () => request<OTCatalog>("/api/ot");
 
 export const fetchFrameworks = () =>
   request<{ frameworks: Framework[] }>("/api/frameworks").then((b) => b.frameworks);
+export const createFramework = (f: Omit<Framework, "id">) =>
+  send<Framework>("POST", "/api/frameworks", f);
+export const updateFramework = (f: Framework) =>
+  send<Framework>("PUT", `/api/frameworks/${f.id}`, f);
+export const deleteFramework = (id: string) =>
+  request<void>(`/api/frameworks/${id}`, { method: "DELETE" });
 
 // Per-alert-type counts under the current filters (drives the OT view).
 export const fetchOtSummary = (f: Filters, sel: Selection) =>
   request<{ counts: Record<string, number> }>(`/api/ot/summary?${filterParams(f, sel)}`).then((b) => b.counts);
+
+// Per-device-class counts (drives the data-sensitivity framework view).
+export const fetchClassSummary = (f: Filters, sel: Selection) =>
+  request<{ counts: Record<string, number> }>(`/api/class/summary?${filterParams(f, sel)}`).then((b) => b.counts);
+
+// Classification coverage for the current window. For a whole-framework
+// selection we add the framework param so the server also returns `covered`.
+export const fetchCoverage = (f: Filters, sel: Selection) => {
+  const params = filterParams(f, sel);
+  if (sel.kind === "framework") params.set("framework", sel.fw);
+  return request<Coverage>(`/api/coverage?${params}`);
+};
 
 export const patchEntry = (id: number, patch: { status?: string; priority?: number }) =>
   send<Entry>("PATCH", `/api/entries/${id}`, patch);
@@ -114,6 +133,16 @@ export const tagEntry = (id: number, tagId: number) =>
 
 export const untagEntry = (id: number, tagId: number) =>
   request<Entry>(`/api/entries/${id}/tags/${tagId}`, { method: "DELETE" });
+
+// Hand-classification: add/remove a MITRE technique or OT code on one entry.
+export const addEntryMitre = (id: number, code: string) =>
+  request<Entry>(`/api/entries/${id}/mitre/${encodeURIComponent(code)}`, { method: "PUT" });
+export const delEntryMitre = (id: number, code: string) =>
+  request<Entry>(`/api/entries/${id}/mitre/${encodeURIComponent(code)}`, { method: "DELETE" });
+export const addEntryOT = (id: number, code: string) =>
+  request<Entry>(`/api/entries/${id}/ot/${encodeURIComponent(code)}`, { method: "PUT" });
+export const delEntryOT = (id: number, code: string) =>
+  request<Entry>(`/api/entries/${id}/ot/${encodeURIComponent(code)}`, { method: "DELETE" });
 
 export const fetchTags = () => request<{ tags: Tag[] }>("/api/tags").then((b) => b.tags);
 export const createTag = (t: Omit<Tag, "id">) => send<Tag>("POST", "/api/tags", t);

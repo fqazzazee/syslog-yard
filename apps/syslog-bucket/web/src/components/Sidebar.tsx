@@ -14,6 +14,7 @@ interface Props {
   onSelect: (sel: Selection) => void;
   onEditBucket: (b: Bucket | null) => void; // null = new
   onEditRule: (r: Rule | null) => void;
+  onEditFramework: (f: Framework | null) => void; // null = new custom framework
   onManageTags: () => void;
   onManageChannels: () => void;
 }
@@ -30,12 +31,14 @@ export default function Sidebar({
   onSelect,
   onEditBucket,
   onEditRule,
+  onEditFramework,
   onManageTags,
   onManageChannels,
 }: Props) {
   const isAll = selection.kind === "all";
   const isMitre = selection.kind === "mitre" || selection.kind === "technique";
   const isOT = selection.kind === "ot" || selection.kind === "otalert";
+  const isAdmin = me.role === "admin";
   return (
     <nav className="sidebar">
       <button className={`nav-item${isAll ? " active" : ""}`} onClick={() => onSelect({ kind: "all" })}>
@@ -44,6 +47,11 @@ export default function Sidebar({
 
       <div className="nav-section">
         <span>Frameworks</span>
+        {isAdmin && (
+          <button className="linkish" title="New custom framework" onClick={() => onEditFramework(null)}>
+            <Icon name="add" size={15} />
+          </button>
+        )}
       </div>
       <button className={`nav-item${isMitre ? " active" : ""}`} onClick={() => onSelect({ kind: "mitre" })}>
         <Icon name="crisis_alert" size={16} /> MITRE ATT&CK
@@ -54,15 +62,22 @@ export default function Sidebar({
       {frameworks.map((f) => {
         const active =
           (selection.kind === "framework" || selection.kind === "frameworkitem") && selection.fw === f.id;
+        const custom = f.id.startsWith("custom-");
         return (
-          <button
-            key={f.id}
-            className={`nav-item${active ? " active" : ""}`}
-            title={f.desc}
-            onClick={() => onSelect({ kind: "framework", fw: f.id })}
-          >
-            <Icon name="shield" size={16} /> {f.short}
-          </button>
+          <div key={f.id} className={`nav-item${active ? " active" : ""}`}>
+            <button
+              className="nav-label"
+              title={f.desc}
+              onClick={() => onSelect({ kind: "framework", fw: f.id })}
+            >
+              <Icon name={custom ? "category" : "shield"} size={15} /> {f.short}
+            </button>
+            {custom && isAdmin && (
+              <button className="nav-edit" title="Edit custom framework" onClick={() => onEditFramework(f)}>
+                <Icon name="edit" size={14} />
+              </button>
+            )}
+          </div>
         );
       })}
 

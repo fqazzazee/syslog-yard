@@ -1,5 +1,14 @@
-import { patchEntry, tagEntry, untagEntry } from "./../api";
-import type { Entry, Tag } from "./../types";
+import { useState } from "react";
+import {
+  addEntryMitre,
+  addEntryOT,
+  delEntryMitre,
+  delEntryOT,
+  patchEntry,
+  tagEntry,
+  untagEntry,
+} from "./../api";
+import type { Entry, MitreCatalog, OTCatalog, Tag } from "./../types";
 import { PRIORITY_NAMES, SEVERITY_NAMES, STATUS_NAMES } from "./../types";
 import { Icon } from "./Icon";
 import { TagChip, TagPicker } from "./Tags";
@@ -8,18 +17,69 @@ interface Props {
   entry: Entry;
   tags: Tag[];
   tagsById: Map<number, Tag>;
+  mitreCatalog: MitreCatalog | null;
+  otCatalog: OTCatalog | null;
   readOnly: boolean; // viewer role: triage controls hidden
   onClose: () => void;
   onUpdated: (e: Entry) => void;
+  onCreateRule: (e: Entry) => void;
 }
 
-export default function EntryDetail({ entry, tags, tagsById, readOnly, onClose, onUpdated }: Props) {
+// CodePicker is a small "+ add" dropdown of catalog codes not already present.
+function CodePicker({
+  options,
+  exclude,
+  label,
+  onPick,
+}: {
+  options: { id: string; name: string }[];
+  exclude: string[];
+  label: string;
+  onPick: (id: string) => void;
+}) {
+  const left = options.filter((o) => !exclude.includes(o.id));
+  if (left.length === 0) return null;
+  return (
+    <select
+      className="code-picker"
+      value=""
+      onChange={(e) => e.target.value && onPick(e.target.value)}
+      aria-label={label}
+    >
+      <option value="">{label}</option>
+      {left.map((o) => (
+        <option key={o.id} value={o.id}>
+          {o.id} — {o.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+export default function EntryDetail({
+  entry,
+  tags,
+  tagsById,
+  mitreCatalog,
+  otCatalog,
+  readOnly,
+  onClose,
+  onUpdated,
+  onCreateRule,
+}: Props) {
   const structured = entry.structured ?? {};
   const structuredKeys = Object.keys(structured);
+  const [busy, setBusy] = useState(false);
 
   const update = (op: Promise<Entry>) => {
-    op.then(onUpdated).catch(() => {});
+    setBusy(true);
+    op.then(onUpdated)
+      .catch(() => {})
+      .finally(() => setBusy(false));
   };
+
+  const mitre = entry.mitre ?? [];
+  const ot = entry.ot ?? [];
 
   return (
     <aside className="detail">
@@ -112,37 +172,79 @@ export default function EntryDetail({ entry, tags, tagsById, readOnly, onClose, 
         )}
       </dl>
 
-      {(entry.mitre ?? []).length > 0 && (
+      {(mitre.length > 0 || !readOnly) && (
         <>
           <h3>ATT&CK techniques</h3>
           <div className="detail-mitre">
-            {entry.mitre.map((id) => (
-              <a
-                key={id}
-                className="mitre-chip"
-                href={`https://attack.mitre.org/techniques/${id.replace(".", "/")}/`}
-                target="_blank"
-                rel="noreferrer"
-                title="Open on attack.mitre.org"
-              >
-                {id}
-              </a>
+            {mitre.map((id) => (
+              <span key={id} className="mitre-chip editable">
+                <a
+                  href={`https://attack.mitre.org/techniques/${id.replace(".", "/")}/`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Open on attack.mitre.org"
+                >
+                  {id}
+                </a>
+                {!readOnly && (
+                  <button
+                    className="chip-x"
+                    title="Remove classification"
+                    disabled={busy}
+                    onClick={() => update(delEntryMitre(entry.id, id))}
+                  >
+                    <Icon name="close" size={12} />
+                  </button>
+                )}
+              </span>
             ))}
+            {!readOnly && mitreCatalog && (
+              <CodePicker
+                options={mitreCatalog.techniques}
+                exclude={mitre}
+                label="+ technique"
+                onPick={(id) => update(addEntryMitre(entry.id, id))}
+              />
+            )}
           </div>
         </>
       )}
 
-      {(entry.ot ?? []).length > 0 && (
+      {(ot.length > 0 || !readOnly) && (
         <>
           <h3>OT alerts</h3>
           <div className="detail-mitre">
-            {entry.ot.map((id) => (
-              <span key={id} className="mitre-chip ot-chip" title="Claroty OT alert type">
+            {ot.map((id) => (
+              <span key={id} className="mitre-chip ot-chip editable" title="Claroty OT alert type">
                 {id}
+                {!readOnly && (
+                  <button
+                    className="chip-x"
+                    title="Remove classification"
+                    disabled={busy}
+                    onClick={() => update(delEntryOT(entry.id, id))}
+                  >
+                    <Icon name="close" size={12} />
+                  </button>
+                )}
               </span>
             ))}
+            {!readOnly && otCatalog && (
+              <CodePicker
+                options={otCatalog.alert_types}
+                exclude={ot}
+                label="+ OT code"
+                onPick={(id) => update(addEntryOT(entry.id, id))}
+              />
+            )}
           </div>
         </>
+      )}
+
+      {!readOnly && (
+        <button className="linkish promote" title="Make this classification reusable" onClick={() => onCreateRule(entry)}>
+          <Icon name="rule" size={14} /> Create rule from this entry
+        </button>
       )}
 
       <h3>Message</h3>

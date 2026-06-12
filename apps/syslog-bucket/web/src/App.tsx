@@ -7,13 +7,32 @@ import {
   fetchFrameworks,
   fetchHints,
   fetchMe,
+  fetchMitre,
+  fetchOt,
   fetchRules,
   fetchStats,
   fetchTags,
   liveTailURL,
   logout,
 } from "./api";
-import type { AuthInfo, Bucket, Channel, Entry, Filters, Framework, Rule, Selection, SortKey, Stats, Tag, User } from "./types";
+import type {
+  Action,
+  AuthInfo,
+  Bucket,
+  Channel,
+  Cond,
+  Entry,
+  Filters,
+  Framework,
+  MitreCatalog,
+  OTCatalog,
+  Rule,
+  Selection,
+  SortKey,
+  Stats,
+  Tag,
+  User,
+} from "./types";
 import { About } from "./components/About";
 import AccountModal from "./components/AccountModal";
 import BucketModal from "./components/BucketModal";
@@ -21,6 +40,7 @@ import ChannelsModal from "./components/ChannelsModal";
 import EntryDetail from "./components/EntryDetail";
 import { Icon } from "./components/Icon";
 import FilterBar from "./components/FilterBar";
+import FrameworkEditor from "./components/FrameworkEditor";
 import Login from "./components/Login";
 import LogTable from "./components/LogTable";
 import FrameworkView from "./components/FrameworkView";
@@ -32,6 +52,13 @@ import TagsModal from "./components/TagsModal";
 import UsersModal from "./components/UsersModal";
 import { YardNav } from "./components/YardNav";
 import { useLiveTail } from "./hooks";
+
+// Seed for a rule pre-filled from an entry ("promote to detection").
+export interface RuleSeed {
+  name?: string;
+  condition?: Cond;
+  actions?: Action[];
+}
 
 const MAX_ROWS = 2000;
 
@@ -50,7 +77,8 @@ const initialFilters: Filters = {
 type ModalState =
   | { kind: "none" }
   | { kind: "bucket"; bucket: Bucket | null }
-  | { kind: "rule"; rule: Rule | null }
+  | { kind: "rule"; rule: Rule | null; seed?: RuleSeed }
+  | { kind: "frameworkEditor"; framework: Framework | null }
   | { kind: "tags" }
   | { kind: "channels" }
   | { kind: "users" }
@@ -85,6 +113,8 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
+  const [mitreCatalog, setMitreCatalog] = useState<MitreCatalog | null>(null);
+  const [otCatalog, setOtCatalog] = useState<OTCatalog | null>(null);
   const [tags, setTags] = useState<Tag[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -137,10 +167,17 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
     void reloadMeta();
   }, [reloadMeta]);
 
-  // Framework catalogs are static; load them once.
-  useEffect(() => {
+  const reloadFrameworks = useCallback(() => {
     fetchFrameworks().then(setFrameworks).catch(() => {});
   }, []);
+
+  // Frameworks include site-defined ones, so reload after edits. The MITRE/OT
+  // catalogs (used by hand-classification pickers) are static.
+  useEffect(() => {
+    reloadFrameworks();
+    fetchMitre().then(setMitreCatalog).catch(() => {});
+    fetchOt().then(setOtCatalog).catch(() => {});
+  }, [reloadFrameworks]);
 
   // The matrix views (ATT&CK / OT) render their own data; the entry list and
   // live tail pause while one is open.
@@ -253,9 +290,27 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
     setModal({ kind: "none" });
     if (changed) {
       void reloadMeta();
+      reloadFrameworks();
       // A rule/bucket change can reshape the current view.
       setFilters((f) => ({ ...f }));
     }
+  };
+
+  // "Create rule from this entry": seed a condition that matches similar
+  // entries (same app), plus actions to re-stamp any hand-added classification.
+  const createRuleFromEntry = (entry: Entry) => {
+    const actions: Action[] = [];
+    if ((entry.mitre ?? []).length > 0) actions.push({ type: "set_mitre", mitre: entry.mitre });
+    if ((entry.ot ?? []).length > 0) actions.push({ type: "set_ot", ot: entry.ot });
+    const condition: Cond =
+      entry.app_name !== ""
+        ? { all: [{ field: "app_name", op: "eq", value: entry.app_name }] }
+        : { field: "host", op: "eq", value: entry.host };
+    setModal({
+      kind: "rule",
+      rule: null,
+      seed: { name: entry.app_name ? `Classify ${entry.app_name}` : "Classify entries", condition, actions },
+    });
   };
 
   const title =
@@ -348,6 +403,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
           }}
           onEditBucket={(bucket) => setModal({ kind: "bucket", bucket })}
           onEditRule={(rule) => setModal({ kind: "rule", rule })}
+          onEditFramework={(framework) => setModal({ kind: "frameworkEditor", framework })}
           onManageTags={() => setModal({ kind: "tags" })}
           onManageChannels={() => setModal({ kind: "channels" })}
         />
@@ -392,9 +448,12 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
                     entry={selected}
                     tags={tags}
                     tagsById={tagsById}
+                    mitreCatalog={mitreCatalog}
+                    otCatalog={otCatalog}
                     readOnly={readOnly}
                     onClose={() => setSelected(null)}
                     onUpdated={onEntryUpdated}
+                    onCreateRule={createRuleFromEntry}
                   />
                 )}
               </>
@@ -404,7 +463,25 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
       </div>
 
       {modal.kind === "bucket" && <BucketModal bucket={modal.bucket} tags={tags} me={me} onClose={closeModal} />}
-      {modal.kind === "rule" && <RuleModal rule={modal.rule} tags={tags} channels={channels} onClose={closeModal} />}
+      {modal.kind === "rule" && (
+        <RuleModal
+          rule={modal.rule}
+          seed={modal.seed}
+          tags={tags}
+          channels={channels}
+          mitreCatalog={mitreCatalog}
+          otCatalog={otCatalog}
+          onClose={closeModal}
+        />
+      )}
+      {modal.kind === "frameworkEditor" && (
+        <FrameworkEditor
+          framework={modal.framework}
+          mitreCatalog={mitreCatalog}
+          otCatalog={otCatalog}
+          onClose={closeModal}
+        />
+      )}
       {modal.kind === "tags" && <TagsModal tags={tags} onClose={closeModal} />}
       {modal.kind === "channels" && <ChannelsModal channels={channels} onClose={closeModal} />}
       {modal.kind === "users" && <UsersModal me={me} onClose={() => closeModal(false)} />}

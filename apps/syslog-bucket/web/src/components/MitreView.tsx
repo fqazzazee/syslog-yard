@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchMitre, fetchMitreSummary } from "./../api";
-import type { Filters, MitreCatalog, Selection } from "./../types";
+import { fetchCoverage, fetchMitre, fetchMitreSummary } from "./../api";
+import type { Coverage, Filters, MitreCatalog, Selection } from "./../types";
+import { CoverageBanner } from "./CoverageBanner";
 
 interface Props {
   filters: Filters;
@@ -14,6 +15,7 @@ interface Props {
 export default function MitreView({ filters, selection, onSelectTechnique }: Props) {
   const [catalog, setCatalog] = useState<MitreCatalog | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -28,6 +30,9 @@ export default function MitreView({ filters, selection, onSelectTechnique }: Pro
     fetchMitreSummary(filters, base)
       .then((c) => !stale && setCounts(c))
       .catch((e) => !stale && setError(String(e)));
+    fetchCoverage(filters, base)
+      .then((c) => !stale && setCoverage(c))
+      .catch(() => {});
     return () => {
       stale = true;
     };
@@ -55,6 +60,7 @@ export default function MitreView({ filters, selection, onSelectTechnique }: Pro
         Events mapped to MITRE ATT&CK at ingest — {total.toLocaleString()} technique hits in this window.
         Click a technique to see the entries.
       </p>
+      {coverage && <CoverageBanner covered={coverage.mitre} total={coverage.total} noun="mapped to ATT&CK" />}
       <div className="mitre-matrix">
         {byTactic.map(({ tactic, techniques }) => (
           <div key={tactic.id} className="mitre-col">

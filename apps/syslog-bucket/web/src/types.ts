@@ -66,6 +66,7 @@ export interface FrameworkItem {
   group: string;
   mitre?: string[];
   ot?: string[];
+  class?: string[]; // device classes that satisfy it (data-sensitivity)
 }
 export interface Framework {
   id: string;
@@ -145,10 +146,20 @@ export interface BucketShare {
 }
 
 export interface Action {
-  type: "tag" | "set_priority" | "suppress" | "notify";
+  type: "tag" | "set_priority" | "suppress" | "notify" | "set_mitre" | "set_ot";
   tag_id?: number;
   priority?: number;
   channel_id?: number;
+  mitre?: string[]; // set_mitre: ATT&CK technique IDs to stamp
+  ot?: string[]; // set_ot: Claroty OT alert codes to stamp
+}
+
+// Coverage gap from /api/coverage: how much of the window is classified.
+export interface Coverage {
+  total: number;
+  mitre: number;
+  ot: number;
+  covered?: number; // present when a ?framework= was requested
 }
 
 // Notification channel. config is kind-specific; the SMTP password is
@@ -224,4 +235,4 @@ export const PRIORITY_NAMES = ["—", "Low", "Med", "High"] as const;
 // Coarse device classes from internal/classify (server-side).
 export const DEVICE_CLASSES = ["firewall", "network", "host", "windows", "ot"] as const;
 
-export const STATUS_NAMES = ["new", "reviewing", "resolved"] as const;
+export const STATUS_NAMES = ["new", "reviewing", "resolved", "benign"] as const;

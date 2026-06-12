@@ -440,6 +440,71 @@ func (s *Store) OTSummary(ctx context.Context, f EntryFilter) (map[string]int64,
 	return out, rows.Err()
 }
 
+// ClassSummary counts entries per device class, scoped by the filter — the data
+// behind the data-sensitivity framework's counts. Entries with no class ("")
+// are excluded (they show up as the coverage gap instead).
+func (s *Store) ClassSummary(ctx context.Context, f EntryFilter) (map[string]int64, error) {
+	conds, args, err := f.whereParts()
+	if err != nil {
+		return nil, err
+	}
+	conds = append(conds, "e.device_class <> ''")
+	sql := `SELECT e.device_class, count(*) FROM entries e WHERE ` +
+		strings.Join(conds, " AND ") + ` GROUP BY e.device_class`
+	rows, err := s.Pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var class string
+		var n int64
+		if err := rows.Scan(&class, &n); err != nil {
+			return nil, err
+		}
+		out[class] = n
+	}
+	return out, rows.Err()
+}
+
+// Coverage is the classification-gap summary: how many entries in the window
+// carry any mitre / ot mapping, against the total.
+type Coverage struct {
+	Total       int64 `json:"total"`
+	MitreMapped int64 `json:"mitre"`
+	OTMapped    int64 `json:"ot"`
+}
+
+// CoverageSummary returns the mapped/total counts in one pass, so a view can
+// show "N of M events unmapped".
+func (s *Store) CoverageSummary(ctx context.Context, f EntryFilter) (Coverage, error) {
+	conds, args, err := f.whereParts()
+	if err != nil {
+		return Coverage{}, err
+	}
+	sql := `SELECT count(*),
+	               count(*) FILTER (WHERE cardinality(e.mitre) > 0),
+	               count(*) FILTER (WHERE cardinality(e.ot) > 0)
+	        FROM entries e WHERE ` + strings.Join(conds, " AND ")
+	var c Coverage
+	err = s.Pool.QueryRow(ctx, sql, args...).Scan(&c.Total, &c.MitreMapped, &c.OTMapped)
+	return c, err
+}
+
+// CountEntries returns how many entries match the filter — used for per-
+// framework coverage (entries the framework's crosswalk covers).
+func (s *Store) CountEntries(ctx context.Context, f EntryFilter) (int64, error) {
+	conds, args, err := f.whereParts()
+	if err != nil {
+		return 0, err
+	}
+	var n int64
+	err = s.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM entries e WHERE `+strings.Join(conds, " AND "), args...).Scan(&n)
+	return n, err
+}
+
 func (s *Store) GetEntry(ctx context.Context, id int64) (*Entry, error) {
 	f := EntryFilter{Limit: 1, IncludeSuppressed: true}
 	rows, err := s.ListEntries(ctx, f.withID(id))
@@ -487,6 +552,49 @@ func (s *Store) UntagEntry(ctx context.Context, entryID, tagID int64) error {
 	return err
 }
 
+// classColumn guards which array column hand-classification may touch.
+func classColumn(field string) (string, bool) {
+	switch field {
+	case "mitre", "ot":
+		return field, true
+	}
+	return "", false
+}
+
+// AddEntryClass appends a mitre technique / ot code to an entry by hand (the
+// analyst classifying what the automated packs missed). Idempotent: the code is
+// only added if not already present. field is "mitre" or "ot".
+func (s *Store) AddEntryClass(ctx context.Context, entryID int64, field, code string) (*Entry, error) {
+	col, ok := classColumn(field)
+	if !ok {
+		return nil, fmt.Errorf("bad classification field %q", field)
+	}
+	tag, err := s.Pool.Exec(ctx,
+		fmt.Sprintf(`UPDATE entries SET %s = array_append(%s, $2) WHERE id = $1 AND NOT %s @> ARRAY[$2]`, col, col, col),
+		entryID, code)
+	if err != nil {
+		return nil, err
+	}
+	// A no-op (code already present, or unknown id) still returns the entry so
+	// the UI can refresh; GetEntry returns nil for a genuinely missing id.
+	_ = tag
+	return s.GetEntry(ctx, entryID)
+}
+
+// RemoveEntryClass removes a hand-added mitre/ot code from an entry.
+func (s *Store) RemoveEntryClass(ctx context.Context, entryID int64, field, code string) (*Entry, error) {
+	col, ok := classColumn(field)
+	if !ok {
+		return nil, fmt.Errorf("bad classification field %q", field)
+	}
+	if _, err := s.Pool.Exec(ctx,
+		fmt.Sprintf(`UPDATE entries SET %s = array_remove(%s, $2) WHERE id = $1`, col, col),
+		entryID, code); err != nil {
+		return nil, err
+	}
+	return s.GetEntry(ctx, entryID)
+}
+
 // withID is a tiny helper so GetEntry can reuse the ListEntries scan path.
 func (f EntryFilter) withID(id int64) EntryFilter {
 	before := id + 1
@@ -494,6 +602,26 @@ func (f EntryFilter) withID(id int64) EntryFilter {
 	f.BeforeID = &before
 	f.AfterID = &after
 	return f
+}
+
+// whereParts compiles the filter's condition (and the suppressed guard) into a
+// list of WHERE clauses plus their positional args — the shared front half of
+// the summary/count queries.
+func (f EntryFilter) whereParts() ([]string, []any, error) {
+	var args []any
+	arg := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	condSQL, err := f.Cond.CompileSQL(arg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("compile condition: %w", err)
+	}
+	conds := []string{condSQL}
+	if !f.IncludeSuppressed {
+		conds = append(conds, "NOT e.suppressed")
+	}
+	return conds, args, nil
 }
 
 func (s *Store) ListSources(ctx context.Context) ([]Source, error) {

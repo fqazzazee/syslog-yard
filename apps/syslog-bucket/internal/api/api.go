@@ -17,7 +17,6 @@ import (
 
 	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
-	"github.com/syslog-yard/syslog-bucket/internal/frameworks"
 	"github.com/syslog-yard/syslog-bucket/internal/mitre"
 	"github.com/syslog-yard/syslog-bucket/internal/notify"
 	"github.com/syslog-yard/syslog-bucket/internal/otmap"
@@ -47,7 +46,12 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Disp
 	mux.HandleFunc("GET /api/mitre/summary", s.getMitreSummary)
 	mux.HandleFunc("GET /api/ot", s.getOT)
 	mux.HandleFunc("GET /api/ot/summary", s.getOTSummary)
+	mux.HandleFunc("GET /api/class/summary", s.getClassSummary)
+	mux.HandleFunc("GET /api/coverage", s.getCoverage)
 	mux.HandleFunc("GET /api/frameworks", s.getFrameworks)
+	mux.HandleFunc("POST /api/frameworks", s.createFramework)
+	mux.HandleFunc("PUT /api/frameworks/{id}", s.updateFramework)
+	mux.HandleFunc("DELETE /api/frameworks/{id}", s.deleteFramework)
 	mux.HandleFunc("POST /api/auth/login", authSvc.HandleLogin)
 	mux.HandleFunc("POST /api/auth/logout", authSvc.HandleLogout)
 	mux.HandleFunc("GET /api/auth/me", authSvc.HandleMe)
@@ -66,6 +70,10 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Disp
 	mux.HandleFunc("PATCH /api/entries/{id}", s.patchEntry)
 	mux.HandleFunc("PUT /api/entries/{id}/tags/{tag}", s.tagEntry)
 	mux.HandleFunc("DELETE /api/entries/{id}/tags/{tag}", s.untagEntry)
+	mux.HandleFunc("PUT /api/entries/{id}/mitre/{code}", s.addEntryMitre)
+	mux.HandleFunc("DELETE /api/entries/{id}/mitre/{code}", s.delEntryMitre)
+	mux.HandleFunc("PUT /api/entries/{id}/ot/{code}", s.addEntryOT)
+	mux.HandleFunc("DELETE /api/entries/{id}/ot/{code}", s.delEntryOT)
 	mux.HandleFunc("GET /api/sources", s.listSources)
 	mux.HandleFunc("GET /api/stats", s.stats)
 	mux.HandleFunc("GET /api/tags", s.listTags)
@@ -136,13 +144,6 @@ func (s *server) getOT(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, otmap.Get())
 }
 
-// getFrameworks returns the compliance-framework catalogs (NIST CSF, CIS,
-// IEC 62443). The UI aggregates per-item counts from the mitre/ot summaries,
-// so there is no separate framework-summary endpoint.
-func (s *server) getFrameworks(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{"frameworks": frameworks.All()})
-}
-
 // getOTSummary counts entries per OT alert-type code, scoped by the same
 // filter query the entry list uses.
 func (s *server) getOTSummary(w http.ResponseWriter, r *http.Request) {
@@ -160,6 +161,69 @@ func (s *server) getOTSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"counts": counts})
+}
+
+// getClassSummary counts entries per device class — the data behind the
+// data-sensitivity framework's counts.
+func (s *server) getClassSummary(w http.ResponseWriter, r *http.Request) {
+	cond, err := s.condFromRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	counts, err := s.store.ClassSummary(r.Context(), store.EntryFilter{
+		Cond:              cond,
+		IncludeSuppressed: r.URL.Query().Get("include_suppressed") == "true",
+	})
+	if err != nil {
+		s.internalError(w, "class summary", err)
+		return
+	}
+	writeJSON(w, map[string]any{"counts": counts})
+}
+
+// getCoverage reports the classification gap for the current window: how many
+// entries carry any mitre / ot mapping out of the total. With a ?framework=
+// (and optional ?item=), it also reports how many that framework's crosswalk
+// covers. The base counts deliberately ignore framework/item so "covered" is
+// measured against the unfiltered window.
+func (s *server) getCoverage(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	fw, item := q.Get("framework"), q.Get("item")
+	includeSuppressed := q.Get("include_suppressed") == "true"
+
+	// Base filters without framework/item.
+	q.Del("framework")
+	q.Del("item")
+	r.URL.RawQuery = q.Encode()
+	base, err := s.condFromRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	cov, err := s.store.CoverageSummary(r.Context(), store.EntryFilter{Cond: base, IncludeSuppressed: includeSuppressed})
+	if err != nil {
+		s.internalError(w, "coverage", err)
+		return
+	}
+	out := map[string]any{"total": cov.Total, "mitre": cov.MitreMapped, "ot": cov.OTMapped}
+	if fw != "" {
+		fwCond, err := s.frameworkCond(r.Context(), fw, item)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		covered, err := s.store.CountEntries(r.Context(), store.EntryFilter{
+			Cond:              rules.Cond{All: []rules.Cond{base, fwCond}},
+			IncludeSuppressed: includeSuppressed,
+		})
+		if err != nil {
+			s.internalError(w, "framework coverage", err)
+			return
+		}
+		out["covered"] = covered
+	}
+	writeJSON(w, out)
 }
 
 // condFromRequest translates the SPA's filter query parameters — plus an
@@ -252,34 +316,11 @@ func (s *server) condFromRequest(r *http.Request) (rules.Cond, error) {
 		all = append(all, rules.Cond{Any: any})
 	}
 	if fw := q.Get("framework"); fw != "" {
-		// A framework item matches any of the mitre techniques / ot codes it
-		// crosswalks to. With no item, match anything the whole framework maps.
-		item := q.Get("item")
-		var any []rules.Cond
-		add := func(mIDs, otIDs []string) {
-			for _, m := range mIDs {
-				any = append(any, rules.Cond{Mitre: m})
-			}
-			for _, o := range otIDs {
-				any = append(any, rules.Cond{OT: o})
-			}
+		c, err := s.frameworkCond(r.Context(), fw, q.Get("item"))
+		if err != nil {
+			return rules.Cond{}, err
 		}
-		if item != "" {
-			mIDs, otIDs, ok := frameworks.Expand(fw, item)
-			if !ok {
-				return rules.Cond{}, errors.New("unknown framework item")
-			}
-			add(mIDs, otIDs)
-		} else {
-			f, ok := frameworks.Get(fw)
-			if !ok {
-				return rules.Cond{}, errors.New("unknown framework")
-			}
-			for _, it := range f.Items {
-				add(it.Mitre, it.OT)
-			}
-		}
-		all = append(all, rules.Cond{Any: any})
+		all = append(all, c)
 	}
 	if v := q.Get("tag_id"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
@@ -374,8 +415,8 @@ func (s *server) patchEntry(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &patch) {
 		return
 	}
-	if patch.Status != nil && *patch.Status != "new" && *patch.Status != "reviewing" && *patch.Status != "resolved" {
-		http.Error(w, "status must be new, reviewing, or resolved", http.StatusBadRequest)
+	if patch.Status != nil && !validStatus(*patch.Status) {
+		http.Error(w, "status must be new, reviewing, resolved, or benign", http.StatusBadRequest)
 		return
 	}
 	if patch.Priority != nil && (*patch.Priority < 0 || *patch.Priority > 3) {
@@ -394,8 +435,66 @@ func (s *server) patchEntry(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, entry)
 }
 
+func validStatus(s string) bool {
+	switch s {
+	case "new", "reviewing", "resolved", "benign":
+		return true
+	}
+	return false
+}
+
 func (s *server) tagEntry(w http.ResponseWriter, r *http.Request)   { s.setEntryTag(w, r, true) }
 func (s *server) untagEntry(w http.ResponseWriter, r *http.Request) { s.setEntryTag(w, r, false) }
+
+// classifyEntry hand-adds (or removes) a mitre technique / ot code on a single
+// entry. field is "mitre" or "ot"; the code is validated against the catalog so
+// a typo can't create a phantom tag.
+func (s *server) classifyEntry(w http.ResponseWriter, r *http.Request, field string, add bool) {
+	entryID, ok := pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	code := r.PathValue("code")
+	valid := knownTechnique
+	if field == "ot" {
+		valid = knownOT
+	}
+	if !valid(code) {
+		http.Error(w, "unknown "+field+" code", http.StatusBadRequest)
+		return
+	}
+	var (
+		entry *store.Entry
+		err   error
+	)
+	if add {
+		entry, err = s.store.AddEntryClass(r.Context(), entryID, field, code)
+	} else {
+		entry, err = s.store.RemoveEntryClass(r.Context(), entryID, field, code)
+	}
+	if err != nil {
+		s.internalError(w, "classify entry", err)
+		return
+	}
+	if entry == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, entry)
+}
+
+func (s *server) addEntryMitre(w http.ResponseWriter, r *http.Request) {
+	s.classifyEntry(w, r, "mitre", true)
+}
+func (s *server) delEntryMitre(w http.ResponseWriter, r *http.Request) {
+	s.classifyEntry(w, r, "mitre", false)
+}
+func (s *server) addEntryOT(w http.ResponseWriter, r *http.Request) {
+	s.classifyEntry(w, r, "ot", true)
+}
+func (s *server) delEntryOT(w http.ResponseWriter, r *http.Request) {
+	s.classifyEntry(w, r, "ot", false)
+}
 
 func (s *server) setEntryTag(w http.ResponseWriter, r *http.Request, add bool) {
 	entryID, ok := pathID(w, r, "id")

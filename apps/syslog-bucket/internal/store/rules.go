@@ -123,6 +123,20 @@ func (s *Store) ApplyRuleHistorical(ctx context.Context, r Rule) (int64, error) 
 			sql = fmt.Sprintf(`UPDATE entries e SET priority = %s WHERE %s`, arg(a.Priority), condSQL)
 		case "suppress":
 			sql = fmt.Sprintf(`UPDATE entries e SET suppressed = TRUE WHERE %s AND NOT e.suppressed`, condSQL)
+		case "set_mitre":
+			if len(a.Mitre) == 0 {
+				continue
+			}
+			codes := arg(a.Mitre)
+			sql = fmt.Sprintf(`UPDATE entries e SET mitre = ARRAY(SELECT DISTINCT unnest(e.mitre || %s::text[]))
+				WHERE %s AND NOT e.mitre @> %s::text[]`, codes, condSQL, codes)
+		case "set_ot":
+			if len(a.OT) == 0 {
+				continue
+			}
+			codes := arg(a.OT)
+			sql = fmt.Sprintf(`UPDATE entries e SET ot = ARRAY(SELECT DISTINCT unnest(e.ot || %s::text[]))
+				WHERE %s AND NOT e.ot @> %s::text[]`, codes, condSQL, codes)
 		default:
 			continue
 		}

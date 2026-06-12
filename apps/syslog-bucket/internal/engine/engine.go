@@ -62,6 +62,23 @@ func (g *Engine) Run(ctx context.Context) {
 	}
 }
 
+// appendUnique adds codes to dst that aren't already present, preserving order.
+func appendUnique(dst, codes []string) []string {
+	for _, c := range codes {
+		found := false
+		for _, existing := range dst {
+			if existing == c {
+				found = true
+				break
+			}
+		}
+		if !found {
+			dst = append(dst, c)
+		}
+	}
+	return dst
+}
+
 // Apply runs every matching rule's actions against the entry in place,
 // before it is inserted. Later rules win on priority; tags accumulate.
 func (g *Engine) Apply(e *store.Entry) {
@@ -89,6 +106,10 @@ func (g *Engine) Apply(e *store.Entry) {
 				// entry is stored. Ingest-only — historical apply never
 				// notifies, so editing a rule can't trigger an alert storm.
 				e.Notifies = append(e.Notifies, store.Notify{ChannelID: a.ChannelID, RuleID: r.ID})
+			case "set_mitre":
+				e.Mitre = appendUnique(e.Mitre, a.Mitre)
+			case "set_ot":
+				e.OT = appendUnique(e.OT, a.OT)
 			}
 		}
 	}

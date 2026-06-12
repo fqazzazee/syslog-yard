@@ -1,23 +1,74 @@
 import { useState } from "react";
 import { applyRule, createRule, deleteRule, updateRule } from "./../api";
-import type { Action, Channel, Cond, Rule, Tag } from "./../types";
+import type { Action, Channel, Cond, MitreCatalog, OTCatalog, Rule, Tag } from "./../types";
 import { PRIORITY_NAMES } from "./../types";
 import ConditionBuilder from "./ConditionBuilder";
 import { Icon } from "./Icon";
 import Modal from "./Modal";
 
+// Seed pre-fills a new rule (e.g. promoted from an entry). Structurally matches
+// App's RuleSeed; kept local to avoid importing App (which imports this).
+interface Seed {
+  name?: string;
+  condition?: Cond;
+  actions?: Action[];
+}
+
 interface Props {
   rule: Rule | null; // null = create
+  seed?: Seed;
   tags: Tag[];
   channels: Channel[];
+  mitreCatalog: MitreCatalog | null;
+  otCatalog: OTCatalog | null;
   onClose: (changed: boolean) => void;
 }
 
-export default function RuleModal({ rule, tags, channels, onClose }: Props) {
-  const [name, setName] = useState(rule?.name ?? "");
+// CodeList edits the array of codes on a set_mitre / set_ot action: chips with
+// removal plus a dropdown of the remaining catalog codes.
+function CodeList({
+  codes,
+  options,
+  label,
+  onChange,
+}: {
+  codes: string[];
+  options: { id: string; name: string }[];
+  label: string;
+  onChange: (codes: string[]) => void;
+}) {
+  const left = options.filter((o) => !codes.includes(o.id));
+  return (
+    <span className="code-list">
+      {codes.map((c) => (
+        <span key={c} className="mitre-chip editable">
+          {c}
+          <button className="chip-x" type="button" title="Remove" onClick={() => onChange(codes.filter((x) => x !== c))}>
+            <Icon name="close" size={12} />
+          </button>
+        </span>
+      ))}
+      {left.length > 0 && (
+        <select className="code-picker" value="" onChange={(e) => e.target.value && onChange([...codes, e.target.value])}>
+          <option value="">{label}</option>
+          {left.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.id} — {o.name}
+            </option>
+          ))}
+        </select>
+      )}
+    </span>
+  );
+}
+
+export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, otCatalog, onClose }: Props) {
+  const [name, setName] = useState(rule?.name ?? seed?.name ?? "");
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
-  const [condition, setCondition] = useState<Cond>(rule?.condition ?? {});
-  const [actions, setActions] = useState<Action[]>(rule?.actions ?? [{ type: "tag", tag_id: tags[0]?.id }]);
+  const [condition, setCondition] = useState<Cond>(rule?.condition ?? seed?.condition ?? {});
+  const [actions, setActions] = useState<Action[]>(
+    rule?.actions ?? seed?.actions ?? [{ type: "tag", tag_id: tags[0]?.id }],
+  );
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -91,11 +142,25 @@ export default function RuleModal({ rule, tags, channels, onClose }: Props) {
       <label>Do</label>
       {actions.map((a, i) => (
         <div className="cond-row" key={i}>
-          <select value={a.type} onChange={(e) => patchAction(i, { type: e.target.value as Action["type"], tag_id: tags[0]?.id, priority: 2, channel_id: channels[0]?.id })}>
+          <select
+            value={a.type}
+            onChange={(e) =>
+              patchAction(i, {
+                type: e.target.value as Action["type"],
+                tag_id: tags[0]?.id,
+                priority: 2,
+                channel_id: channels[0]?.id,
+                mitre: [],
+                ot: [],
+              })
+            }
+          >
             <option value="tag">Add tag</option>
             <option value="set_priority">Set priority</option>
             <option value="suppress">Suppress</option>
             <option value="notify">Notify</option>
+            <option value="set_mitre">Set ATT&CK technique</option>
+            <option value="set_ot">Set OT code</option>
           </select>
           {a.type === "tag" && (
             <select value={a.tag_id ?? 0} onChange={(e) => patchAction(i, { tag_id: Number(e.target.value) })}>
@@ -128,6 +193,22 @@ export default function RuleModal({ rule, tags, channels, onClose }: Props) {
               <span className="hint">no channels — add one under Channels</span>
             ))}
           {a.type === "suppress" && <span className="hint">hidden from views, kept in storage</span>}
+          {a.type === "set_mitre" && mitreCatalog && (
+            <CodeList
+              codes={a.mitre ?? []}
+              options={mitreCatalog.techniques}
+              label="+ technique"
+              onChange={(mitre) => patchAction(i, { mitre })}
+            />
+          )}
+          {a.type === "set_ot" && otCatalog && (
+            <CodeList
+              codes={a.ot ?? []}
+              options={otCatalog.alert_types}
+              label="+ OT code"
+              onChange={(ot) => patchAction(i, { ot })}
+            />
+          )}
           <button type="button" className="linkish" onClick={() => setActions(actions.filter((_, j) => j !== i))}>
             <Icon name="close" size={14} />
           </button>
