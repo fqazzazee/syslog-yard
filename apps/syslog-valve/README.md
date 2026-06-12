@@ -11,7 +11,9 @@ Beyond the spine: facility/severity/host/program/regex **filters** with
 if/else routing, **drop** sinks, **cache** nodes writing to `/data` or an
 external share with logrotate-compiled retention, **TLS** in and out
 (one-click self-signed certs), **live tail** of everything entering the
-valve, config **version history** with previews, and graph import/export.
+valve, **live per-wire throughput** (msgs/sec read from `syslog-ng-ctl stats`
+and rendered on the canvas edges), config **version history** with previews,
+and graph import/export.
 
 ## Run (standalone)
 

@@ -6,6 +6,7 @@ package supervisor
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -297,6 +299,48 @@ func (s *Supervisor) Reload() error {
 		return fmt.Errorf("syslog-ng is not running")
 	}
 	return s.cmd.Process.Signal(syscall.SIGHUP)
+}
+
+// ctlBin returns the syslog-ng-ctl path next to the syslog-ng binary, so a
+// custom VALVE_SYSLOG_NG path still finds its control client.
+func (s *Supervisor) ctlBin() string {
+	dir, file := filepath.Split(s.bin)
+	if strings.Contains(file, "syslog-ng") {
+		return filepath.Join(dir, strings.Replace(file, "syslog-ng", "syslog-ng-ctl", 1))
+	}
+	return "syslog-ng-ctl"
+}
+
+// Stats asks the running syslog-ng (over its default control socket) for the
+// cumulative per-statement "processed" message counters, keyed by the
+// statement name codegen assigned (s_<ident> for sources, d_<ident> for
+// destinations). The caller maps those back to graph nodes. Returns an error
+// if syslog-ng isn't answering; counters are monotonic until a reload/restart.
+func (s *Supervisor) Stats() (map[string]int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, s.ctlBin(), "stats").Output()
+	if err != nil {
+		return nil, fmt.Errorf("syslog-ng-ctl stats: %w", err)
+	}
+	res := map[string]int64{}
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	for sc.Scan() {
+		// SourceName;SourceId;SourceInstance;State;Type;Number
+		f := strings.Split(sc.Text(), ";")
+		if len(f) < 6 || f[4] != "processed" {
+			continue
+		}
+		// Statement-level rows carry the plain statement name in SourceId;
+		// driver-level rows (dst.network, …) use name#instance — skip those.
+		if f[0] != "source" && f[0] != "destination" {
+			continue
+		}
+		if n, err := strconv.ParseInt(f[5], 10, 64); err == nil {
+			res[f[1]] = n
+		}
+	}
+	return res, sc.Err()
 }
 
 func (s *Supervisor) Status() Status {

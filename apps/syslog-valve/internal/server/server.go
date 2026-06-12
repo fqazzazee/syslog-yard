@@ -243,7 +243,48 @@ func (s *Server) config(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, s.sup.Status())
+	st := s.sup.Status()
+	resp := struct {
+		supervisor.Status
+		Throughput map[string]int64 `json:"throughput,omitempty"`
+	}{Status: st}
+	// Per-node processed counters for the wire labels; cheap enough to read on
+	// each poll, and only meaningful while syslog-ng is up.
+	if st.Running {
+		if stats, err := s.sup.Stats(); err == nil {
+			resp.Throughput = s.throughputByNode(stats)
+		}
+	}
+	writeJSON(w, resp)
+}
+
+// throughputByNode maps syslog-ng's per-statement processed counters back to
+// graph node IDs (sources and sinks; filters have no driver counter).
+func (s *Server) throughputByNode(stats map[string]int64) map[string]int64 {
+	data, err := s.loadGraph()
+	if err != nil {
+		return nil
+	}
+	var g graph.Graph
+	if json.Unmarshal(data, &g) != nil {
+		return nil
+	}
+	out := map[string]int64{}
+	for _, n := range g.Nodes {
+		var key string
+		switch n.Type {
+		case graph.TypeSource:
+			key = "s_" + graph.Ident(n.ID)
+		case graph.TypeForward, graph.TypeCache, graph.TypeNotify:
+			key = "d_" + graph.Ident(n.ID)
+		default:
+			continue
+		}
+		if v, ok := stats[key]; ok {
+			out[n.ID] = v
+		}
+	}
+	return out
 }
 
 func (s *Server) getHints(w http.ResponseWriter, _ *http.Request) {

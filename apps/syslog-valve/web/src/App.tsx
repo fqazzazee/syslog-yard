@@ -40,6 +40,15 @@ function mkEdge(from: string, to: string, fromPort?: string | null): Edge {
   };
 }
 
+// fmtEps renders a per-second message rate compactly; undefined for no/zero
+// flow so an idle wire just shows its structural label (or nothing).
+function fmtEps(r: number | undefined): string | undefined {
+  if (r === undefined || r <= 0) return undefined;
+  if (r < 1) return `${r.toFixed(2)}/s`;
+  if (r < 10) return `${r.toFixed(1)}/s`;
+  return `${Math.round(r)}/s`;
+}
+
 function toFlow(g: Graph): { nodes: FlowNode[]; edges: Edge[] } {
   return {
     nodes: g.nodes.map((n) => ({
@@ -124,6 +133,10 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
+  const [eps, setEps] = useState<Record<string, number>>({});
+  const prevTp = useRef<{ counts: Record<string, number>; t: number } | null>(null);
+  const nodesRef = useRef<FlowNode[]>([]);
+  nodesRef.current = nodes;
   const [conf, setConf] = useState("");
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [hints, setHints] = useState<Record<string, string>>({});
@@ -134,11 +147,33 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   const importInput = useRef<HTMLInputElement>(null);
   const readOnly = user?.role === "viewer";
 
+  // applyStatus stores the status and turns the cumulative per-node counters
+  // into a per-second rate from the delta since the previous poll.
+  const applyStatus = useCallback((st: Status | null) => {
+    setStatus(st);
+    const tp = st?.throughput;
+    if (!tp) return;
+    const now = Date.now();
+    const prev = prevTp.current;
+    if (prev) {
+      const dt = (now - prev.t) / 1000;
+      if (dt > 0.5) {
+        const next: Record<string, number> = {};
+        for (const [id, cur] of Object.entries(tp)) {
+          const p = prev.counts[id];
+          next[id] = p == null || cur < p ? 0 : (cur - p) / dt; // reset → 0
+        }
+        setEps(next);
+      }
+    }
+    prevTp.current = { counts: tp, t: now };
+  }, []);
+
   const refresh = useCallback(() => {
-    api.status().then(setStatus).catch(() => setStatus(null));
+    api.status().then(applyStatus).catch(() => setStatus(null));
     api.config().then(setConf).catch(() => {});
     api.history().then(setHistory).catch(() => {});
-  }, []);
+  }, [applyStatus]);
 
   useEffect(() => {
     api
@@ -151,9 +186,28 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
       .catch((e) => setBanner({ kind: "err", text: String(e) }));
     api.hints().then(setHints).catch(() => {});
     refresh();
-    const t = setInterval(() => api.status().then(setStatus).catch(() => setStatus(null)), 3000);
+    const t = setInterval(() => api.status().then(applyStatus).catch(() => setStatus(null)), 3000);
     return () => clearInterval(t);
-  }, [refresh, setNodes, setEdges]);
+  }, [refresh, applyStatus, setNodes, setEdges]);
+
+  // Re-label the wires with live throughput whenever the rates update. A wire
+  // into a sink shows that sink's rate (post-filter delivered); a wire out of a
+  // source shows the source's rate. Filter→filter wires have no driver counter.
+  useEffect(() => {
+    const type: Record<string, string> = {};
+    for (const n of nodesRef.current) type[n.id] = n.data.g.type;
+    setEdges((es) =>
+      es.map((e) => {
+        const isElse = e.sourceHandle === "else";
+        let rate: number | undefined;
+        if (["forward", "cache", "notify"].includes(type[e.target])) rate = eps[e.target];
+        else if (type[e.source] === "source") rate = eps[e.source];
+        const rateLabel = fmtEps(rate);
+        const label = [isElse ? "else" : null, rateLabel].filter(Boolean).join(" · ") || undefined;
+        return { ...e, label, animated: rate === undefined ? true : rate > 0, className: isElse ? "edge-else" : undefined };
+      }),
+    );
+  }, [eps, setEdges]);
 
   const onConnect = useCallback(
     (c: Connection) =>

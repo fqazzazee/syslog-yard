@@ -153,6 +153,10 @@ footer .err { color: var(--err); }
 .react-flow__edge.edge-else .react-flow__edge-textbg { fill: var(--bg); }
 .react-flow__edge.edge-else .react-flow__edge-text { fill: var(--err); }
 
+/* Live per-wire throughput labels (msgs/sec from syslog-ng-ctl stats). */
+.react-flow__edge .react-flow__edge-text { fill: var(--text); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px; }
+.react-flow__edge .react-flow__edge-textbg { fill: var(--bg); fill-opacity: 0.85; }
+
 .panel label.check { display: flex; gap: 6px; align-items: center; }
 .panel label.check input { width: auto; margin: 0; }
 

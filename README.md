@@ -143,8 +143,9 @@ cd apps/syslog-bucket && go test ./...   # repeat for syslog-hose / syslog-valve
   **MITRE ATT&CK technique** filters with if/else routing; disk cache nodes
   with retention compiled to logrotate; **in-stream notify nodes** (webhook,
   Slack/Teams) that alert on the raw flow before storage; live tail of
-  everything entering the valve; config version history with previews; graph
-  import/export.
+  everything entering the valve; **live per-wire throughput** on the canvas
+  (msgs/sec from `syslog-ng-ctl stats`); config version history with previews;
+  graph import/export.
 - **syslog-bucket**: syslog-ng-fronted ingest into Postgres; email-style
   3-pane triage; virtual buckets (saved searches), color-coded tags, a rules
   engine that tags/prioritizes/suppresses/classifies at ingest and
@@ -194,6 +195,7 @@ a real lab or small deployment today. What's in place:
 
 Possible improvements on the radar:
 
-- Per-edge throughput rendered on the valve's wires from `syslog-ng-ctl stats`.
 - More crosswalk depth (sub-techniques, NIST 800-53 control enhancements) and a
   one-click export of a framework's coverage as a report.
+- Per-wire byte throughput and queue depth on the valve (alongside the msgs/sec
+  rate), and a small sparkline history per wire.

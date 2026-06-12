@@ -63,6 +63,9 @@ export interface Status {
   lastApply: string;
   lastError: string;
   log: string[];
+  // Cumulative "processed" message count per graph node id (sources + sinks),
+  // from syslog-ng-ctl stats; the UI turns deltas into per-wire throughput.
+  throughput?: Record<string, number>;
 }
 
 export interface HistoryEntry {
