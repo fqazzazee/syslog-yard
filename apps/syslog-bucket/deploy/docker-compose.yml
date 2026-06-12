@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:17-alpine
+    image: docker.io/library/postgres:17-alpine
     environment:
       POSTGRES_USER: syslog_bucket
       POSTGRES_PASSWORD: syslog_bucket
@@ -28,7 +28,7 @@ services:
     restart: unless-stopped
 
   syslog:
-    image: balabit/syslog-ng:4.8.3
+    image: docker.io/balabit/syslog-ng:4.8.3
     command: ["--no-caps", "-F"]
     volumes:
       - ./syslog-ng/syslog-ng.conf:/etc/syslog-ng/syslog-ng.conf:ro

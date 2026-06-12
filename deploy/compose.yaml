@@ -91,7 +91,7 @@ services:
     restart: unless-stopped
 
   bucket-db:
-    image: postgres:17-alpine
+    image: docker.io/library/postgres:17-alpine
     networks: [yardnet]
     environment:
       POSTGRES_USER: syslog_bucket
@@ -139,7 +139,7 @@ services:
     restart: unless-stopped
 
   bucket-syslog:
-    image: balabit/syslog-ng:4.8.3
+    image: docker.io/balabit/syslog-ng:4.8.3
     command: ["--no-caps", "-F"]
     networks: [yardnet]
     volumes:

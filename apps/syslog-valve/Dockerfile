@@ -1,5 +1,5 @@
 # --- UI build ---
-FROM node:22-alpine AS ui
+FROM docker.io/library/node:22-alpine AS ui
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -7,7 +7,7 @@ COPY web/ ./
 RUN npm run build
 
 # --- Go build ---
-FROM golang:1.26-alpine AS build
+FROM docker.io/library/golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 RUN go mod download
@@ -16,7 +16,7 @@ COPY --from=ui /src/web/dist ./web/dist
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /syslog-valve ./cmd/syslog-valve
 
 # --- Runtime: alpine because we ship syslog-ng as the data plane ---
-FROM alpine:3.22
+FROM docker.io/library/alpine:3.22
 RUN apk add --no-cache syslog-ng logrotate ca-certificates tzdata
 COPY --from=build /syslog-valve /usr/local/bin/syslog-valve
 
