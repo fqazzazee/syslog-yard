@@ -226,8 +226,14 @@ cd apps/syslog-bucket && go test ./...   # repeat for syslog-hose / syslog-valve
   classification with a `benign` triage outcome, hand-adding or removing ATT&CK
   and OT codes on entries the packs missed, and a "Create rule from this entry"
   shortcut that promotes a manual call into a reusable detection (the
-  `set_mitre` and `set_ot` rule actions); curated default buckets for a SOC
-  triage workload; rules that condition and tag on MITRE techniques; device-class
+  `set_mitre` and `set_ot` rule actions); a network security view that
+  classifies traffic by the addresses entries mention — flow direction
+  (inbound/outbound/lateral), RFC1918-internal vs external vs special-use
+  scopes, and live category sets matched at read time: known-malicious sources
+  (Spamhaus DROP, abuse.ch Feodo Tracker C2), Tor exit nodes, Microsoft 365
+  ranges, and admin-defined CIDR groups, with feed snapshots cached in Postgres
+  so a feed refresh retroactively flags history and offline starts keep
+  working; curated default buckets for a SOC triage workload; rules that condition and tag on MITRE techniques; device-class
   tagging and sortable, filterable columns; notifications (webhook, Slack/Teams,
   SMTP) fired by a notify rule action; a live tail over WebSocket; local accounts
   plus OIDC sign-in with admin/analyst/viewer roles; and buckets shareable

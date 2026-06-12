@@ -17,6 +17,7 @@ import (
 	"github.com/syslog-yard/syslog-bucket/internal/config"
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
 	"github.com/syslog-yard/syslog-bucket/internal/ingest"
+	"github.com/syslog-yard/syslog-bucket/internal/netfeeds"
 	"github.com/syslog-yard/syslog-bucket/internal/notify"
 	"github.com/syslog-yard/syslog-bucket/internal/parsers"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
@@ -118,6 +119,13 @@ func run() error {
 	}
 	go dispatcher.Run(ctx)
 
+	// Network-view category sets: threat-intel / O365 feeds plus custom CIDR
+	// groups. Cached snapshots load synchronously; fetching runs in the
+	// background so an offline start still serves the static scopes.
+	netMgr := netfeeds.New(st)
+	netMgr.Load(ctx)
+	go netMgr.Run(ctx)
+
 	registry := parsers.NewRegistry(parsers.Generic{})
 	ing := ingest.New(st, registry, eng, hub, dispatcher, cfg.IngestAddr)
 
@@ -142,7 +150,7 @@ func run() error {
 	}
 	httpSrv := &http.Server{
 		Addr:    cfg.APIAddr,
-		Handler: api.New(st, eng, hub, dispatcher, dist, hints, authSvc, cfg),
+		Handler: api.New(st, eng, hub, dispatcher, dist, hints, authSvc, cfg, netMgr),
 	}
 	httpErr := make(chan error, 1)
 	go func() {

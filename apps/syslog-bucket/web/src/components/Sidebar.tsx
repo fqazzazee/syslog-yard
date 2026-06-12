@@ -59,6 +59,12 @@ export default function Sidebar({
       <button className={`nav-item${isOT ? " active" : ""}`} onClick={() => onSelect({ kind: "ot" })}>
         <Icon name="factory" size={16} /> ICS/OT Alerts
       </button>
+      <button
+        className={`nav-item${selection.kind === "net" ? " active" : ""}`}
+        onClick={() => onSelect({ kind: "net" })}
+      >
+        <Icon name="lan" size={16} /> Network
+      </button>
       {frameworks.map((f) => {
         const active =
           (selection.kind === "framework" || selection.kind === "frameworkitem") && selection.fw === f.id;

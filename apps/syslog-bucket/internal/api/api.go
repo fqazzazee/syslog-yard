@@ -20,6 +20,7 @@ import (
 	"github.com/syslog-yard/syslog-bucket/internal/config"
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
 	"github.com/syslog-yard/syslog-bucket/internal/mitre"
+	"github.com/syslog-yard/syslog-bucket/internal/netfeeds"
 	"github.com/syslog-yard/syslog-bucket/internal/notify"
 	"github.com/syslog-yard/syslog-bucket/internal/otmap"
 	"github.com/syslog-yard/syslog-bucket/internal/rules"
@@ -36,13 +37,15 @@ type server struct {
 	hints    map[string]string
 	authSvc  *auth.Service
 	cfg      config.Config // env fallback for settings not yet stored in the DB
+	netMgr   *netfeeds.Manager
+	netSum   netSummaryCache
 }
 
-func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Dispatcher, web fs.FS, hints map[string]string, authSvc *auth.Service, cfg config.Config) http.Handler {
+func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Dispatcher, web fs.FS, hints map[string]string, authSvc *auth.Service, cfg config.Config, netMgr *netfeeds.Manager) http.Handler {
 	if hints == nil {
 		hints = map[string]string{}
 	}
-	s := &server{store: st, engine: eng, hub: hub, notifier: notifier, web: web, hints: hints, authSvc: authSvc, cfg: cfg}
+	s := &server{store: st, engine: eng, hub: hub, notifier: notifier, web: web, hints: hints, authSvc: authSvc, cfg: cfg, netMgr: netMgr}
 	// Apply stored (or env-fallback) OIDC + session settings to the auth service
 	// before the server starts handling requests.
 	s.applyStoredSettings(context.Background())
@@ -54,6 +57,11 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Disp
 	mux.HandleFunc("GET /api/ot", s.getOT)
 	mux.HandleFunc("GET /api/ot/summary", s.getOTSummary)
 	mux.HandleFunc("GET /api/class/summary", s.getClassSummary)
+	mux.HandleFunc("GET /api/net/summary", s.getNetSummary)
+	mux.HandleFunc("GET /api/net/entries", s.getNetEntries)
+	mux.HandleFunc("GET /api/net/config", s.getNetConfig)
+	mux.HandleFunc("PUT /api/net/config", s.putNetConfig)
+	mux.HandleFunc("POST /api/net/refresh", s.refreshNetFeeds)
 	mux.HandleFunc("GET /api/coverage", s.getCoverage)
 	mux.HandleFunc("GET /api/frameworks", s.getFrameworks)
 	mux.HandleFunc("POST /api/frameworks", s.createFramework)

@@ -1157,3 +1157,45 @@ h1.brand .logo { display: inline-flex; color: var(--accent); }
 @media (max-width: 1150px) {
   .topbar .sub { display: none; }
 }
+
+/* --- network security view --- */
+.net-view { overflow-y: auto; }
+.net-h {
+  display: flex; align-items: center; gap: 8px;
+  margin: 18px 0 8px; font-size: 13px; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--fg-dim);
+}
+.net-h-bad { color: var(--sev-crit); }
+.net-cards { display: flex; flex-wrap: wrap; gap: 8px; }
+.net-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  min-width: 120px; padding: 10px 14px; font-size: 12px;
+  color: var(--fg-dim); text-align: left; cursor: pointer;
+}
+.net-card.hit { color: var(--fg); border-color: var(--accent); }
+.net-card.cat-malicious.hit { border-color: var(--sev-crit); }
+.net-card-n { font-size: 20px; font-weight: 600; color: var(--fg); }
+.net-mal-banner {
+  display: flex; align-items: center; gap: 8px; margin-top: 8px;
+  padding: 8px 12px; border: 1px solid var(--sev-crit); border-radius: 6px;
+  color: var(--sev-crit); font-size: 13px;
+}
+.net-table { border-collapse: collapse; font-size: 12px; width: 100%; max-width: 980px; }
+.net-table th {
+  text-align: left; padding: 4px 10px 4px 0; color: var(--fg-dim);
+  font-weight: 500; border-bottom: 1px solid var(--border);
+}
+.net-table td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
+.net-table .net-msg { font-family: ui-monospace, monospace; word-break: break-all; }
+.net-bad-ip { color: var(--sev-crit); font-weight: 600; }
+.net-err { color: var(--sev-crit); }
+.net-off { opacity: 0.55; }
+.net-close { margin-left: auto; font-size: 11px; padding: 2px 8px; }
+.net-cfg { max-width: 640px; margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.net-cfg h4 { margin: 10px 0 2px; font-size: 12px; color: var(--fg-dim); }
+.net-cfg .check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.net-cfg-cat { display: flex; gap: 6px; }
+.net-cfg-cat input:first-child { width: 180px; }
+.net-cfg-cat input:nth-child(2) { flex: 1; }
+.net-cfg-actions { display: flex; gap: 8px; margin-top: 6px; }
+.net-cfg-toggle { margin-top: 10px; align-self: flex-start; }

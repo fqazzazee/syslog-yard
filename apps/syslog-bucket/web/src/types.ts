@@ -236,7 +236,56 @@ export type Selection =
   | { kind: "ot" }
   | { kind: "otalert"; id: string }
   | { kind: "framework"; fw: string }
-  | { kind: "frameworkitem"; fw: string; id: string };
+  | { kind: "frameworkitem"; fw: string; id: string }
+  | { kind: "net" };
+
+// --- network security view (read-time IP classification) ---
+
+export interface NetFeedStatus {
+  id: string;
+  label: string;
+  category: string; // malicious | tor | o365 | custom
+  enabled: boolean;
+  prefixes: number;
+  fetched_at: string;
+  error?: string;
+}
+
+export interface NetCategoryCount {
+  id: string; // set id, drill down with class=set:<id>
+  label: string;
+  category: string;
+  count: number;
+}
+
+export interface NetIPHit {
+  ip: string;
+  feeds: string[];
+  count: number;
+  last_seen: string;
+  entry_ids: number[];
+}
+
+export interface NetSummary {
+  window_minutes: number;
+  scanned: number;
+  truncated: boolean;
+  directions: Record<string, number>;
+  scopes: Record<string, number>;
+  categories: NetCategoryCount[];
+  malicious: NetIPHit[];
+  feeds: NetFeedStatus[];
+}
+
+export interface NetCustomCat {
+  name: string;
+  cidrs: string[];
+}
+
+export interface NetConfig {
+  feeds: Record<string, boolean>;
+  custom: NetCustomCat[];
+}
 
 export const SEVERITY_NAMES = [
   "emerg",

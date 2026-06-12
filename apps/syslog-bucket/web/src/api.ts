@@ -9,6 +9,9 @@ import type {
   Filters,
   Framework,
   MitreCatalog,
+  NetConfig,
+  NetFeedStatus,
+  NetSummary,
   OTCatalog,
   Rule,
   Selection,
@@ -117,6 +120,28 @@ export const fetchOtSummary = (f: Filters, sel: Selection) =>
 // Per-device-class counts (drives the data-sensitivity framework view).
 export const fetchClassSummary = (f: Filters, sel: Selection) =>
   request<{ counts: Record<string, number> }>(`/api/class/summary?${filterParams(f, sel)}`).then((b) => b.counts);
+
+// --- network security view ---
+
+export const fetchNetSummary = (minutes: number) =>
+  request<NetSummary>(`/api/net/summary?minutes=${minutes}`);
+
+export const fetchNetEntries = (q: { class?: string; ip?: string; minutes: number }) => {
+  const params = new URLSearchParams();
+  if (q.class) params.set("class", q.class);
+  if (q.ip) params.set("ip", q.ip);
+  params.set("minutes", String(q.minutes));
+  return request<{ entries: Entry[] }>(`/api/net/entries?${params}`).then((b) => b.entries);
+};
+
+export const fetchNetConfig = () =>
+  request<{ config: NetConfig; feeds: NetFeedStatus[] }>("/api/net/config");
+
+export const putNetConfig = (c: NetConfig) =>
+  send<{ ok: boolean; feeds: NetFeedStatus[] }>("PUT", "/api/net/config", c);
+
+export const refreshNetFeeds = () =>
+  send<{ ok: boolean; feeds: NetFeedStatus[] }>("POST", "/api/net/refresh", {});
 
 // Classification coverage for the current window. For a whole-framework
 // selection we add the framework param so the server also returns `covered`.

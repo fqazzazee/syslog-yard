@@ -45,6 +45,7 @@ import Login from "./components/Login";
 import LogTable from "./components/LogTable";
 import FrameworkView from "./components/FrameworkView";
 import MitreView from "./components/MitreView";
+import NetView from "./components/NetView";
 import OTView from "./components/OTView";
 import RuleModal from "./components/RuleModal";
 import SettingsModal from "./components/SettingsModal";
@@ -185,7 +186,8 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
 
   // The matrix views (ATT&CK / OT) render their own data; the entry list and
   // live tail pause while one is open.
-  const isMatrix = selection.kind === "mitre" || selection.kind === "ot" || selection.kind === "framework";
+  const isMatrix =
+    selection.kind === "mitre" || selection.kind === "ot" || selection.kind === "framework" || selection.kind === "net";
   // A column sort returns one ranked page; time sort streams + paginates.
   const pageLimit = filters.sort === "time" ? 200 : 1000;
 
@@ -334,7 +336,9 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
                   ? (frameworks.find((f) => f.id === selection.fw)?.name ?? "Framework")
                   : selection.kind === "frameworkitem"
                     ? `${frameworks.find((f) => f.id === selection.fw)?.short ?? "Framework"} · ${selection.id}`
-                    : `Tag: ${tagsById.get(selection.id)?.name ?? selection.id}`;
+                    : selection.kind === "net"
+                      ? "Network security"
+                      : `Tag: ${tagsById.get(selection.id)?.name ?? selection.id}`;
 
   return (
     <div className="app">
@@ -428,7 +432,9 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
           <FilterBar filters={filters} onChange={setFilters} />
           {error && <div className="error">{error}</div>}
           <main className="content">
-            {selection.kind === "ot" ? (
+            {selection.kind === "net" ? (
+              <NetView filters={filters} me={me} />
+            ) : selection.kind === "ot" ? (
               <OTView filters={filters} selection={selection} onSelectAlert={onSelectAlert} />
             ) : selection.kind === "framework" ? (
               (() => {
