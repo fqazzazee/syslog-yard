@@ -3,13 +3,13 @@
 syslog-yard is an open-source, self-hosted syslog toolkit. It's three small
 tools that run as containers under a single compose file:
 
-![syslog-yard-diagram-01](docs/img/syslog-yard-diagram-01.png)
-
 - **syslog-hose** generates random but realistic syslog traffic at whatever rate you set.
 - **syslog-valve** is a visual router and filter built on syslog-ng: graphical
   IN and OUT ports, filtering in between, TLS, and disk caching with
   logrotate-managed retention.
 - **syslog-bucket** is a multi-user syslog server with a triage UI modeled on an email client.
+
+![syslog-yard-diagram-01](docs/img/syslog-yard-diagram-01.png)
 
 Each tool works on its own. Run all three and you get a full loop (generate,
 then route and filter, then store) on one internal bridge network, with web UIs
