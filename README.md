@@ -103,6 +103,35 @@ through, auto-tagged by rules:
 | [deploy/quadlet](deploy/quadlet) | rootless podman systemd units |
 | per-app READMEs | standalone use, env vars, development |
 
+## Continuous integration
+
+One GitHub Actions workflow, [`.github/workflows/test.yaml`](.github/workflows/test.yaml),
+acts purely as a **correctness gate** — it builds and ships nothing.
+
+**What it runs:** `go test ./...` for each of the three modules
+(`syslog-hose`, `syslog-valve`, `syslog-bucket`) as a parallel matrix on a
+clean Ubuntu runner. Each leg checks out the repo, installs the Go version
+pinned in that module's `go.mod`, and runs its tests. Because `go test`
+compiles every package first and runs a subset of `go vet`, a build break or
+a broken embed fails the run too — not just a failing assertion.
+
+**When it runs:** on every **push to `main`**, on every **pull request**, and
+on demand (*Run workflow* in the Actions tab). `fail-fast` is off, so all
+three results show even if one fails.
+
+**What it deliberately does not do:** no container images are built, nothing
+is pushed to any registry (no GHCR), and nothing is deployed. The suite is
+always built locally from source (`scripts/yardctl up`, or `podman build`);
+this workflow only tells you whether the code is still green on a machine with
+none of your local state — the kind of check that catches "works on my
+machine" regressions.
+
+**Run the same checks locally:**
+
+```sh
+cd apps/syslog-bucket && go test ./...   # repeat for syslog-hose / syslog-valve
+```
+
 ## Features by tool
 
 - **syslog-hose**: vendor presets (FortiGate, Cisco, Linux, OT switches,

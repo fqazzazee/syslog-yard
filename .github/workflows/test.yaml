@@ -1,0 +1,35 @@
+# Continuous integration — correctness gate only.
+#
+# Runs the Go test suite for each of the three tools on a clean Ubuntu runner,
+# on every push to main and every pull request (and on demand). It builds and
+# publishes NOTHING: no container images, no GHCR, no deploy. Its only job is
+# to tell you whether the code still compiles and the tests still pass on a
+# machine that has none of your local state — which is exactly what catches
+# regressions like a missing embedded asset that "works on my machine".
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: # lets you re-run it by hand from the Actions tab
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # run all three even if one fails, so you see every result
+      matrix:
+        app: [syslog-hose, syslog-valve, syslog-bucket]
+    name: test (${{ matrix.app }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # each module pins its own Go version in go.mod
+          go-version-file: apps/${{ matrix.app }}/go.mod
+          cache-dependency-path: apps/${{ matrix.app }}/go.sum
+      # `go test` compiles every package first (so a build break fails here
+      # too) and runs a subset of `go vet` automatically.
+      - run: go test ./...
+        working-directory: apps/${{ matrix.app }}
