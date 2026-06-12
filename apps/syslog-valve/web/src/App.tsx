@@ -217,16 +217,16 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
     [setEdges],
   );
 
-  const addNode = (type: NodeType) => {
+  const addNode = (type: NodeType, init?: { name: string; config: Partial<GraphNode["config"]> }) => {
     const id = `${type}-${Date.now().toString(36)}`;
     const col = { source: 60, filter: 320, forward: 620, cache: 620, notify: 620 }[type];
     const g: GraphNode = {
       id,
       type,
-      name: NEW_NAMES[type],
+      name: init?.name ?? NEW_NAMES[type],
       x: col,
       y: 80 + nodes.length * 70,
-      config: { ...DEFAULTS[type] },
+      config: { ...DEFAULTS[type], ...init?.config },
     };
     if (type === "forward" && hints.suggestedForward) {
       const [h, p] = hints.suggestedForward.split(":");
@@ -243,6 +243,14 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
 
   const updateSelected = (g: GraphNode) => {
     setNodes((ns) => (ns.map((n) => (n.id === g.id ? { ...n, data: { g } } : n))));
+  };
+
+  // Drops a node and its wires from the draft; like add/edit it only
+  // touches the live config on Apply.
+  const deleteNode = (id: string) => {
+    setNodes((ns) => ns.filter((n) => n.id !== id));
+    setEdges((es) => es.filter((e) => e.source !== id && e.target !== id));
+    setSelected((s) => (s === id ? null : s));
   };
 
   const save = async (): Promise<boolean> => {
@@ -338,6 +346,16 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
               <button onClick={() => addNode("source")}>
                 <Icon name="add" size={15} /> IN port
               </button>
+              {/* External entry point: deploy/compose.yaml publishes host
+                  6514 (udp+tcp) to container 6514, so this block is where
+                  off-host senders land. Its enabled toggle is the
+                  "allow external sources" switch. */}
+              <button
+                onClick={() => addNode("source", { name: "external syslog", config: { transport: "udp+tcp", port: 6514 } })}
+                title="Listen for syslog from other machines (host port 6514)"
+              >
+                <Icon name="add" size={15} /> External IN
+              </button>
               <button onClick={() => addNode("filter")}>
                 <Icon name="add" size={15} /> Filter
               </button>
@@ -406,6 +424,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
             onConnect={onConnect}
             onNodeClick={(_, n) => setSelected(n.id)}
             onPaneClick={() => setSelected(null)}
+            deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
             fitView
             colorMode={theme}
           >
@@ -421,7 +440,12 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
         </div>
         <aside>
           {sel ? (
-            <NodePanel node={sel} shares={shares} onChange={updateSelected} />
+            <NodePanel
+              node={sel}
+              shares={shares}
+              onChange={updateSelected}
+              onDelete={readOnly ? undefined : () => deleteNode(sel.id)}
+            />
           ) : (
             <div className="muted">Select a node to edit it.</div>
           )}

@@ -7,9 +7,10 @@ Image=localhost/syslog-valve:latest
 ContainerName=syslog-valve
 Network=yard.network
 PublishPort=8081:8081
-# Host entry into the valve's IN ports; add pairs per extra listener.
-PublishPort=6514:514/udp
-PublishPort=6514:514/tcp
+# Host entry into the valve's "External IN" block (add one in the UI and
+# Apply); add pairs per extra listener. Internal traffic uses 514.
+PublishPort=6514:6514/udp
+PublishPort=6514:6514/tcp
 Volume=valve-data.volume:/data
 Environment=VALVE_ADDR=:8081
 Environment=VALVE_DATA=/data

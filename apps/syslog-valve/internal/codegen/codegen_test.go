@@ -61,6 +61,40 @@ func TestGenerate(t *testing.T) {
 	}
 }
 
+func TestGenerateUDPTCPSource(t *testing.T) {
+	g := testGraph()
+	g.Nodes[0].Config = graph.Config{Transport: "udp+tcp", Port: 6514}
+	conf, err := Generate(g, "4.8", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "source s_src_1 {\n" +
+		`    network(ip("0.0.0.0") transport("udp") port(6514));` + "\n" +
+		`    network(ip("0.0.0.0") transport("tcp") port(6514));` + "\n};"
+	if !strings.Contains(conf, want) {
+		t.Errorf("generated config missing dual-transport source:\n%s", conf)
+	}
+}
+
+func TestGenerateSkipsDisabled(t *testing.T) {
+	// Disabling the source drops its listener, its tap, and every path
+	// through it; the forward stays defined but unused.
+	g := testGraph()
+	g.Nodes[0].Disabled = true
+	conf, err := Generate(g, "4.8", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, gone := range []string{"source s_src_1", "log {", "d_tap_src_1"} {
+		if strings.Contains(conf, gone) {
+			t.Errorf("disabled source still produced %q:\n%s", gone, conf)
+		}
+	}
+	if !strings.Contains(conf, "destination d_fwd_1") {
+		t.Errorf("enabled forward missing:\n%s", conf)
+	}
+}
+
 func TestGenerateFilterAndCache(t *testing.T) {
 	conf, err := Generate(filteredGraph(), "4.8", nil)
 	if err != nil {

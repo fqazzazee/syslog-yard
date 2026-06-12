@@ -89,10 +89,20 @@ password that it prints once in its log. Grab it with
 time with `scripts/yardctl reset-admin`. For users, roles, OIDC single sign-on,
 and bucket sharing, see [docs/AUTH.md](docs/AUTH.md).
 
-To send external syslog in, use host port **6514** (udp/tcp) into the valve's IN
-ports. One thing to watch for: VM-based runtimes (Rancher/Docker Desktop, Colima)
-forward TCP but not UDP across the VM boundary. `yardctl smoke` probes both and
-tells you which one arrived.
+To send external syslog in, add an **External IN** block in the valve (toolbar
+button — a source on container port 6514, udp+tcp, published as host port
+**6514**), wire it, and Apply. Then from another machine:
+`logger -n <yard-host> -P 6514 -T -p user.err "hello yard"` (`-T` tcp, `-d` udp).
+The block's *enabled* toggle is the "allow external sources" switch: untick and
+Apply to shut external intake off without losing the wiring. Internal hose
+traffic uses container port 514, so it routes independently. "Connection
+refused" usually means the sender targets port 514 on the host (nothing listens
+there) or no External IN flow is applied. Devices that can only send to classic
+514 are covered too: uncomment the `514:6514` pairs in `deploy/compose.yaml`
+(the comment there explains the one-time sysctl rootless podman needs for a
+privileged port). One more thing to watch for: VM-based runtimes (Rancher/Docker
+Desktop, Colima) forward TCP but not UDP across the VM boundary. `yardctl smoke`
+probes both and tells you which one arrived.
 
 ## Install on a clean Linux server or WSL (Podman)
 

@@ -61,12 +61,13 @@ type Config struct {
 }
 
 type Node struct {
-	ID     string  `json:"id"`
-	Type   string  `json:"type"`
-	Name   string  `json:"name"`
-	X      float64 `json:"x"`
-	Y      float64 `json:"y"`
-	Config Config  `json:"config"`
+	ID       string  `json:"id"`
+	Type     string  `json:"type"`
+	Name     string  `json:"name"`
+	X        float64 `json:"x"`
+	Y        float64 `json:"y"`
+	Disabled bool    `json:"disabled,omitempty"` // kept in the graph, left out of the config
+	Config   Config  `json:"config"`
 }
 
 type Edge struct {
@@ -98,6 +99,27 @@ func (g *Graph) Node(id string) *Node {
 		}
 	}
 	return nil
+}
+
+// Enabled returns a copy of g without disabled nodes and the edges that
+// touch them — for codegen, a toggled-off node simply doesn't exist, so
+// paths through it are severed.
+func (g *Graph) Enabled() *Graph {
+	out := &Graph{}
+	off := map[string]bool{}
+	for _, n := range g.Nodes {
+		if n.Disabled {
+			off[n.ID] = true
+			continue
+		}
+		out.Nodes = append(out.Nodes, n)
+	}
+	for _, e := range g.Edges {
+		if !off[e.From] && !off[e.To] {
+			out.Edges = append(out.Edges, e)
+		}
+	}
+	return out
 }
 
 func (g *Graph) EdgesFrom(id string) []Edge {
@@ -246,6 +268,13 @@ func checkTransport(n Node) error {
 	switch n.Config.Transport {
 	case "udp", "tcp", "tls":
 		return nil
+	case "udp+tcp":
+		// Sources can listen on both at once (e.g. the external IN port);
+		// a forward still needs to pick one wire format.
+		if n.Type == TypeSource {
+			return nil
+		}
+		return fmt.Errorf("node %q: udp+tcp only works on sources; pick one transport for a forward", label(n))
 	default:
 		return fmt.Errorf("node %q: transport must be udp, tcp or tls, got %q", label(n), n.Config.Transport)
 	}

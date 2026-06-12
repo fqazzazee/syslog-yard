@@ -4,9 +4,12 @@
 #   syslog-valve UI  http://localhost:8081   (visual router)
 #   syslog-bucket UI http://localhost:8082   (email-style triage)
 #
-# External syslog entry point: host port 6514 (udp/tcp) → syslog-valve's
-# IN port 514. Wire valve flows in its UI; forward to bucket-syslog:514 to
-# land entries in syslog-bucket. The bucket's receiver is internal-only.
+# External syslog entry point: host port 6514 (udp/tcp) → the valve's
+# "External IN" block (container port 6514) — add one in the valve UI and
+# Apply; its enabled toggle turns external intake on/off. Internal traffic
+# (the hose) uses container port 514, so the two route independently.
+# Forward to bucket-syslog:514 to land entries in syslog-bucket. The
+# bucket's receiver is internal-only.
 # (6514 = IANA syslog-TLS; chosen over 5514 which collided with a local
 # ssh forward on this host. Run `scripts/yardctl firewall` to open ports.)
 
@@ -70,10 +73,21 @@ services:
     networks: [yardnet]
     ports:
       - "8081:8081"
-      # Host ports for the valve's IN ports; add more pairs when you add
-      # listeners on other container ports.
-      - "6514:514/udp"
-      - "6514:514/tcp"
+      # External senders target the HOST port (e.g. <yard-host>:6514) and
+      # land on the valve's "External IN" block (container port 6514) —
+      # wire one in the UI and Apply. Add more pairs to publish listeners
+      # on other container ports.
+      - "6514:6514/udp"
+      - "6514:6514/tcp"
+      # Classic syslog port, for devices that can't send anywhere else.
+      # 514 is privileged: rootful docker/podman binds it as-is; rootless
+      # podman needs the host to allow it first:
+      #   echo net.ipv4.ip_unprivileged_port_start=514 | sudo tee /etc/sysctl.d/50-syslog-yard.conf
+      #   sudo sysctl --system
+      # Then uncomment, re-up, and open the port (yardctl firewall covers
+      # only 6514): sudo ufw allow 514  /  firewall-cmd --add-port=514/{udp,tcp}
+      # - "514:6514/udp"
+      # - "514:6514/tcp"
     environment:
       VALVE_ADDR: ":8081"
       VALVE_DATA: /data

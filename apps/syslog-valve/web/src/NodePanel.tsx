@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, SEVERITIES, type CertStatus, type GraphNode, type MitreCatalog } from "./api";
+import { Icon } from "./Icon";
 
 const TITLES: Record<GraphNode["type"], string> = {
   source: "IN port",
@@ -13,10 +14,12 @@ export function NodePanel({
   node,
   shares,
   onChange,
+  onDelete,
 }: {
   node: GraphNode;
   shares: string[];
   onChange: (g: GraphNode) => void;
+  onDelete?: () => void;
 }) {
   const set = (patch: Partial<GraphNode["config"]>) =>
     onChange({ ...node, config: { ...node.config, ...patch } });
@@ -31,6 +34,14 @@ export function NodePanel({
           onChange={(e) => onChange({ ...node, name: e.target.value })}
         />
       </label>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={!node.disabled}
+          onChange={(e) => onChange({ ...node, disabled: e.target.checked ? undefined : true })}
+        />
+        enabled — off keeps the block but leaves it out on Apply
+      </label>
 
       {(node.type === "source" || node.type === "forward") && (
         <>
@@ -38,10 +49,11 @@ export function NodePanel({
             Transport
             <select
               value={node.config.transport}
-              onChange={(e) => set({ transport: e.target.value as "udp" | "tcp" | "tls" })}
+              onChange={(e) => set({ transport: e.target.value as NonNullable<GraphNode["config"]["transport"]> })}
             >
               <option value="udp">udp</option>
               <option value="tcp">tcp</option>
+              {node.type === "source" && <option value="udp+tcp">udp + tcp (both)</option>}
               <option value="tls">tls (RFC 5425)</option>
             </select>
           </label>
@@ -234,6 +246,11 @@ export function NodePanel({
       )}
 
       <p className="muted">Changes take effect on Apply.</p>
+      {onDelete && (
+        <button className="danger" onClick={onDelete} title="Remove this node and its wires (takes effect on Apply)">
+          <Icon name="delete" size={15} /> Delete node
+        </button>
+      )}
     </div>
   );
 }

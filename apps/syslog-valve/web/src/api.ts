@@ -1,7 +1,7 @@
 export type NodeType = "source" | "filter" | "forward" | "cache" | "notify";
 
 export interface NodeConfig {
-  transport?: "udp" | "tcp" | "tls";
+  transport?: "udp" | "tcp" | "tls" | "udp+tcp"; // udp+tcp: sources only
   port?: number;
   bind?: string;
   host?: string;
@@ -41,6 +41,7 @@ export interface GraphNode {
   name: string;
   x: number;
   y: number;
+  disabled?: boolean; // toggled off: stays on the canvas, left out on Apply
   config: NodeConfig;
 }
 

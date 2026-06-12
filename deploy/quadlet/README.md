@@ -44,8 +44,9 @@ reuse them.)
 ## Notes for real syslog sources
 
 - Rootless podman cannot bind host ports <1024 by default; the valve's
-  syslog entry is published as **6514 → 514** (udp+tcp), same as compose.
-  To use 514 itself: `sudo sysctl net.ipv4.ip_unprivileged_port_start=514`.
+  syslog entry is published as **6514 → 6514** (udp+tcp), landing on the
+  valve's External IN block — same as compose. To use 514 itself:
+  `sudo sysctl net.ipv4.ip_unprivileged_port_start=514`.
 - **Source IPs**: with slirp4netns every connection appears to come from the
   bridge gateway. Use pasta (default since podman 5) or, for a real edge box,
   host networking: in `syslog-valve.container` replace the `Network=` and

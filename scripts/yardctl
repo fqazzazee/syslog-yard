@@ -193,7 +193,7 @@ smoke() {
             info "smoke $proto OK — reached syslog-bucket"
             ok=1
         else
-            info "smoke $proto: message did not arrive (needs a matching IN port on the valve; UDP cannot cross VM-based runtimes' port forwarding)"
+            info "smoke $proto: message did not arrive (needs an applied, enabled External IN block on the valve; UDP cannot cross VM-based runtimes' port forwarding)"
         fi
     done
     [ -n "$ok" ] || die "smoke FAILED — nothing reached syslog-bucket (valve flow applied? firewall? see yardctl firewall)"

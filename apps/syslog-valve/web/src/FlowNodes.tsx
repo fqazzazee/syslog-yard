@@ -46,15 +46,23 @@ function hostOf(url?: string): string {
 function Label({ g }: { g: GraphNode }) {
   return (
     <div className="nlabel">
-      <b>{g.name}</b>
+      <b>
+        {g.name}
+        {g.disabled && <em className="off-tag">off</em>}
+      </b>
       <span>{summary(g)}</span>
     </div>
   );
 }
 
+// cls dims toggled-off nodes; they stay editable but Apply skips them.
+function cls(base: string, g: GraphNode): string {
+  return g.disabled ? `${base} voff` : base;
+}
+
 export function SourceNode({ data }: NodeProps<FlowNode>) {
   return (
-    <div className="vnode vsource">
+    <div className={cls("vnode vsource", data.g)}>
       <Label g={data.g} />
       <Handle type="source" position={Position.Right} />
     </div>
@@ -63,7 +71,7 @@ export function SourceNode({ data }: NodeProps<FlowNode>) {
 
 export function FilterNode({ data }: NodeProps<FlowNode>) {
   return (
-    <div className="vnode vfilter">
+    <div className={cls("vnode vfilter", data.g)}>
       <Handle type="target" position={Position.Left} />
       <Label g={data.g} />
       <div className="ports">
@@ -78,7 +86,7 @@ export function FilterNode({ data }: NodeProps<FlowNode>) {
 
 export function SinkNode({ data }: NodeProps<FlowNode>) {
   return (
-    <div className={`vnode v${data.g.type}`}>
+    <div className={cls(`vnode v${data.g.type}`, data.g)}>
       <Handle type="target" position={Position.Left} />
       <Label g={data.g} />
     </div>
