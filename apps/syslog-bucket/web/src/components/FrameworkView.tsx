@@ -75,13 +75,15 @@ export default function FrameworkView({ framework, filters, selection, onSelectI
 
   return (
     <div className="mitre-view">
-      <p className="mitre-intro">
-        {framework.name} — {framework.desc}. {total.toLocaleString()} mapped hits in this window (crosswalked from
-        ATT&CK techniques, OT alerts &amp; device classes). Click a cell to see the entries.
-      </p>
-      {coverage && (
-        <CoverageBanner covered={coverage.covered ?? 0} total={coverage.total} noun={`covered by ${framework.short}`} />
-      )}
+      <div className="mitre-head">
+        <p className="mitre-intro">
+          {framework.name} — {framework.desc}. {total.toLocaleString()} mapped hits in this window (crosswalked from
+          ATT&CK techniques, OT alerts &amp; device classes). Click a cell to see the entries.
+        </p>
+        {coverage && (
+          <CoverageBanner covered={coverage.covered ?? 0} total={coverage.total} noun={`covered by ${framework.short}`} />
+        )}
+      </div>
       <div className="mitre-matrix">
         {byGroup.map(({ group, items }) => (
           <div key={group.id} className="mitre-col">

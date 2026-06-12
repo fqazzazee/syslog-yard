@@ -972,13 +972,26 @@ button.nav-item {
 .code-list { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .linkish.promote { margin: 10px 0 4px; color: var(--accent); }
 
-/* Coverage / "unclassified gap" banner shown atop the matrix views. */
-.coverage-banner { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; }
+/* Intro + coverage share one row so the coverage gauge sits beside the blurb
+   instead of as a full-width band that crowds the matrix. Wraps below on
+   narrow viewports. */
+.mitre-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+}
+.mitre-head .mitre-intro { margin: 0; flex: 1 1 360px; }
+
+/* Coverage / "unclassified gap" gauge, a compact unit on the right of the head. */
+.coverage-banner { display: flex; align-items: center; gap: 10px; margin: 0; flex: 0 0 auto; }
 .coverage-bar {
-  flex: 0 0 140px;
+  flex: 0 0 120px;
   height: 8px;
   border-radius: 4px;
-  background: #3a2230;
+  background: var(--bg-hover);
   overflow: hidden;
 }
 .coverage-fill { display: block; height: 100%; background: var(--accent); }

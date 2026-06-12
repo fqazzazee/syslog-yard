@@ -57,11 +57,13 @@ export default function OTView({ filters, selection, onSelectAlert }: Props) {
 
   return (
     <div className="mitre-view">
-      <p className="mitre-intro">
-        OT/ICS events mapped to Claroty-style alert types at ingest — {total.toLocaleString()} alerts in this window
-        (CTD &amp; xDome). Click an alert type to see the entries.
-      </p>
-      {coverage && <CoverageBanner covered={coverage.ot} total={coverage.total} noun="mapped to OT alerts" />}
+      <div className="mitre-head">
+        <p className="mitre-intro">
+          OT/ICS events mapped to Claroty-style alert types at ingest — {total.toLocaleString()} alerts in this window
+          (CTD &amp; xDome). Click an alert type to see the entries.
+        </p>
+        {coverage && <CoverageBanner covered={coverage.ot} total={coverage.total} noun="mapped to OT alerts" />}
+      </div>
       <div className="mitre-matrix ot-matrix">
         {byCategory.map(({ category, alerts }) => (
           <div key={category.id} className="mitre-col">

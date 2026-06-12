@@ -56,11 +56,13 @@ export default function MitreView({ filters, selection, onSelectTechnique }: Pro
 
   return (
     <div className="mitre-view">
-      <p className="mitre-intro">
-        Events mapped to MITRE ATT&CK at ingest — {total.toLocaleString()} technique hits in this window.
-        Click a technique to see the entries.
-      </p>
-      {coverage && <CoverageBanner covered={coverage.mitre} total={coverage.total} noun="mapped to ATT&CK" />}
+      <div className="mitre-head">
+        <p className="mitre-intro">
+          Events mapped to MITRE ATT&CK at ingest — {total.toLocaleString()} technique hits in this window.
+          Click a technique to see the entries.
+        </p>
+        {coverage && <CoverageBanner covered={coverage.mitre} total={coverage.total} noun="mapped to ATT&CK" />}
+      </div>
       <div className="mitre-matrix">
         {byTactic.map(({ tactic, techniques }) => (
           <div key={tactic.id} className="mitre-col">
