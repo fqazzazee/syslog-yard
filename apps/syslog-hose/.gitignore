@@ -1,6 +1,7 @@
 /syslog-hose
 /data/
 web/node_modules/
-web/dist/
+web/dist/*
+!web/dist/index.html
 nohup.out
 *.log

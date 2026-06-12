@@ -286,6 +286,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
           </span>{" "}
           syslog-bucket <span className="bucket-label">{title}</span>
         </h1>
+        <span className="sub">syslog server &amp; triage</span>
         <YardNav links={hints} current="bucket" />
         {stats && (
           <span className="stats">

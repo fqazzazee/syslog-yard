@@ -1076,3 +1076,9 @@ h1.brand .logo { display: inline-flex; color: var(--accent); }
 .ot-matrix .mitre-col { min-width: 240px; }
 .mitre-chip.ot-chip { color: var(--sev-warn); border-color: #5b4a1c; cursor: default; }
 .mitre-chip.ot-chip:hover { border-color: #6d5a22; color: var(--sev-warn); }
+
+/* tool description in the top bar (matches hose/valve) */
+.topbar .sub { color: var(--fg-dim); font-size: 12px; white-space: nowrap; }
+@media (max-width: 1150px) {
+  .topbar .sub { display: none; }
+}

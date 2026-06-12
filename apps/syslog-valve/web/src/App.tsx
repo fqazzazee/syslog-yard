@@ -274,6 +274,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
           </span>{" "}
           syslog-valve
         </h1>
+        <span className="sub">syslog router &amp; filter</span>
         <YardNav links={hints} current="valve" />
         <div className="toolbar">
           {!readOnly && (
