@@ -1,4 +1,4 @@
-import type { Bucket, Channel, Rule, Selection, Tag, User } from "./../types";
+import type { Bucket, Channel, Framework, Rule, Selection, Tag, User } from "./../types";
 import { Icon } from "./Icon";
 import { TagChip } from "./Tags";
 
@@ -7,6 +7,7 @@ interface Props {
   tags: Tag[];
   rules: Rule[];
   channels: Channel[];
+  frameworks: Framework[];
   selection: Selection;
   me: User;
   readOnly: boolean; // viewer role: no create/edit affordances
@@ -22,6 +23,7 @@ export default function Sidebar({
   tags,
   rules,
   channels,
+  frameworks,
   selection,
   me,
   readOnly,
@@ -45,6 +47,28 @@ export default function Sidebar({
       <button className={`nav-item${isOT ? " active" : ""}`} onClick={() => onSelect({ kind: "ot" })}>
         <Icon name="factory" size={16} /> OT alerts
       </button>
+
+      {frameworks.length > 0 && (
+        <>
+          <div className="nav-section">
+            <span>Frameworks</span>
+          </div>
+          {frameworks.map((f) => {
+            const active =
+              (selection.kind === "framework" || selection.kind === "frameworkitem") && selection.fw === f.id;
+            return (
+              <button
+                key={f.id}
+                className={`nav-item${active ? " active" : ""}`}
+                title={f.desc}
+                onClick={() => onSelect({ kind: "framework", fw: f.id })}
+              >
+                <Icon name="shield" size={16} /> {f.short}
+              </button>
+            );
+          })}
+        </>
+      )}
 
       <div className="nav-section">
         <span>Buckets</span>

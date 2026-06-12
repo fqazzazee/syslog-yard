@@ -97,6 +97,9 @@ func run() error {
 	if err := auth.Bootstrap(ctx, st, cfg.AdminPassword); err != nil {
 		return err
 	}
+	if _, err := st.SeedDefaultBuckets(ctx); err != nil {
+		return err
+	}
 	var oidc *auth.OIDC
 	if cfg.OIDCIssuer != "" {
 		oidc = &auth.OIDC{

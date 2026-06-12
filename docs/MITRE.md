@@ -99,3 +99,44 @@ mapping alongside ATT&CK.
 | **Integrity** | New Asset · Asset Change · Baseline Deviation · Configuration Download · PLC Mode Change · IP/MAC Conflict |
 
 Endpoints: `GET /api/ot` (catalog) and `GET /api/ot/summary` (per-alert counts).
+
+## Compliance frameworks (NIST CSF, CIS, IEC 62443)
+
+On top of ATT&CK and the OT alerts, the bucket presents the same events through
+**compliance frameworks**. A framework is a curated **crosswalk**, not a new
+detector: each item lists the ATT&CK techniques and Claroty OT codes that map
+onto it, so the views reuse the counts already computed (`entries.mitre` /
+`entries.ot`) and drilling into a cell expands to a filter over those tags. No
+extra per-entry storage — adding a framework is one entry in
+`internal/frameworks`.
+
+Shipped:
+
+- **NIST CSF 2.0** — Functions as columns (Govern · Identify · Protect ·
+  Detect · Respond), categories as cells (PR.AA, DE.CM, …).
+- **CIS Controls v8** — the relevant controls (Account Mgmt, Access Control,
+  Malware Defenses, Network Monitoring, …) grouped by the function they serve.
+- **IEC 62443-3-3** — the seven Foundational Requirements (FR1–FR7), grouped
+  into Access/Integrity/Monitoring themes; OT-centric, so mostly fed by the
+  Claroty alerts.
+
+Each opens from the sidebar's **Frameworks** section as a matrix (counts in the
+current window; click a cell for the entries). The crosswalks are opinionated
+and coarse — a standards-aligned overview of what the sensors see, not an
+audit-grade control assessment. Catalogs are served at `GET /api/frameworks`.
+
+## Rules: condition & tag by technique
+
+A rule's condition builder has a **MITRE technique** row: pick a technique and
+the rule matches entries mapped to it at ingest — so you can, e.g., auto-tag
+everything mapped to **T1190** or page on **T1071**. Combine it with the tag /
+priority / suppress / notify actions like any other condition.
+
+## Default buckets
+
+A fresh bucket seeds a curated set of saved searches reflecting a realistic SOC
+triage workload — Critical & high, New / untriaged, Exploitation attempts,
+Brute force, Suspicious logins, Malware & phishing, Command & control, Lateral
+movement, Privilege escalation, and OT security / integrity — so an analyst has
+somewhere useful to start. Seeding only runs when no buckets exist; it never
+overwrites a deployment's own.

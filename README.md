@@ -85,9 +85,12 @@ through, auto-tagged by rules:
 - **syslog-bucket**: syslog-ng-fronted ingest into Postgres; email-style
   3-pane triage; virtual buckets (saved searches), color-coded tags, a rules
   engine that tags/prioritizes/suppresses at ingest and retroactively;
-  **MITRE ATT&CK mapping at ingest with a kill-chain matrix view** and a
+  **MITRE ATT&CK mapping at ingest with a kill-chain matrix view**, a
   parallel **Claroty-style OT alert view** (Security / Integrity alert types),
-  device-class tagging, and sortable/filterable columns; **notifications** (webhook, Slack/
+  and **compliance-framework views** (NIST CSF, CIS v8, IEC 62443) crosswalked
+  from them; curated default buckets for a SOC triage workload; rules that
+  condition/tag on MITRE techniques; device-class tagging and
+  sortable/filterable columns; **notifications** (webhook, Slack/
   Teams, SMTP) fired by a notify rule action; live tail over WebSocket; local
   accounts + OIDC sign-in with admin/analyst/viewer roles; buckets shareable
   per-user, view-only or editable.
@@ -103,8 +106,12 @@ a real lab or small deployment today. What's in place:
 - A reviewed security posture — parameterized everywhere, CSP + hardening
   headers, login throttling, and a documented threat model
   ([docs/SECURITY.md](docs/SECURITY.md)).
-- MITRE ATT&CK mapping with a kill-chain matrix, sorting/filtering, and device
-  classification ([docs/MITRE.md](docs/MITRE.md)).
+- MITRE ATT&CK mapping with a kill-chain matrix, a Claroty-style OT alert view,
+  sorting/filtering, and device classification ([docs/MITRE.md](docs/MITRE.md)).
+- **Compliance-framework views** — NIST CSF, CIS Controls v8 and IEC 62443
+  matrices, crosswalked from the ATT&CK / OT mappings; rules can condition (and
+  tag) on a MITRE technique; curated default buckets reflect a SOC triage
+  workload.
 - Notifications to webhook / Slack-Teams / SMTP, from the bucket and in-stream
   on the valve ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)).
 - A unified, icon-driven UI across the three tools with a built-in About/Help
@@ -112,10 +119,8 @@ a real lab or small deployment today. What's in place:
 
 Possible improvements on the radar:
 
-- A pluggable **classification framework** that makes MITRE ATT&CK one of
-  several mappings (e.g. Cyber Kill Chain, NIST CSF, CIS Controls,
-  data-sensitivity, custom org labels), each with its own view and a visible
-  "unclassified" coverage gap.
+- More framework crosswalks (Cyber Kill Chain, NIST 800-53, data-sensitivity,
+  custom org labels) and a visible "unclassified" coverage gap per mapping.
 - **Analyst classification** — hand-classify what the automated packs miss,
   mark entries benign, and promote a manual call into a reusable detection.
 - Per-edge throughput rendered on the valve's wires from `syslog-ng-ctl stats`.

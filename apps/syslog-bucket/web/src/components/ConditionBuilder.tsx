@@ -1,5 +1,6 @@
-import { useState } from "react";
-import type { Cond, Tag } from "./../types";
+import { useEffect, useState } from "react";
+import { fetchMitre } from "./../api";
+import type { Cond, MitreTechnique, Tag } from "./../types";
 import { Icon } from "./Icon";
 
 // The builder edits the common shape — a flat AND of leaf conditions. Trees
@@ -9,6 +10,7 @@ import { Icon } from "./Icon";
 type Row =
   | { kind: "text"; text: string }
   | { kind: "tag"; tagId: number }
+  | { kind: "mitre"; id: string }
   | { kind: "window"; minutes: number }
   | { kind: "field"; field: string; op: string; value: string };
 
@@ -52,6 +54,7 @@ function leafToRow(c: Cond): Row | null {
   if (keys.length === 0) return null;
   if (c.text) return { kind: "text", text: c.text };
   if (c.tag_id) return { kind: "tag", tagId: c.tag_id };
+  if (c.mitre) return { kind: "mitre", id: c.mitre };
   if (c.last_seconds) return { kind: "window", minutes: Math.round(c.last_seconds / 60) };
   if (c.field && keys.every((k) => ["field", "op", "value"].includes(k))) {
     return { kind: "field", field: c.field, op: c.op ?? "eq", value: String(c.value ?? "") };
@@ -81,6 +84,8 @@ export function rowsToCond(rows: Row[]): Cond {
         return { text: r.text };
       case "tag":
         return { tag_id: r.tagId };
+      case "mitre":
+        return { mitre: r.id };
       case "window":
         return { last_seconds: r.minutes * 60 };
       case "field":
@@ -107,6 +112,13 @@ export default function ConditionBuilder({ value, onChange, tags }: Props) {
   const [jsonMode, setJsonMode] = useState(initialRows === null);
   const [jsonDraft, setJsonDraft] = useState(() => JSON.stringify(value, null, 2));
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const [techniques, setTechniques] = useState<MitreTechnique[]>([]);
+
+  useEffect(() => {
+    fetchMitre()
+      .then((c) => setTechniques(c.techniques))
+      .catch(() => {});
+  }, []);
 
   const rows = condToRows(value) ?? [];
   const setRows = (next: Row[]) => onChange(rowsToCond(next));
@@ -157,15 +169,18 @@ export default function ConditionBuilder({ value, onChange, tags }: Props) {
                   ? { kind, text: "" }
                   : kind === "tag"
                     ? { kind, tagId: tags[0]?.id ?? 0 }
-                    : kind === "window"
-                      ? { kind, minutes: 60 }
-                      : { kind, field: "host", op: "contains", value: "" };
+                    : kind === "mitre"
+                      ? { kind, id: techniques[0]?.id ?? "" }
+                      : kind === "window"
+                        ? { kind, minutes: 60 }
+                        : { kind, field: "host", op: "contains", value: "" };
               setRows(rows.map((r, j) => (j === i ? fresh : r)));
             }}
           >
             <option value="field">Field</option>
             <option value="text">Full text</option>
             <option value="tag">Has tag</option>
+            <option value="mitre">MITRE technique</option>
             <option value="window">Time window</option>
           </select>
 
@@ -222,6 +237,17 @@ export default function ConditionBuilder({ value, onChange, tags }: Props) {
               {tags.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {row.kind === "mitre" && (
+            <select className="cond-value" value={row.id} onChange={(e) => patchRow(i, { id: e.target.value })}>
+              {techniques.length === 0 && <option value={row.id}>{row.id || "loading…"}</option>}
+              {techniques.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.id} · {t.name}
                 </option>
               ))}
             </select>

@@ -53,6 +53,29 @@ export interface OTCatalog {
   alert_types: OTAlertType[];
 }
 
+// Compliance frameworks served by /api/frameworks. A framework is a crosswalk:
+// groups are the matrix columns, items the cells, each mapping to the mitre
+// techniques / ot codes that satisfy it.
+export interface FrameworkGroup {
+  id: string;
+  name: string;
+}
+export interface FrameworkItem {
+  id: string;
+  name: string;
+  group: string;
+  mitre?: string[];
+  ot?: string[];
+}
+export interface Framework {
+  id: string;
+  name: string;
+  short: string;
+  desc: string;
+  groups: FrameworkGroup[];
+  items: FrameworkItem[];
+}
+
 // Sort key for the log table. "time" is the default (newest first).
 export type SortKey = "time" | "severity" | "priority" | "host" | "app" | "device_class";
 
@@ -72,6 +95,8 @@ export interface Cond {
   value?: string | number;
   text?: string;
   tag_id?: number;
+  mitre?: string; // entry mapped to this ATT&CK technique
+  ot?: string; // entry mapped to this Claroty OT alert code
   last_seconds?: number;
 }
 
@@ -179,7 +204,9 @@ export type Selection =
   | { kind: "mitre" }
   | { kind: "technique"; id: string }
   | { kind: "ot" }
-  | { kind: "otalert"; id: string };
+  | { kind: "otalert"; id: string }
+  | { kind: "framework"; fw: string }
+  | { kind: "frameworkitem"; fw: string; id: string };
 
 export const SEVERITY_NAMES = [
   "emerg",

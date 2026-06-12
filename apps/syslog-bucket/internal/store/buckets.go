@@ -93,6 +93,72 @@ func (s *Store) GetBucket(ctx context.Context, id int64, u *User) (*Bucket, erro
 	return nil, nil
 }
 
+// SeedDefaultBuckets installs a curated set of saved searches reflecting a
+// realistic SOC triage workload — but only when no buckets exist yet, so it
+// never clobbers a deployment's own. They are ownerless "yard buckets",
+// visible to everyone. Returns how many were created.
+func (s *Store) SeedDefaultBuckets(ctx context.Context) (int, error) {
+	var n int
+	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM buckets`).Scan(&n); err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		return 0, nil
+	}
+	defs := defaultBuckets()
+	for i := range defs {
+		defs[i].Position = i + 1
+		if _, err := s.CreateBucket(ctx, defs[i]); err != nil {
+			return i, err
+		}
+	}
+	return len(defs), nil
+}
+
+// defaultBuckets is the shipped SOC workload. Conditions ride the same
+// mitre/ot/severity/status tags the bucket already computes at ingest.
+func defaultBuckets() []Bucket {
+	mitreLeaf := func(id string) rules.Cond { return rules.Cond{Mitre: id} }
+	otLeaf := func(id string) rules.Cond { return rules.Cond{OT: id} }
+	anyMitre := func(ids ...string) rules.Cond {
+		c := rules.Cond{}
+		for _, id := range ids {
+			c.Any = append(c.Any, mitreLeaf(id))
+		}
+		return c
+	}
+	anyOT := func(ids ...string) rules.Cond {
+		c := rules.Cond{}
+		for _, id := range ids {
+			c.Any = append(c.Any, otLeaf(id))
+		}
+		return c
+	}
+	b := func(name, desc string, c rules.Cond) Bucket {
+		return Bucket{Name: name, Description: desc, Condition: c}
+	}
+	return []Bucket{
+		b("Critical & high", "Severity emergency–error — look here first",
+			rules.Cond{Field: "severity", Op: "lte", Value: float64(3)}),
+		b("New / untriaged", "Unreviewed entries of notable severity",
+			rules.Cond{All: []rules.Cond{
+				{Field: "status", Op: "eq", Value: "new"},
+				{Field: "severity", Op: "lte", Value: float64(4)},
+			}}),
+		b("Exploitation attempts", "Exploit of public-facing apps (ATT&CK T1190)", mitreLeaf("T1190")),
+		b("Brute force & auth failures", "Password guessing (ATT&CK T1110)", mitreLeaf("T1110")),
+		b("Suspicious logins", "Use of valid accounts (ATT&CK T1078)", mitreLeaf("T1078")),
+		b("Malware & phishing", "User execution / phishing (T1204, T1566)", anyMitre("T1204", "T1566")),
+		b("Command & control", "C2 / beaconing (ATT&CK T1071)", mitreLeaf("T1071")),
+		b("Lateral movement", "Remote services (ATT&CK T1021)", mitreLeaf("T1021")),
+		b("Privilege escalation", "Elevation control abuse (ATT&CK T1548)", mitreLeaf("T1548")),
+		b("OT security alerts", "Claroty Security alerts on the OT network",
+			anyOT("CL-KT", "CL-SUS", "CL-SCAN", "CL-UA", "CL-POL", "CL-MAL")),
+		b("OT integrity changes", "Claroty Integrity alerts — asset/config/PLC changes",
+			anyOT("CL-NEWA", "CL-CHG", "CL-BASE", "CL-CFG", "CL-MODE", "CL-CONF")),
+	}
+}
+
 func (s *Store) CreateBucket(ctx context.Context, b Bucket) (Bucket, error) {
 	cond, err := json.Marshal(b.Condition)
 	if err != nil {

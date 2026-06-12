@@ -6,6 +6,7 @@ import type {
   Delivery,
   Entry,
   Filters,
+  Framework,
   MitreCatalog,
   OTCatalog,
   Rule,
@@ -21,6 +22,10 @@ export function filterParams(f: Filters, sel: Selection): URLSearchParams {
   if (sel.kind === "tag") params.set("tag_id", String(sel.id));
   if (sel.kind === "technique") params.set("mitre", sel.id);
   if (sel.kind === "otalert") params.set("ot", sel.id);
+  if (sel.kind === "frameworkitem") {
+    params.set("framework", sel.fw);
+    params.set("item", sel.id);
+  }
   if (f.q) params.set("q", f.q);
   if (f.host) params.set("host", f.host);
   if (f.app) params.set("app", f.app);
@@ -93,6 +98,9 @@ export const fetchMitreSummary = (f: Filters, sel: Selection) =>
   );
 
 export const fetchOt = () => request<OTCatalog>("/api/ot");
+
+export const fetchFrameworks = () =>
+  request<{ frameworks: Framework[] }>("/api/frameworks").then((b) => b.frameworks);
 
 // Per-alert-type counts under the current filters (drives the OT view).
 export const fetchOtSummary = (f: Filters, sel: Selection) =>

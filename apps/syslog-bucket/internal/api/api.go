@@ -17,6 +17,7 @@ import (
 
 	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
+	"github.com/syslog-yard/syslog-bucket/internal/frameworks"
 	"github.com/syslog-yard/syslog-bucket/internal/mitre"
 	"github.com/syslog-yard/syslog-bucket/internal/notify"
 	"github.com/syslog-yard/syslog-bucket/internal/otmap"
@@ -46,6 +47,7 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Disp
 	mux.HandleFunc("GET /api/mitre/summary", s.getMitreSummary)
 	mux.HandleFunc("GET /api/ot", s.getOT)
 	mux.HandleFunc("GET /api/ot/summary", s.getOTSummary)
+	mux.HandleFunc("GET /api/frameworks", s.getFrameworks)
 	mux.HandleFunc("POST /api/auth/login", authSvc.HandleLogin)
 	mux.HandleFunc("POST /api/auth/logout", authSvc.HandleLogout)
 	mux.HandleFunc("GET /api/auth/me", authSvc.HandleMe)
@@ -132,6 +134,13 @@ func (s *server) getMitreSummary(w http.ResponseWriter, r *http.Request) {
 // getOT returns the Claroty-style OT alert catalog served at /api/ot.
 func (s *server) getOT(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, otmap.Get())
+}
+
+// getFrameworks returns the compliance-framework catalogs (NIST CSF, CIS,
+// IEC 62443). The UI aggregates per-item counts from the mitre/ot summaries,
+// so there is no separate framework-summary endpoint.
+func (s *server) getFrameworks(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, map[string]any{"frameworks": frameworks.All()})
 }
 
 // getOTSummary counts entries per OT alert-type code, scoped by the same
@@ -239,6 +248,36 @@ func (s *server) condFromRequest(r *http.Request) (rules.Cond, error) {
 		}
 		if len(any) == 0 {
 			return rules.Cond{}, errors.New("unknown ot category")
+		}
+		all = append(all, rules.Cond{Any: any})
+	}
+	if fw := q.Get("framework"); fw != "" {
+		// A framework item matches any of the mitre techniques / ot codes it
+		// crosswalks to. With no item, match anything the whole framework maps.
+		item := q.Get("item")
+		var any []rules.Cond
+		add := func(mIDs, otIDs []string) {
+			for _, m := range mIDs {
+				any = append(any, rules.Cond{Mitre: m})
+			}
+			for _, o := range otIDs {
+				any = append(any, rules.Cond{OT: o})
+			}
+		}
+		if item != "" {
+			mIDs, otIDs, ok := frameworks.Expand(fw, item)
+			if !ok {
+				return rules.Cond{}, errors.New("unknown framework item")
+			}
+			add(mIDs, otIDs)
+		} else {
+			f, ok := frameworks.Get(fw)
+			if !ok {
+				return rules.Cond{}, errors.New("unknown framework")
+			}
+			for _, it := range f.Items {
+				add(it.Mitre, it.OT)
+			}
 		}
 		all = append(all, rules.Cond{Any: any})
 	}

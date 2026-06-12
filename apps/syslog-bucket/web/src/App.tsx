@@ -4,6 +4,7 @@ import {
   fetchBuckets,
   fetchChannels,
   fetchEntries,
+  fetchFrameworks,
   fetchHints,
   fetchMe,
   fetchRules,
@@ -12,7 +13,7 @@ import {
   liveTailURL,
   logout,
 } from "./api";
-import type { AuthInfo, Bucket, Channel, Entry, Filters, Rule, Selection, SortKey, Stats, Tag, User } from "./types";
+import type { AuthInfo, Bucket, Channel, Entry, Filters, Framework, Rule, Selection, SortKey, Stats, Tag, User } from "./types";
 import { About } from "./components/About";
 import AccountModal from "./components/AccountModal";
 import BucketModal from "./components/BucketModal";
@@ -22,6 +23,7 @@ import { Icon } from "./components/Icon";
 import FilterBar from "./components/FilterBar";
 import Login from "./components/Login";
 import LogTable from "./components/LogTable";
+import FrameworkView from "./components/FrameworkView";
 import MitreView from "./components/MitreView";
 import OTView from "./components/OTView";
 import RuleModal from "./components/RuleModal";
@@ -82,6 +84,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [buckets, setBuckets] = useState<Bucket[]>([]);
+  const [frameworks, setFrameworks] = useState<Framework[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -134,9 +137,14 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
     void reloadMeta();
   }, [reloadMeta]);
 
+  // Framework catalogs are static; load them once.
+  useEffect(() => {
+    fetchFrameworks().then(setFrameworks).catch(() => {});
+  }, []);
+
   // The matrix views (ATT&CK / OT) render their own data; the entry list and
   // live tail pause while one is open.
-  const isMatrix = selection.kind === "mitre" || selection.kind === "ot";
+  const isMatrix = selection.kind === "mitre" || selection.kind === "ot" || selection.kind === "framework";
   // A column sort returns one ranked page; time sort streams + paginates.
   const pageLimit = filters.sort === "time" ? 200 : 1000;
 
@@ -194,6 +202,11 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
 
   const onSelectAlert = (id: string) => {
     setSelection({ kind: "otalert", id });
+    setSelected(null);
+  };
+
+  const onSelectFrameworkItem = (fw: string, id: string) => {
+    setSelection({ kind: "frameworkitem", fw, id });
     setSelected(null);
   };
 
@@ -258,7 +271,11 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
               ? "OT alerts"
               : selection.kind === "otalert"
                 ? `OT ${selection.id}`
-                : `Tag: ${tagsById.get(selection.id)?.name ?? selection.id}`;
+                : selection.kind === "framework"
+                  ? (frameworks.find((f) => f.id === selection.fw)?.name ?? "Framework")
+                  : selection.kind === "frameworkitem"
+                    ? `${frameworks.find((f) => f.id === selection.fw)?.short ?? "Framework"} · ${selection.id}`
+                    : `Tag: ${tagsById.get(selection.id)?.name ?? selection.id}`;
 
   return (
     <div className="app">
@@ -320,6 +337,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
           tags={tags}
           rules={rules}
           channels={channels}
+          frameworks={frameworks}
           selection={selection}
           me={me}
           readOnly={readOnly}
@@ -339,6 +357,20 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
           <main className="content">
             {selection.kind === "ot" ? (
               <OTView filters={filters} selection={selection} onSelectAlert={onSelectAlert} />
+            ) : selection.kind === "framework" ? (
+              (() => {
+                const fw = frameworks.find((f) => f.id === selection.fw);
+                return fw ? (
+                  <FrameworkView
+                    framework={fw}
+                    filters={filters}
+                    selection={selection}
+                    onSelectItem={onSelectFrameworkItem}
+                  />
+                ) : (
+                  <div className="mitre-view empty">Loading framework…</div>
+                );
+              })()
             ) : isMatrix ? (
               <MitreView filters={filters} selection={selection} onSelectTechnique={onSelectTechnique} />
             ) : (
