@@ -268,7 +268,9 @@ func (s *Supervisor) HistoryConfig(id string) ([]byte, error) {
 
 func (s *Supervisor) History() []HistoryEntry {
 	entries, _ := os.ReadDir(s.historyDir())
-	var out []HistoryEntry
+	// Non-nil so the API answers [] (not null) on a fresh install — the UI
+	// maps over it.
+	out := []HistoryEntry{}
 	for _, e := range entries {
 		if id, ok := strings.CutSuffix(e.Name(), ".conf"); ok {
 			t, err := time.Parse("20060102-150405.000", id)
