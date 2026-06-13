@@ -38,6 +38,7 @@ Just three small containers and a browser.
   wiring, and remap classic port 514 in compose for devices that can't send
   anywhere else.
   ![syslog-valve-diagram-example02](docs/img/syslog-valve-example02.png)
+  ![syslog-valve-diagram-example01](docs/img/syslog-valve-example01.png)
 - **A network security view** — the bucket classifies traffic by the IP
   addresses entries mention: flow direction (inbound / outbound / lateral),
   RFC1918-internal vs public vs special-use scopes, and live matching against
@@ -45,9 +46,12 @@ Just three small containers and a browser.
   Tracker C2), Tor exit nodes, Microsoft 365 ranges, and your own CIDR
   groups. Matching runs at read time, so every feed refresh retroactively
   flags history; flagged addresses get a drill-down table.
+  ![syslog-bucket-diagram-example01](docs/img/syslog-bucket-example01.png)
 - **Realistic traffic generation** — hose presets for FortiGate, Cisco,
   Linux, OT switches, and Claroty OT/ICS CEF alerts, with rate control and
   concurrent jobs.
+  ![syslog-hose-diagram-example02](docs/img/syslog-hose-example02.png)
+  ![syslog-hose-diagram-example01](docs/img/syslog-hose-example01.png)
 - **Email-style triage** — virtual buckets, color-coded tags, and a rules
   engine that tags, prioritizes, suppresses, classifies, and notifies — at
   ingest and retroactively — plus a live tail.
