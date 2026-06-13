@@ -3,6 +3,7 @@
   --bg-panel: #181d26;
   --bg-hover: #1f2632;
   --bg-active: #223048; /* selected nav item / log row; pairs with --fg */
+  --ok: #6ee07a; /* "good" accents on the page background (live, delivery ok) */
   --border: #2a3242;
   --fg: #d6dce6;
   --fg-dim: #8a94a6;
@@ -23,6 +24,7 @@
   --bg-panel: #ffffff;
   --bg-hover: #e9eef5;
   --bg-active: #d4e3f7;
+  --ok: #1a7f37;
   --border: #d3dbe6;
   --fg: #1b2431;
   --fg-dim: #586273;
@@ -306,8 +308,8 @@ body {
 }
 
 .live.on {
-  color: #6ee07a;
-  border-color: #2c4a33;
+  color: var(--ok);
+  border-color: var(--ok);
 }
 
 .filterbar {
@@ -1093,7 +1095,7 @@ button.nav-item {
   align-items: center;
 }
 .delivery-status { font-weight: 700; text-transform: uppercase; font-size: 10px; }
-.delivery-ok .delivery-status { color: #6ee07a; }
+.delivery-ok .delivery-status { color: var(--ok); }
 .delivery-error .delivery-status { color: var(--sev-emerg); }
 .delivery-dropped .delivery-status { color: var(--sev-warn); }
 .delivery-time { color: var(--fg-dim); }

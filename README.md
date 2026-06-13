@@ -25,6 +25,44 @@ before it touches production, or trim the noise you'd otherwise pay to store
 downstream. There are no agents to license, no per-GB bill, and no SaaS account.
 Just three small containers and a browser.
 
+## Feature highlights
+
+- **A visual syslog pipeline** — draw IN ports, filters, and OUT ports on the
+  valve's canvas; the graph compiles to syslog-ng with a syntax check, atomic
+  swap, one-click rollback, and live per-wire msgs/sec.
+- **External syslog sources, with an on/off switch** — a dedicated
+  **External IN** block receives traffic from other machines on host port
+  **6514** (udp + tcp at once), kept separate from the suite's internal
+  traffic so you can route, filter, and meter it on its own. Untick its
+  *enabled* toggle and Apply to shut external intake off without losing the
+  wiring, and remap classic port 514 in compose for devices that can't send
+  anywhere else.
+- **A network security view** — the bucket classifies traffic by the IP
+  addresses entries mention: flow direction (inbound / outbound / lateral),
+  RFC1918-internal vs public vs special-use scopes, and live matching against
+  online databases — known-malicious sources (Spamhaus DROP, abuse.ch Feodo
+  Tracker C2), Tor exit nodes, Microsoft 365 ranges, and your own CIDR
+  groups. Matching runs at read time, so every feed refresh retroactively
+  flags history; flagged addresses get a drill-down table.
+- **Realistic traffic generation** — hose presets for FortiGate, Cisco,
+  Linux, OT switches, and Claroty OT/ICS CEF alerts, with rate control and
+  concurrent jobs.
+- **Email-style triage** — virtual buckets, color-coded tags, and a rules
+  engine that tags, prioritizes, suppresses, classifies, and notifies — at
+  ingest and retroactively — plus a live tail.
+- **MITRE ATT&CK, OT, and compliance views** — a kill-chain matrix,
+  Claroty-style OT alerts, and NIST CSF / CIS v8 / IEC 62443 / Cyber Kill
+  Chain / NIST 800-53 / data-sensitivity crosswalks plus custom org
+  frameworks, each with coverage-gap banners and analyst overrides.
+- **Alerting** — webhook, Slack/Teams, and SMTP channels from the bucket;
+  in-stream webhook/Slack notify nodes on the valve.
+- **Multi-user with single sign-on** — the bucket is the yard's identity
+  provider: local + OIDC accounts, admin/analyst/viewer roles, per-user
+  bucket sharing, admin-tunable session idle-timeout.
+- **Easy to operate** — three small containers, one compose file, a `yardctl`
+  helper (prereqs, firewall, smoke test, and `service-install` to start the
+  suite at boot), dark/light themes, MIT licensed.
+
 ## Why syslog-yard, and how it compares
 
 **It's easy to pick up.** You don't have to memorize a config language. You draw
@@ -207,7 +245,14 @@ cd apps/syslog-bucket && go test ./...   # repeat for syslog-hose / syslog-valve
   jobs, and a live tail of what it sends.
 - **syslog-valve**: a node-graph canvas compiled to syslog-ng config with a
   syntax check, atomic swap, and one-click rollback; UDP/TCP/TLS listeners (with
-  one-click self-signed certs); facility, severity, host, program, regex, and
+  one-click self-signed certs), including a dual udp+tcp source transport;
+  paired **Internal IN / External IN** entry points — internal traffic (the
+  hose and other yard services) stays on container port 514 while external
+  senders land on the published External IN (host 6514) and route
+  independently; per-block enable/disable toggles (a disabled block stays on
+  the canvas but is left out on Apply — the External IN's toggle is the
+  "allow external sources" switch) and block deletion (panel button or
+  Delete/Backspace); facility, severity, host, program, regex, and
   MITRE ATT&CK technique filters with if/else routing; disk cache nodes whose
   retention compiles to logrotate; in-stream notify nodes (webhook, Slack/Teams)
   that alert on the raw flow before storage; a live tail of everything entering
@@ -261,6 +306,12 @@ a real lab or a small deployment today. What's in place:
 - Analyst classification: a `benign` triage outcome, hand-adding ATT&CK and OT
   codes to entries the automated packs missed, and "Create rule from this entry"
   to turn that manual call into a reusable detection.
+- A network security view classifying traffic by mentioned IP addresses:
+  direction, internal/external/special scopes, and read-time matching against
+  live threat-intel and Microsoft 365 feeds plus custom CIDR categories, with
+  cached snapshots so offline starts keep working.
+- First-class external syslog intake: the valve's External IN block (host port
+  6514, udp+tcp) with an enable toggle, separate from internal yard traffic.
 - Notifications to webhook, Slack/Teams, and SMTP, from the bucket and in-stream
   on the valve ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)).
 - A unified, icon-driven UI across the three tools, with a built-in About/Help

@@ -86,6 +86,13 @@ export function NodePanel({
               onChange={(e) => set({ port: Number(e.target.value) })}
             />
           </label>
+          {node.type === "source" && (
+            <p className="muted">
+              {node.config.port === 6514
+                ? "External entry point: the deployment publishes host port 6514 onto this port, so off-host senders land here. The enabled toggle above is the external on/off switch."
+                : `Internal: yard services reach this at syslog-valve:${node.config.port ?? 514} (the hose sends here by default). Not reachable from outside the host unless published in deploy/compose.yaml.`}
+            </p>
+          )}
           {node.config.transport === "tls" && node.type === "source" && <CertPanel />}
           {node.config.transport === "tls" && node.type === "forward" && (
             <label className="check">

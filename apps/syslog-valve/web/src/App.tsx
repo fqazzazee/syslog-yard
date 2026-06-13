@@ -86,7 +86,7 @@ const DEFAULTS: Record<NodeType, GraphNode["config"]> = {
 };
 
 const NEW_NAMES: Record<NodeType, string> = {
-  source: "syslog in",
+  source: "internal in",
   filter: "severity filter",
   forward: "forward",
   cache: "cache",
@@ -343,8 +343,11 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
         <div className="toolbar">
           {!readOnly && (
             <>
-              <button onClick={() => addNode("source")}>
-                <Icon name="add" size={15} /> IN port
+              <button
+                onClick={() => addNode("source")}
+                title="Listen inside the yard network (the hose and other internal services send here)"
+              >
+                <Icon name="add" size={15} /> Internal IN
               </button>
               {/* External entry point: deploy/compose.yaml publishes host
                   6514 (udp+tcp) to container 6514, so this block is where
