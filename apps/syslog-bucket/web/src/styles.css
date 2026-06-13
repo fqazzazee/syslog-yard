@@ -2,6 +2,7 @@
   --bg: #11151c;
   --bg-panel: #181d26;
   --bg-hover: #1f2632;
+  --bg-active: #223048; /* selected nav item / log row; pairs with --fg */
   --border: #2a3242;
   --fg: #d6dce6;
   --fg-dim: #8a94a6;
@@ -21,6 +22,7 @@
   --bg: #f4f6fa;
   --bg-panel: #ffffff;
   --bg-hover: #e9eef5;
+  --bg-active: #d4e3f7;
   --border: #d3dbe6;
   --fg: #1b2431;
   --fg-dim: #586273;
@@ -408,7 +410,7 @@ button.nav-item {
 }
 
 .nav-item.active {
-  background: #223048;
+  background: var(--bg-active);
 }
 
 .nav-label {
@@ -807,7 +809,7 @@ button.nav-item {
 }
 
 .logtable tbody tr.selected {
-  background: #223048;
+  background: var(--bg-active);
 }
 
 .col-time { width: 150px; color: var(--fg-dim); }
