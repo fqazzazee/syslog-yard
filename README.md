@@ -157,11 +157,16 @@ You'll need `git`, `podman` (version 4.6 or newer), a compose provider
 (`podman-compose`, or `podman compose` with a docker-compose binary), and `curl`
 for the health and smoke checks.
 
+Note: If you're using Ubuntu image in a WSL environment, you will need to install the 
+docker binaries and consider running the yardctl with sudo. See docker's official docs
+for Apt setup.
+https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository
+
 ```sh
 # Fedora / RHEL / CentOS Stream
 sudo dnf install -y git podman podman-compose curl
 
-# Debian / Ubuntu (including WSL Ubuntu)
+# Debian / Ubuntu
 sudo apt update && sudo apt install -y git podman podman-compose curl
 ```
 
