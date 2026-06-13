@@ -1,8 +1,22 @@
 package netfeeds
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 )
+
+// The API answer must carry "custom":[] (not null) when no custom categories
+// exist — the UI maps over it (same bug class as the valve history view).
+func TestConfigMarshalsEmptyCustomAsArray(t *testing.T) {
+	doc, err := json.Marshal(New(nil).Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(doc), `"custom":[]`) {
+		t.Errorf("config JSON = %s", doc)
+	}
+}
 
 func TestParseSpamhausDrop(t *testing.T) {
 	body := []byte(`{"cidr":"1.10.16.0/20","sblid":"SBL256894","rir":"apnic"}

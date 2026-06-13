@@ -281,11 +281,13 @@ func (m *Manager) fetch(ctx context.Context, f feedDef) ([]string, error) {
 	return out, nil
 }
 
-// Config returns a deep-enough copy of the current config (secrets-free).
+// Config returns a deep-enough copy of the current config. Custom is always
+// non-nil so the API marshals [] (not null) — the UI maps over it.
 func (m *Manager) Config() Config {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	c := Config{Feeds: map[string]bool{}, Custom: append([]CustomCat(nil), m.config.Custom...)}
+	c := Config{Feeds: map[string]bool{}, Custom: make([]CustomCat, 0, len(m.config.Custom))}
+	c.Custom = append(c.Custom, m.config.Custom...)
 	for k, v := range m.config.Feeds {
 		c.Feeds[k] = v
 	}

@@ -101,50 +101,63 @@ export default function NetView({ filters, me }: Props) {
         )}
       </div>
 
-      <h3 className="net-h">Direction</h3>
-      <div className="net-cards">
-        {DIRECTIONS.map((d) => (
-          <button
-            key={d.id}
-            className={`net-card${(sum.directions[d.id] ?? 0) > 0 ? " hit" : ""}`}
-            title={d.hint}
-            onClick={() => setDrill({ label: `${d.label.toLowerCase()} traffic`, q: { class: `dir:${d.id}` } })}
-          >
-            <span className="net-card-n">{(sum.directions[d.id] ?? 0).toLocaleString()}</span>
-            {d.label}
-          </button>
-        ))}
-      </div>
-
-      <h3 className="net-h">Address scopes</h3>
-      <div className="net-cards">
-        {SCOPES.map((s) => (
-          <button
-            key={s.id}
-            className={`net-card${(sum.scopes[s.id] ?? 0) > 0 ? " hit" : ""}`}
-            title={s.hint}
-            onClick={() => setDrill({ label: s.label, q: { class: `scope:${s.id}` } })}
-          >
-            <span className="net-card-n">{(sum.scopes[s.id] ?? 0).toLocaleString()}</span>
-            {s.label}
-          </button>
-        ))}
-      </div>
-
-      <h3 className="net-h">Categories</h3>
-      <div className="net-cards">
-        {sum.categories.map((c) => (
-          <button
-            key={c.id}
-            className={`net-card cat-${c.category}${c.count > 0 ? " hit" : ""}`}
-            title={`category: ${c.category}`}
-            onClick={() => setDrill({ label: c.label, q: { class: `set:${c.id}` } })}
-          >
-            <span className="net-card-n">{c.count.toLocaleString()}</span>
-            {c.label}
-          </button>
-        ))}
-        {sum.categories.length === 0 && <span className="muted">No category sets enabled.</span>}
+      <div className="mitre-matrix net-matrix">
+        <div className="mitre-col">
+          <div className="mitre-tactic">Direction</div>
+          {DIRECTIONS.map((d) => (
+            <NetCell
+              key={d.id}
+              name={d.label}
+              hint={d.hint}
+              count={sum.directions[d.id] ?? 0}
+              onClick={() => setDrill({ label: `${d.label.toLowerCase()} traffic`, q: { class: `dir:${d.id}` } })}
+            />
+          ))}
+        </div>
+        <div className="mitre-col">
+          <div className="mitre-tactic">Address scope</div>
+          {SCOPES.map((s) => (
+            <NetCell
+              key={s.id}
+              name={s.label}
+              hint={s.hint}
+              count={sum.scopes[s.id] ?? 0}
+              onClick={() => setDrill({ label: s.label, q: { class: `scope:${s.id}` } })}
+            />
+          ))}
+        </div>
+        <div className="mitre-col">
+          <div className="mitre-tactic net-tactic-bad">Threat intel</div>
+          {sum.categories
+            .filter((c) => c.category === "malicious" || c.category === "tor")
+            .map((c) => (
+              <NetCell
+                key={c.id}
+                name={c.label}
+                hint={c.category === "malicious" ? "known-malicious sources" : "anonymity network"}
+                count={c.count}
+                bad={c.category === "malicious"}
+                onClick={() => setDrill({ label: c.label, q: { class: `set:${c.id}` } })}
+              />
+            ))}
+        </div>
+        <div className="mitre-col">
+          <div className="mitre-tactic">Cloud &amp; custom</div>
+          {sum.categories
+            .filter((c) => c.category !== "malicious" && c.category !== "tor")
+            .map((c) => (
+              <NetCell
+                key={c.id}
+                name={c.label}
+                hint={c.category === "o365" ? "Microsoft-published ranges" : "admin-defined CIDRs"}
+                count={c.count}
+                onClick={() => setDrill({ label: c.label, q: { class: `set:${c.id}` } })}
+              />
+            ))}
+          {sum.categories.filter((c) => c.category !== "malicious" && c.category !== "tor").length === 0 && (
+            <span className="muted">none configured</span>
+          )}
+        </div>
       </div>
 
       {sum.malicious.length > 0 && (
@@ -263,6 +276,36 @@ export default function NetView({ filters, me }: Props) {
   );
 }
 
+// NetCell is one matrix tile, styled exactly like the ATT&CK/OT cells so the
+// view matches the rest of the UI in both themes.
+function NetCell({
+  name,
+  hint,
+  count,
+  bad,
+  onClick,
+}: {
+  name: string;
+  hint: string;
+  count: number;
+  bad?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`mitre-tech${count > 0 ? " hit" : ""}${bad && count > 0 ? " net-bad" : ""}`}
+      title={hint}
+      onClick={onClick}
+    >
+      <span className="mitre-tech-name">{name}</span>
+      <span className="mitre-tech-meta">
+        <span className="mitre-tech-id">{hint}</span>
+        {count > 0 && <span className="mitre-count">{count.toLocaleString()}</span>}
+      </span>
+    </button>
+  );
+}
+
 // NetConfigEditor lets an admin toggle feeds and maintain custom CIDR
 // categories ("VPN pool", "branch offices", …). Loaded lazily so the view
 // itself stays read-only for analysts.
@@ -278,7 +321,8 @@ function NetConfigEditor({ onSaved }: { onSaved: () => void }) {
     import("./../api").then(({ fetchNetConfig }) =>
       fetchNetConfig()
         .then((r) => {
-          setCfg(r.config);
+          // custom ?? []: tolerate an older server answering null here.
+          setCfg({ ...r.config, custom: r.config.custom ?? [] });
           setLabels(Object.fromEntries(r.feeds.map((f) => [f.id, f.label])));
         })
         .catch((e) => setErr(String(e))),

@@ -89,8 +89,11 @@ func (c *renderContext) randIP(kind string) string {
 			return fmt.Sprintf("192.168.%d.%d", c.rng.Intn(256), c.rng.Intn(254)+1)
 		}
 	case "public":
-		// Sample from blocks that read as real internet space.
-		firsts := []int{8, 13, 23, 34, 45, 52, 64, 74, 91, 104, 128, 142, 151, 162, 185, 195, 203, 209}
+		// Sample from blocks that read as real internet space. Deliberately
+		// avoids first octets with big Microsoft allocations (13, 52, 104):
+		// the bucket's network view matches real O365 ranges, and random
+		// demo IPs shouldn't land in them.
+		firsts := []int{8, 23, 31, 34, 45, 64, 74, 77, 91, 121, 128, 142, 151, 162, 185, 195, 203, 209}
 		return fmt.Sprintf("%d.%d.%d.%d",
 			firsts[c.rng.Intn(len(firsts))], c.rng.Intn(256), c.rng.Intn(256), c.rng.Intn(254)+1)
 	default:
