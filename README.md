@@ -37,6 +37,7 @@ Just three small containers and a browser.
   *enabled* toggle and Apply to shut external intake off without losing the
   wiring, and remap classic port 514 in compose for devices that can't send
   anywhere else.
+  ![syslog-valve-diagram-example02](docs/img/syslog-valve-example02.png)
 - **A network security view** — the bucket classifies traffic by the IP
   addresses entries mention: flow direction (inbound / outbound / lateral),
   RFC1918-internal vs public vs special-use scopes, and live matching against
