@@ -217,6 +217,7 @@ auto-tagged by rules:
 | [docs/SECURITY.md](docs/SECURITY.md) | threat model, what's defended, production hardening checklist |
 | [docs/SHARES.md](docs/SHARES.md) | external NAS shares (NFS/CIFS) for log storage |
 | [docs/CREDITS.md](docs/CREDITS.md) | the open-source projects, libraries, and public data feeds the suite builds on, with their licenses |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | dev setup, tests, style, and pull-request expectations |
 | [deploy/quadlet](deploy/quadlet) | rootless podman systemd units |
 | per-app READMEs | standalone use, env vars, development |
 

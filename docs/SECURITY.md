@@ -120,4 +120,7 @@ never back into config or commands.
 
 This is a lab/self-hosted project; file issues for security concerns the
 same way as bugs. There is no public deployment to coordinate disclosure
-against.
+against. If you'd rather report privately (for example, an injection past
+one of the defenses above), use GitHub's
+[private vulnerability reporting](https://github.com/fqazzazee/syslog-yard/security/advisories/new)
+— it's enabled for this repository.

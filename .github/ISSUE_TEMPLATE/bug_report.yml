@@ -1,0 +1,45 @@
+name: Bug report
+description: Something in the suite doesn't work as documented
+labels: [bug]
+body:
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Affected tool
+      multiple: true
+      options:
+        - syslog-hose
+        - syslog-valve
+        - syslog-bucket
+        - yardctl / compose / deploy
+        - docs
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        1. Drew an External IN → filter → OUT flow and clicked Apply
+        2. Expected the wire counters to move
+        3. Got "connection refused" from the sender instead
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS/distro, runtime (podman/docker, rootless?), VM boundary if any (WSL, Rancher/Docker Desktop, Colima), and the commit or release you're running.
+      placeholder: |
+        Fedora 44, rootless podman 5.x, podman-compose
+        syslog-yard v0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Relevant output from `scripts/yardctl logs <service>` and, for delivery problems, `scripts/yardctl smoke`. Paste as text, not screenshots.
+      render: text

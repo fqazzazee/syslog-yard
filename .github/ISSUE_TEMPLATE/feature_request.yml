@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest an improvement or new capability
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Affected tool
+      multiple: true
+      options:
+        - syslog-hose
+        - syslog-valve
+        - syslog-bucket
+        - yardctl / compose / deploy
+        - docs
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that the suite doesn't let you do (or makes harder than it should be)?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How you imagine it working. Rough is fine.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds or alternatives you've considered
