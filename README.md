@@ -216,6 +216,7 @@ auto-tagged by rules:
 | [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md) | webhook / Slack-Teams / SMTP channels fired by the notify rule action |
 | [docs/SECURITY.md](docs/SECURITY.md) | threat model, what's defended, production hardening checklist |
 | [docs/SHARES.md](docs/SHARES.md) | external NAS shares (NFS/CIFS) for log storage |
+| [docs/CREDITS.md](docs/CREDITS.md) | the open-source projects, libraries, and public data feeds the suite builds on, with their licenses |
 | [deploy/quadlet](deploy/quadlet) | rootless podman systemd units |
 | per-app READMEs | standalone use, env vars, development |
 
@@ -350,3 +351,7 @@ syslog-yard is free and open source under the MIT License. You're welcome to run
 it, modify it, and use it for personal or commercial purposes at no cost. It
 comes as-is, with no warranty of any kind, so use it at your own risk. See the
 [LICENSE](LICENSE) file for the full terms.
+
+The suite is built on a small set of open-source projects and public data
+services; they're all listed, with their licenses, in
+[docs/CREDITS.md](docs/CREDITS.md).

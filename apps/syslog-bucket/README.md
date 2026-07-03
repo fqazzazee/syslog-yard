@@ -75,3 +75,8 @@ cd web && npm install && npm run dev
 `cmd/` entrypoint · `internal/` (ingest, parsers, rules, store, auth, api,
 ws) · `web/` React SPA · `migrations/` SQL applied at startup · `deploy/`
 standalone compose + syslog-ng config.
+
+## License
+
+MIT — see [LICENSE](../../LICENSE) at the repo root. Third-party projects the
+suite builds on are credited in [docs/CREDITS.md](../../docs/CREDITS.md).

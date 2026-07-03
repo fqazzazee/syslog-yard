@@ -45,3 +45,8 @@ make test       # Go unit tests (no syslog-ng needed)
 make build      # UI + binary; needs node and go
 cd web && npm run dev   # UI dev server proxying /api to :8081
 ```
+
+## License
+
+MIT — see [LICENSE](../../LICENSE) at the repo root. Third-party projects the
+suite builds on are credited in [docs/CREDITS.md](../../docs/CREDITS.md).
