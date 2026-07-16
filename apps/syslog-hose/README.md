@@ -52,7 +52,8 @@ Works rootless out of the box — syslog-hose only makes *outbound* connections 
 binds privileged ports:
 
 ```bash
-podman build -t syslog-hose .
+# context is the parent apps/ dir: the image also copies apps/shared
+podman build -t syslog-hose -f Dockerfile ..
 podman run -d --name syslog-hose \
   -p 8080:8080 \
   -v syslog-hose-data:/data \

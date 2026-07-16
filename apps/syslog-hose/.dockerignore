@@ -1,7 +1,0 @@
-.git
-data
-web/node_modules
-web/dist
-syslog-hose
-docs
-*.log

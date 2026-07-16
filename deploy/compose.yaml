@@ -44,7 +44,10 @@ volumes:
 
 services:
   syslog-hose:
-    build: ../apps/syslog-hose
+    build:
+      # context is apps/ so the image can also copy apps/shared
+      context: ../apps
+      dockerfile: syslog-hose/Dockerfile
     image: syslog-hose:latest
     networks: [yardnet]
     ports:
@@ -68,7 +71,10 @@ services:
     restart: unless-stopped
 
   syslog-valve:
-    build: ../apps/syslog-valve
+    build:
+      # context is apps/ so the image can also copy apps/shared
+      context: ../apps
+      dockerfile: syslog-valve/Dockerfile
     image: syslog-valve:latest
     networks: [yardnet]
     ports:
@@ -121,7 +127,10 @@ services:
     restart: unless-stopped
 
   syslog-bucket:
-    build: ../apps/syslog-bucket
+    build:
+      # context is apps/ so the image can also copy apps/shared
+      context: ../apps
+      dockerfile: syslog-bucket/Dockerfile
     image: syslog-bucket:latest
     networks: [yardnet]
     ports:

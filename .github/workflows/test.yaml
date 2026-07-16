@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false # run all three even if one fails, so you see every result
       matrix:
-        app: [syslog-hose, syslog-valve, syslog-bucket]
+        app: [shared, syslog-hose, syslog-valve, syslog-bucket]
     name: test (${{ matrix.app }})
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +30,11 @@ jobs:
           go-version-file: apps/${{ matrix.app }}/go.mod
           cache-dependency-path: apps/${{ matrix.app }}/go.sum
       # `go test` compiles every package first (so a build break fails here
-      # too) and runs a subset of `go vet` automatically.
+      # too) and runs a subset of `go vet` automatically. GOWORK=off keeps
+      # each module on its own pinned Go version instead of the root
+      # go.work's (which must satisfy the newest module); the apps/shared
+      # module still resolves via each go.mod's replace directive.
       - run: go test ./...
         working-directory: apps/${{ matrix.app }}
+        env:
+          GOWORK: off

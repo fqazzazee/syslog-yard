@@ -1,5 +1,0 @@
-web/node_modules
-web/dist
-syslog-valve
-data
-.gitignore

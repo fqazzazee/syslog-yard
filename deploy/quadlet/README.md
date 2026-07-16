@@ -33,9 +33,10 @@ The units reference locally built images (`localhost/syslog-<tool>:latest`) —
 no registry. Build them once from the repo root before starting the units:
 
 ```sh
-podman build -t localhost/syslog-hose:latest apps/syslog-hose
-podman build -t localhost/syslog-valve:latest apps/syslog-valve
-podman build -t localhost/syslog-bucket:latest apps/syslog-bucket
+# context is apps/ so each image can also copy apps/shared
+podman build -t localhost/syslog-hose:latest -f apps/syslog-hose/Dockerfile apps
+podman build -t localhost/syslog-valve:latest -f apps/syslog-valve/Dockerfile apps
+podman build -t localhost/syslog-bucket:latest -f apps/syslog-bucket/Dockerfile apps
 ```
 
 (`scripts/yardctl up` builds the same images under compose; the quadlet units
@@ -60,7 +61,7 @@ reuse them.)
 Rebuild the image(s) from updated source, then restart:
 
 ```sh
-podman build -t localhost/syslog-hose:latest apps/syslog-hose   # etc.
+podman build -t localhost/syslog-hose:latest -f apps/syslog-hose/Dockerfile apps   # etc.
 systemctl --user restart syslog-hose syslog-valve syslog-bucket bucket-syslog
 ```
 
