@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/syslog-yard/shared/secure"
+	"github.com/syslog-yard/shared/yardauth"
 	"github.com/syslog-yard/syslog-valve/internal/certs"
 	"github.com/syslog-yard/syslog-valve/internal/codegen"
 	"github.com/syslog-yard/syslog-valve/internal/graph"
@@ -21,7 +23,6 @@ import (
 	"github.com/syslog-yard/syslog-valve/internal/rotate"
 	"github.com/syslog-yard/syslog-valve/internal/supervisor"
 	"github.com/syslog-yard/syslog-valve/internal/tap"
-	"github.com/syslog-yard/syslog-valve/internal/yardauth"
 )
 
 type Server struct {
@@ -87,7 +88,7 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 		guard = yardauth.New("", false)
 	}
 	guard.Routes(s.mux)
-	s.handler = secureHeaders(guard.Middleware(s.mux))
+	s.handler = secure.Headers(guard.Middleware(s.mux))
 	return s
 }
 

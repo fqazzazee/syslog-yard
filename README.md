@@ -247,7 +247,7 @@ which is the kind of thing that catches "works on my machine" regressions.
 To run the same checks locally:
 
 ```sh
-cd apps/syslog-bucket && go test ./...   # repeat for syslog-hose / syslog-valve
+cd apps/syslog-bucket && go test ./...   # repeat for shared / syslog-hose / syslog-valve
 ```
 
 ## Features by tool

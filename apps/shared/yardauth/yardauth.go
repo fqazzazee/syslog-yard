@@ -7,8 +7,8 @@
 // them on a standard same-host deployment.
 //
 // Unset YARD_AUTH_URL = guard disabled = the tool runs open (standalone
-// mode). This file is identical in syslog-hose and
-// syslog-valve; keep edits in sync.
+// mode). Shared by syslog-hose and syslog-valve; the bucket is the identity
+// provider itself and has its own internal/auth.
 package yardauth
 
 import (

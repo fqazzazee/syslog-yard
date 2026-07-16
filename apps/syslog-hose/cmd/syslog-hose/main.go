@@ -8,10 +8,10 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/syslog-yard/shared/yardauth"
 	"github.com/syslog-yard/syslog-hose/internal/engine"
 	"github.com/syslog-yard/syslog-hose/internal/preset"
 	"github.com/syslog-yard/syslog-hose/internal/server"
-	"github.com/syslog-yard/syslog-hose/internal/yardauth"
 	"github.com/syslog-yard/syslog-hose/web"
 )
 

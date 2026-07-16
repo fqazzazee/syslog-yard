@@ -11,9 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/syslog-yard/shared/secure"
+	"github.com/syslog-yard/shared/yardauth"
 	"github.com/syslog-yard/syslog-hose/internal/engine"
 	"github.com/syslog-yard/syslog-hose/internal/preset"
-	"github.com/syslog-yard/syslog-hose/internal/yardauth"
 )
 
 // Server wires the manager and preset store into an http.Handler.
@@ -40,7 +41,7 @@ func New(mgr *engine.Manager, store *preset.Store, ui fs.FS, hints map[string]st
 	s := &Server{mgr: mgr, store: store, ui: ui, hints: hints, mux: http.NewServeMux()}
 	s.routes()
 	guard.Routes(s.mux)
-	s.handler = secureHeaders(guard.Middleware(s.mux))
+	s.handler = secure.Headers(guard.Middleware(s.mux))
 	return s
 }
 

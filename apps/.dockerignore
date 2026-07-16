@@ -1,0 +1,9 @@
+# Build context is apps/ (each Dockerfile needs its own app plus shared/),
+# so ignores live here — per-app .dockerignore files don't apply to a parent
+# context.
+**/node_modules
+**/web/dist
+**/data
+**/docs
+**/*.log
+.gitignore

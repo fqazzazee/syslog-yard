@@ -1,18 +1,25 @@
+# Build context is apps/ (see deploy/compose.yaml): the image needs this app
+# plus apps/shared (Go module + shared web components), so paths below are
+# relative to apps/, not to this directory.
+
 # --- UI build ---
 FROM docker.io/library/node:22-alpine AS ui
-WORKDIR /src/web
-COPY web/package.json web/package-lock.json ./
+WORKDIR /src/syslog-valve/web
+COPY syslog-valve/web/package.json syslog-valve/web/package-lock.json ./
 RUN npm ci
-COPY web/ ./
+COPY shared/web/ /src/shared/web/
+COPY syslog-valve/web/ ./
 RUN npm run build
 
 # --- Go build ---
 FROM docker.io/library/golang:1.26-alpine AS build
-WORKDIR /src
-COPY go.mod ./
+WORKDIR /src/syslog-valve
+COPY shared/go.mod /src/shared/go.mod
+COPY syslog-valve/go.mod ./
 RUN go mod download
-COPY . .
-COPY --from=ui /src/web/dist ./web/dist
+COPY shared/ /src/shared/
+COPY syslog-valve/ ./
+COPY --from=ui /src/syslog-valve/web/dist ./web/dist
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /syslog-valve ./cmd/syslog-valve
 
 # --- Runtime: alpine because we ship syslog-ng as the data plane ---

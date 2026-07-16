@@ -29,6 +29,13 @@ covering standalone use, env vars, and a UI dev server:
 - [apps/syslog-valve](apps/syslog-valve/README.md)
 - [apps/syslog-bucket](apps/syslog-bucket/README.md)
 
+Code every tool needs lives once in [apps/shared](apps/shared): the `yardauth`
+guard, the hardening headers, the ATT&CK catalog, and the shared web
+components (`Icon`, `YardNav`, `AccountMenu` — the per-app files of the same
+name are one-line re-export shims). Edit it there; the apps consume it via a
+`replace` directive (Go) and relative imports (web), wired together by the
+root `go.work`.
+
 ## Tests
 
 CI runs `go test ./...` for each module on every push and pull request
@@ -36,10 +43,10 @@ CI runs `go test ./...` for each module on every push and pull request
 thing locally before opening a PR:
 
 ```sh
-cd apps/syslog-bucket && go test ./...   # repeat for syslog-hose / syslog-valve
+cd apps/syslog-bucket && go test ./...   # repeat for shared / syslog-hose / syslog-valve
 ```
 
-A PR needs all three modules green. If your change has a visible effect,
+A PR needs all four modules green. If your change has a visible effect,
 exercise it through the UI too (`scripts/yardctl up`), not just the tests.
 
 ## Style

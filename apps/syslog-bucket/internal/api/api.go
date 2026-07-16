@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/syslog-yard/shared/secure"
 	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/config"
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
@@ -115,7 +116,7 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Disp
 	mux.HandleFunc("GET /api/notifications/log", s.notificationLog)
 	mux.HandleFunc("GET /api/ws", s.liveTail)
 	mux.HandleFunc("GET /", s.spa)
-	return secureHeaders(authSvc.Middleware(mux))
+	return secure.Headers(authSvc.Middleware(mux))
 }
 
 func (s *server) healthz(w http.ResponseWriter, r *http.Request) {
