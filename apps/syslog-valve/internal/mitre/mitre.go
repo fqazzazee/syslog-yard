@@ -4,19 +4,16 @@
 // so each technique is expressed as a syslog-ng filter pattern (a PCRE over
 // the message, and/or a program name).
 //
-// The technique list is intentionally kept in step with the bucket's
-// (apps/syslog-bucket/internal/mitre): same IDs, names and tactics, so a flow
-// the valve routes "by technique" lines up with how the bucket later labels
-// the same events. Patterns target the demo vocabulary (FortiGate key=value,
+// The vocabulary (IDs, names, tactics) comes from the suite-wide catalog in
+// github.com/syslog-yard/shared/attack; this package only adds the wire
+// patterns. Patterns target the demo vocabulary (FortiGate key=value,
 // sshd/sudo text).
 package mitre
 
+import "github.com/syslog-yard/shared/attack"
+
 // Tactic is one ATT&CK tactic; Short is the join key used by techniques.
-type Tactic struct {
-	ID    string `json:"id"`
-	Short string `json:"short"`
-	Name  string `json:"name"`
-}
+type Tactic = attack.Tactic
 
 // Technique is one ATT&CK technique plus the syslog-ng match that recognises
 // it on the wire. At least one of Message (a PCRE applied to the message) or
@@ -35,38 +32,41 @@ type Catalog struct {
 	Techniques []Technique `json:"techniques"`
 }
 
-var tactics = []Tactic{
-	{"TA0001", "initial-access", "Initial Access"},
-	{"TA0002", "execution", "Execution"},
-	{"TA0003", "persistence", "Persistence"},
-	{"TA0004", "privilege-escalation", "Privilege Escalation"},
-	{"TA0005", "defense-evasion", "Defense Evasion"},
-	{"TA0006", "credential-access", "Credential Access"},
-	{"TA0008", "lateral-movement", "Lateral Movement"},
-	{"TA0011", "command-and-control", "Command and Control"},
-	{"TA0040", "impact", "Impact"},
+// patterns is the valve's contribution per technique: how to recognise it in
+// the raw stream. Keyed by technique ID; the IDs must exist in the shared
+// catalog (enforced by TestPatternsMatchCatalog).
+var patterns = map[string]struct {
+	Message string
+	Program string
+}{
+	"T1190": {Message: `Code\.Execution`},
+	"T1110": {Message: `Failed password|status="failed"`},
+	"T1078": {Message: `Accepted (password|publickey)|status="success"|AAA user.*Successful`},
+	"T1204": {Message: `subtype="virus"`},
+	"T1566": {Message: `catdesc="Phishing"`},
+	"T1071": {Message: `Cobalt`},
+	"T1021": {Message: `action="deny".*service="(SSH|RDP|SMB|TELNET|MSSQL)"`},
+	"T1548": {Program: "sudo"},
+	"T1499": {Message: "SYN flooding"},
 }
 
-var techniques = []Technique{
-	{ID: "T1190", Name: "Exploit Public-Facing Application", Tactics: []string{"initial-access"},
-		Message: `Code\.Execution`},
-	{ID: "T1110", Name: "Brute Force", Tactics: []string{"credential-access"},
-		Message: `Failed password|status="failed"`},
-	{ID: "T1078", Name: "Valid Accounts", Tactics: []string{"initial-access", "persistence", "privilege-escalation", "defense-evasion"},
-		Message: `Accepted (password|publickey)|status="success"|AAA user.*Successful`},
-	{ID: "T1204", Name: "User Execution", Tactics: []string{"execution"},
-		Message: `subtype="virus"`},
-	{ID: "T1566", Name: "Phishing", Tactics: []string{"initial-access"},
-		Message: `catdesc="Phishing"`},
-	{ID: "T1071", Name: "Application Layer Protocol", Tactics: []string{"command-and-control"},
-		Message: `Cobalt`},
-	{ID: "T1021", Name: "Remote Services", Tactics: []string{"lateral-movement"},
-		Message: `action="deny".*service="(SSH|RDP|SMB|TELNET|MSSQL)"`},
-	{ID: "T1548", Name: "Abuse Elevation Control Mechanism", Tactics: []string{"privilege-escalation", "defense-evasion"},
-		Program: "sudo"},
-	{ID: "T1499", Name: "Endpoint Denial of Service", Tactics: []string{"impact"},
-		Message: "SYN flooding"},
-}
+// techniques joins the shared catalog with the local patterns, preserving
+// catalog order. A catalog entry without a pattern is skipped: the valve can
+// only offer techniques it can actually match on the wire.
+var techniques = func() []Technique {
+	out := make([]Technique, 0, len(patterns))
+	for _, t := range attack.Techniques {
+		p, ok := patterns[t.ID]
+		if !ok {
+			continue
+		}
+		out = append(out, Technique{
+			ID: t.ID, Name: t.Name, Tactics: t.Tactics,
+			Message: p.Message, Program: p.Program,
+		})
+	}
+	return out
+}()
 
 var byID = func() map[string]Technique {
 	m := make(map[string]Technique, len(techniques))
@@ -83,4 +83,4 @@ func Lookup(id string) (Technique, bool) {
 }
 
 // Get returns the catalog served at /api/mitre.
-func Get() Catalog { return Catalog{Tactics: tactics, Techniques: techniques} }
+func Get() Catalog { return Catalog{Tactics: attack.Tactics, Techniques: techniques} }

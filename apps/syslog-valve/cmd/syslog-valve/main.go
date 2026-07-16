@@ -15,13 +15,13 @@ import (
 
 	"strings"
 
+	"github.com/syslog-yard/shared/yardauth"
 	"github.com/syslog-yard/syslog-valve/internal/codegen"
 	"github.com/syslog-yard/syslog-valve/internal/notify"
 	"github.com/syslog-yard/syslog-valve/internal/rotate"
 	"github.com/syslog-yard/syslog-valve/internal/server"
 	"github.com/syslog-yard/syslog-valve/internal/supervisor"
 	"github.com/syslog-yard/syslog-valve/internal/tap"
-	"github.com/syslog-yard/syslog-valve/internal/yardauth"
 	"github.com/syslog-yard/syslog-valve/web"
 )
 

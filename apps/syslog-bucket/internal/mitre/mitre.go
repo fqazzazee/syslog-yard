@@ -1,38 +1,30 @@
 // Package mitre maps ingested entries to MITRE ATT&CK techniques.
-// It carries a small, curated slice of the ATT&CK Enterprise matrix — the
-// tactics and techniques that show up in the syslog the suite actually sees
-// (firewall, IPS/AV, auth) — plus a detection table that reuses the shared
-// condition AST (internal/rules) so a technique is recognised exactly the way
-// a bucket or rule would match it.
+// The vocabulary — a small, curated slice of the ATT&CK Enterprise matrix,
+// the tactics and techniques that show up in the syslog the suite actually
+// sees (firewall, IPS/AV, auth) — comes from the suite-wide catalog in
+// github.com/syslog-yard/shared/attack. This package adds the detection
+// table, which reuses the shared condition AST (internal/rules) so a
+// technique is recognised exactly the way a bucket or rule would match it.
 //
 // The mapping runs at ingest, after the parsers have populated structured
 // fields, and stamps each entry with the technique IDs it matched. The bucket
-// then sorts and groups by tactic/technique; the valve carries a parallel,
-// syslog-ng-flavoured copy of the same catalog for its technique filter (keep
-// the two technique lists in sync — see apps/syslog-valve/internal/mitre).
+// then sorts and groups by tactic/technique; the valve derives its technique
+// filter from the same shared catalog (see apps/syslog-valve/internal/mitre).
 package mitre
 
 import (
 	"sort"
 
+	"github.com/syslog-yard/shared/attack"
 	"github.com/syslog-yard/syslog-bucket/internal/rules"
 )
 
 // Tactic is one ATT&CK tactic (a kill-chain column). Order follows the
 // Enterprise matrix left-to-right so the UI can lay tactics out in sequence.
-type Tactic struct {
-	ID    string `json:"id"`    // e.g. "TA0006"
-	Short string `json:"short"` // e.g. "credential-access" (used as the join key)
-	Name  string `json:"name"`  // e.g. "Credential Access"
-}
+type Tactic = attack.Tactic
 
 // Technique is one ATT&CK technique, tagged with the tactics it serves.
-type Technique struct {
-	ID      string   `json:"id"`      // e.g. "T1110"
-	Name    string   `json:"name"`    // e.g. "Brute Force"
-	Tactics []string `json:"tactics"` // tactic Short names
-	URL     string   `json:"url"`     // attack.mitre.org reference
-}
+type Technique = attack.Technique
 
 // detection binds a technique to the condition that recognises it.
 type detection struct {
@@ -49,32 +41,6 @@ type Catalog struct {
 
 func leaf(field, op string, value any) rules.Cond {
 	return rules.Cond{Field: field, Op: op, Value: value}
-}
-
-// tactics in ATT&CK Enterprise matrix order (only the ones our techniques use).
-var tactics = []Tactic{
-	{"TA0001", "initial-access", "Initial Access"},
-	{"TA0002", "execution", "Execution"},
-	{"TA0003", "persistence", "Persistence"},
-	{"TA0004", "privilege-escalation", "Privilege Escalation"},
-	{"TA0005", "defense-evasion", "Defense Evasion"},
-	{"TA0006", "credential-access", "Credential Access"},
-	{"TA0008", "lateral-movement", "Lateral Movement"},
-	{"TA0011", "command-and-control", "Command and Control"},
-	{"TA0040", "impact", "Impact"},
-}
-
-// techniques this build recognises. Each has at least one detection below.
-var techniques = []Technique{
-	{"T1190", "Exploit Public-Facing Application", []string{"initial-access"}, "https://attack.mitre.org/techniques/T1190/"},
-	{"T1110", "Brute Force", []string{"credential-access"}, "https://attack.mitre.org/techniques/T1110/"},
-	{"T1078", "Valid Accounts", []string{"initial-access", "persistence", "privilege-escalation", "defense-evasion"}, "https://attack.mitre.org/techniques/T1078/"},
-	{"T1204", "User Execution", []string{"execution"}, "https://attack.mitre.org/techniques/T1204/"},
-	{"T1566", "Phishing", []string{"initial-access"}, "https://attack.mitre.org/techniques/T1566/"},
-	{"T1071", "Application Layer Protocol", []string{"command-and-control"}, "https://attack.mitre.org/techniques/T1071/"},
-	{"T1021", "Remote Services", []string{"lateral-movement"}, "https://attack.mitre.org/techniques/T1021/"},
-	{"T1548", "Abuse Elevation Control Mechanism", []string{"privilege-escalation", "defense-evasion"}, "https://attack.mitre.org/techniques/T1548/"},
-	{"T1499", "Endpoint Denial of Service", []string{"impact"}, "https://attack.mitre.org/techniques/T1499/"},
 }
 
 // detections recognise techniques from the demo vocabulary (FortiGate
@@ -149,8 +115,8 @@ func Map(rec rules.Record) []string {
 	return hits
 }
 
-// catalog is assembled once; the slices above never change at runtime.
-var catalog = Catalog{Tactics: tactics, Techniques: techniques}
+// catalog is assembled once; the shared slices never change at runtime.
+var catalog = Catalog{Tactics: attack.Tactics, Techniques: attack.Techniques}
 
 // Get returns the technique catalog served at /api/mitre.
 func Get() Catalog { return catalog }

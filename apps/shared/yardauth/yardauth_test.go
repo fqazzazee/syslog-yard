@@ -50,11 +50,11 @@ func TestGuardEnforcement(t *testing.T) {
 	}{
 		{"GET", "/api/jobs", "", 401},
 		{"GET", "/api/jobs", "tok-bad", 401},
-		{"GET", "/api/jobs", "tok-good", 200},   // viewer may read
-		{"POST", "/api/jobs", "tok-good", 403},  // viewer may not write
-		{"GET", "/api/hints", "", 200},          // public
-		{"GET", "/", "", 200},                   // SPA stays open
-		{"GET", "/api/auth/info", "", 200},      // self-managing route
+		{"GET", "/api/jobs", "tok-good", 200},  // viewer may read
+		{"POST", "/api/jobs", "tok-good", 403}, // viewer may not write
+		{"GET", "/api/hints", "", 200},         // public
+		{"GET", "/", "", 200},                  // SPA stays open
+		{"GET", "/api/auth/info", "", 200},     // self-managing route
 	}
 	for _, c := range cases {
 		r := httptest.NewRequest(c.method, c.path, nil)
