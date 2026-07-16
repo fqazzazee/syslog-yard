@@ -10,6 +10,13 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
+    // Shared components (apps/shared/web) sit outside this package, so react
+    // must resolve explicitly to this app's copy for files up there too.
+    "baseUrl": ".",
+    "paths": {
+      "react": ["./node_modules/@types/react"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime"]
+    },
     "strict": true
   },
   "include": ["src"]
