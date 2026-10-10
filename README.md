@@ -346,6 +346,10 @@ models. The design choices, review, and final call are human, and everything
 here is built and tested before it lands, but it's only fair to say that LLM
 tooling was part of how it was made.
 
+## Support
+
+If it saved you building a syslog lab from scratch, you can [buy me a coffee ☕](https://buymeacoffee.com/fqazzazee).
+
 ## License
 
 syslog-yard is free and open source under the MIT License. You're welcome to run
