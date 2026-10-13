@@ -1,6 +1,6 @@
 # syslog-yard
 
-syslog-yard is an open-source, self-hosted syslog toolkit. It's three small
+syslog-yard is a self-hosted syslog toolkit. It's three small
 tools that run as containers under a single compose file:
 
 - **syslog-hose** generates random but realistic syslog traffic at whatever rate you set.
@@ -66,7 +66,7 @@ Just three small containers and a browser.
   bucket sharing, admin-tunable session idle-timeout.
 - **Easy to operate** — three small containers, one compose file, a `yardctl`
   helper (prereqs, firewall, smoke test, and `service-install` to start the
-  suite at boot), dark/light themes, MIT licensed.
+  suite at boot), dark/light themes, free for home labs and internal company use.
 
 ## Why syslog-yard, and how it compares
 
@@ -102,7 +102,7 @@ Here's roughly how it lines up against the alternatives:
 | Instead of... | syslog-yard gives you |
 |---|---|
 | Hand-editing `syslog-ng.conf` or `rsyslog.conf` and reloading | A visual node graph compiled to syslog-ng, syntax-checked, applied atomically, with one-click rollback |
-| A paid routing and reduction pipeline (Cribl Stream, syslog-ng Premium Edition) | The same route, filter, drop, and cache-to-disk, open-source and self-hosted |
+| A paid routing and reduction pipeline (Cribl Stream, syslog-ng Premium Edition) | The same route, filter, drop, and cache-to-disk, self-hosted and free for home labs and internal use |
 | A paid syslog server (for example SolarWinds Kiwi) | A multi-user, email-style triage server with rules, tags, and MITRE ATT&CK / OT mapping |
 | `logger` or throwaway scripts to fake traffic | A UI generator with realistic vendor presets (FortiGate, Cisco, Claroty CTD/xDome, and more) at a set rate |
 | Paying your SIEM to ingest everything | Filtering and caching noise out before it ever reaches the billed tier |
@@ -352,8 +352,23 @@ If it saved you building a syslog lab from scratch, you can [buy me a coffee ☕
 
 ## License
 
-syslog-yard is free and open source under the MIT License. You're welcome to run
-it, modify it, and use it for personal or commercial purposes at no cost. It
+syslog-yard is source-available, not open source. You can use it under either
+of two licenses, whichever fits you:
+
+- **[PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)**
+  covers personal, hobby and home-lab use with no commercial purpose, plus
+  charities, schools, public research and government.
+- **[PolyForm Internal Use 1.0.0](https://polyformproject.org/licenses/internal-use/1.0.0)**
+  covers a company running syslog-yard on its own systems for its own
+  operations, at no cost.
+
+Using syslog-yard to deliver work for someone else needs a commercial license.
+That includes consulting, freelancing, contracting, assessments, audits, and
+managed or hosted services, even if you work alone. Email
+fadi.qazzazee@gmail.com to arrange one.
+
+Versions published before this change, including v0.1.0, were released under
+the MIT License, and copies of those versions stay under MIT. Either way, it
 comes as-is, with no warranty of any kind, so use it at your own risk. See the
 [LICENSE](LICENSE) file for the full terms.
 

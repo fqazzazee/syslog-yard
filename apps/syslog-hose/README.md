@@ -161,5 +161,6 @@ interface for now.
 
 ## License
 
-MIT — see [LICENSE](../../LICENSE) at the repo root. Third-party projects the
+PolyForm Noncommercial or PolyForm Internal Use, with commercial licenses on
+request — see [LICENSE](../../LICENSE) at the repo root. Third-party projects the
 suite builds on are credited in [docs/CREDITS.md](../../docs/CREDITS.md).

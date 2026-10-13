@@ -1,6 +1,6 @@
 # syslog-bucket
 
-An open-source, self-hosted **syslog server + web app modeled on an email
+A self-hosted **syslog server + web app modeled on an email
 client**. Receive syslog from anything, then sort, filter, tag, and triage
 entries the way you triage email. Part of
 [syslog-yard](../../README.md); runs standalone too.
@@ -78,5 +78,6 @@ standalone compose + syslog-ng config.
 
 ## License
 
-MIT — see [LICENSE](../../LICENSE) at the repo root. Third-party projects the
+PolyForm Noncommercial or PolyForm Internal Use, with commercial licenses on
+request — see [LICENSE](../../LICENSE) at the repo root. Third-party projects the
 suite builds on are credited in [docs/CREDITS.md](../../docs/CREDITS.md).

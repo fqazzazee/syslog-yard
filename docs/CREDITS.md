@@ -67,7 +67,8 @@ affiliated with or endorses this project.
 
 ## License compatibility
 
-syslog-yard itself is [MIT](../LICENSE). GPL components (syslog-ng,
+syslog-yard itself is source-available under PolyForm Noncommercial or
+PolyForm Internal Use (see [LICENSE](../LICENSE)). GPL components (syslog-ng,
 logrotate) run as separate processes/containers invoked over their normal
 interfaces — their sources are unmodified and available upstream. The badge
 images on this page are rendered by [shields.io](https://shields.io)
