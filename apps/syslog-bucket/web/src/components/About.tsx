@@ -78,7 +78,7 @@ export function About({ tool, onClose }: { tool: Tool; onClose: () => void }) {
           </button>
         </div>
         <p className="about-tagline">
-          One yard, three tools — an open-source, self-hosted syslog toolkit: generate → route/filter → store, deployed as
+          One yard, three tools — a self-hosted syslog toolkit: generate → route/filter → store, deployed as
           plain containers under a single compose file.
         </p>
 

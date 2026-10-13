@@ -75,5 +75,7 @@ See the [Reporting section of docs/SECURITY.md](docs/SECURITY.md#reporting).
 
 ## License
 
-syslog-yard is [MIT](LICENSE); by contributing you agree your work is
-licensed the same way.
+syslog-yard is source-available under PolyForm Noncommercial or PolyForm
+Internal Use, plus commercial licenses on request (see [LICENSE](LICENSE)). By
+contributing, you license your work to Fadi Qazzazee under the MIT License. That
+lets it ship under all of those licenses.
