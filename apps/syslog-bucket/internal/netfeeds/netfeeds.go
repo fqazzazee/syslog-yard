@@ -30,10 +30,14 @@ import (
 
 const (
 	refreshEvery = 12 * time.Hour
+	checkEvery   = time.Hour // how often Run looks for stale feeds
 	fetchTimeout = 30 * time.Second
-	maxBody      = 16 << 20 // generous: the O365 endpoint doc is ~1MB
-	configKey    = "net.config"
-	feedKeyPfx   = "net.feed." // + feed id → cached snapshot
+	// bgRefreshTimeout bounds a refresh started from the API, detached from
+	// the request (four feeds at fetchTimeout each, plus slack).
+	bgRefreshTimeout = 3 * time.Minute
+	maxBody          = 16 << 20 // generous: the O365 endpoint doc is ~1MB
+	configKey        = "net.config"
+	feedKeyPfx       = "net.feed." // + feed id → cached snapshot
 )
 
 // Categories group sets in the UI. CatMalicious is the one the view flags.
@@ -123,9 +127,20 @@ type SetInfo struct {
 	Category string `json:"category"`
 }
 
+// Failed fetches are retried with exponential backoff between these bounds
+// instead of waiting for the next regular check. Vars so tests can shrink them.
+var (
+	retryMin = time.Minute
+	retryMax = checkEvery
+)
+
 type Manager struct {
 	store  *store.Store
 	client *http.Client
+
+	// refreshMu serializes fetch passes (periodic, retry, admin-triggered) so
+	// they never hammer a feed concurrently.
+	refreshMu sync.Mutex
 
 	mu     sync.RWMutex
 	config Config
@@ -179,24 +194,65 @@ func withDefaults(c Config) Config {
 	return c
 }
 
-// Run refreshes stale feeds immediately and then on a ticker, until ctx ends.
+// Run refreshes stale feeds immediately and then periodically, until ctx
+// ends. A failed fetch leaves its feed stale, so it is retried with
+// exponential backoff (retryMin doubling to retryMax) rather than only at
+// the next regular check.
 func (m *Manager) Run(ctx context.Context) {
-	m.RefreshStale(ctx)
-	t := time.NewTicker(refreshEvery)
+	backoff := retryMin
+	next := func(failed int) time.Duration {
+		if failed == 0 {
+			backoff = retryMin
+			return checkEvery
+		}
+		d := backoff
+		backoff = min(backoff*2, retryMax)
+		return d
+	}
+	t := time.NewTimer(next(m.RefreshStale(ctx)))
 	defer t.Stop()
 	for {
 		select {
 		case <-t.C:
-			m.RefreshStale(ctx)
+			t.Reset(next(m.RefreshStale(ctx)))
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
+// RefreshInBackground runs a refresh detached from the caller's context
+// (an HTTP request), bounded by bgRefreshTimeout: all enabled feeds when
+// force is set, otherwise only stale ones. onDone (optional) runs after it
+// finishes; the returned channel closes at the same point.
+func (m *Manager) RefreshInBackground(force bool, onDone func()) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Detached from any request: a panic here would take the whole
+		// bucket down, so log it and let the next scheduled refresh retry.
+		defer func() {
+			if p := recover(); p != nil {
+				slog.Error("netfeeds: background refresh panicked", "panic", p)
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), bgRefreshTimeout)
+		defer cancel()
+		if force {
+			m.RefreshAll(ctx)
+		} else {
+			m.RefreshStale(ctx)
+		}
+		if onDone != nil {
+			onDone()
+		}
+	}()
+	return done
+}
+
 // RefreshStale fetches every enabled feed whose snapshot is older than the
-// refresh interval (or missing).
-func (m *Manager) RefreshStale(ctx context.Context) {
+// refresh interval (or missing). Returns how many fetches failed.
+func (m *Manager) RefreshStale(ctx context.Context) int {
 	m.mu.RLock()
 	cfg := m.config
 	stale := make([]feedDef, 0, len(builtins))
@@ -206,11 +262,12 @@ func (m *Manager) RefreshStale(ctx context.Context) {
 		}
 	}
 	m.mu.RUnlock()
-	m.refresh(ctx, stale)
+	return m.refresh(ctx, stale)
 }
 
 // RefreshAll force-fetches every enabled feed (the admin's "refresh now").
-func (m *Manager) RefreshAll(ctx context.Context) {
+// Returns how many fetches failed.
+func (m *Manager) RefreshAll(ctx context.Context) int {
 	m.mu.RLock()
 	cfg := m.config
 	all := make([]feedDef, 0, len(builtins))
@@ -220,12 +277,25 @@ func (m *Manager) RefreshAll(ctx context.Context) {
 		}
 	}
 	m.mu.RUnlock()
-	m.refresh(ctx, all)
+	return m.refresh(ctx, all)
 }
 
-func (m *Manager) refresh(ctx context.Context, feeds []feedDef) {
+func (m *Manager) refresh(ctx context.Context, feeds []feedDef) (failed int) {
+	m.refreshMu.Lock()
+	defer m.refreshMu.Unlock()
 	for _, f := range feeds {
+		if ctx.Err() != nil {
+			// Shutting down / timed out: leave the snapshot alone rather than
+			// recording "context canceled" as the feed's error.
+			return failed + 1
+		}
 		prefixes, err := m.fetch(ctx, f)
+		if err != nil && ctx.Err() != nil {
+			return failed + 1
+		}
+		if err != nil {
+			failed++
+		}
 		m.mu.Lock()
 		sn := m.snaps[f.ID]
 		sn.LastAttempt = time.Now().UTC()
@@ -242,10 +312,14 @@ func (m *Manager) refresh(ctx context.Context, feeds []feedDef) {
 		m.compileLocked()
 		m.mu.Unlock()
 		// Persist outside the lock; the snapshot is value-copied above.
+		if m.store == nil {
+			continue
+		}
 		if err := m.store.PutSetting(ctx, feedKeyPfx+f.ID, sn); err != nil {
 			slog.Warn("netfeeds: cache snapshot", "feed", f.ID, "error", err)
 		}
 	}
+	return failed
 }
 
 func (m *Manager) fetch(ctx context.Context, f feedDef) ([]string, error) {

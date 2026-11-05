@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -97,7 +98,20 @@ func buildOIDC(c oidcSettings) *auth.OIDC {
 func (s *server) applyStoredSettings(ctx context.Context) {
 	oc, _ := s.resolveOIDC(ctx)
 	s.authSvc.SetOIDC(buildOIDC(oc))
-	s.authSvc.SetIdleTTL(time.Duration(s.resolveIdleMinutes(ctx)) * time.Minute)
+	idle := time.Duration(s.resolveIdleMinutes(ctx)) * time.Minute
+	s.authSvc.SetIdleTTL(idle)
+	s.capSessions(ctx, idle)
+}
+
+// capSessions shortens live sessions to the current idle window, so lowering
+// the timeout takes effect for sessions issued under a longer one. Raising it
+// is a no-op (the cap only ever moves expiry earlier).
+func (s *server) capSessions(ctx context.Context, idle time.Duration) {
+	if n, err := s.store.CapSessionExpiry(ctx, idle); err != nil {
+		slog.Error("cap session expiry", "error", err)
+	} else if n > 0 {
+		slog.Info("shortened sessions to the idle timeout", "sessions", n, "idle", idle)
+	}
 }
 
 func (s *server) getSettings(w http.ResponseWriter, r *http.Request) {
@@ -212,6 +226,8 @@ func (s *server) putSessionSettings(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "save session settings", err)
 		return
 	}
-	s.authSvc.SetIdleTTL(time.Duration(in.IdleMinutes) * time.Minute)
+	idle := time.Duration(in.IdleMinutes) * time.Minute
+	s.authSvc.SetIdleTTL(idle)
+	s.capSessions(r.Context(), idle)
 	writeJSON(w, map[string]bool{"ok": true})
 }

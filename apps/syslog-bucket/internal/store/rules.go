@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/syslog-yard/syslog-bucket/internal/rules"
@@ -98,53 +99,112 @@ func marshalRule(r Rule) (cond, actions []byte, err error) {
 	return cond, actions, err
 }
 
+// ApplyResult summarises a historical rule run.
+type ApplyResult struct {
+	// Affected is how many distinct entries at least one action changed
+	// (the field name predates this struct; the UI reads it).
+	Affected int64 `json:"affected"`
+	// Matched is how many entries the condition selected.
+	Matched int64 `json:"matched"`
+	// Skipped lists action types that never run retroactively (notify: a
+	// rule edit must not fire an alert storm for old entries).
+	Skipped []string `json:"skipped"`
+}
+
 // ApplyRuleHistorical runs a rule's actions against all existing entries
-// matching its condition — the retroactive half. Returns the
-// number of rows each pass touched.
-func (s *Store) ApplyRuleHistorical(ctx context.Context, r Rule) (int64, error) {
-	var total int64
+// matching its condition — the retroactive half. Like the ingest engine, the
+// condition is evaluated once: the matching ids are snapshotted first, so an
+// action that changes a matched column (set_priority, suppress, …) can't
+// change which entries later actions touch. All actions apply in a single
+// transaction — an error leaves history untouched.
+func (s *Store) ApplyRuleHistorical(ctx context.Context, r Rule) (ApplyResult, error) {
+	res := ApplyResult{Skipped: []string{}}
+	var args []any
+	arg := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	condSQL, err := r.Condition.CompileSQL(arg)
+	if err != nil {
+		return res, err
+	}
+
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return res, err
+	}
+	defer tx.Rollback(ctx) // no-op once committed
+
+	if _, err := tx.Exec(ctx, `CREATE TEMP TABLE rule_apply_match (id BIGINT PRIMARY KEY) ON COMMIT DROP`); err != nil {
+		return res, err
+	}
+	if _, err := tx.Exec(ctx, `CREATE TEMP TABLE rule_apply_touched (id BIGINT PRIMARY KEY) ON COMMIT DROP`); err != nil {
+		return res, err
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO rule_apply_match SELECT e.id FROM entries e WHERE `+condSQL, args...)
+	if err != nil {
+		return res, fmt.Errorf("match entries: %w", err)
+	}
+	res.Matched = tag.RowsAffected()
+
+	skipped := map[string]bool{}
 	for _, a := range r.Actions {
-		var args []any
-		arg := func(v any) string {
-			args = append(args, v)
-			return fmt.Sprintf("$%d", len(args))
-		}
-		condSQL, err := r.Condition.CompileSQL(arg)
-		if err != nil {
-			return total, err
-		}
+		// Each statement records the ids it changed in rule_apply_touched, so
+		// Affected counts entries, not action passes.
 		var sql string
+		var aargs []any
 		switch a.Type {
 		case "tag":
-			sql = fmt.Sprintf(`INSERT INTO entry_tags (entry_id, tag_id, rule_id)
-				SELECT e.id, %s, %s FROM entries e WHERE %s
-				ON CONFLICT DO NOTHING`, arg(a.TagID), arg(r.ID), condSQL)
+			sql = `WITH ch AS (
+				INSERT INTO entry_tags (entry_id, tag_id, rule_id)
+				SELECT m.id, t.id, $2::bigint FROM rule_apply_match m JOIN tags t ON t.id = $1::bigint
+				ON CONFLICT DO NOTHING RETURNING entry_id)
+				INSERT INTO rule_apply_touched SELECT entry_id FROM ch ON CONFLICT DO NOTHING`
+			aargs = []any{a.TagID, r.ID}
 		case "set_priority":
-			sql = fmt.Sprintf(`UPDATE entries e SET priority = %s WHERE %s`, arg(a.Priority), condSQL)
+			sql = `WITH ch AS (
+				UPDATE entries e SET priority = $1 FROM rule_apply_match m
+				WHERE e.id = m.id AND e.priority IS DISTINCT FROM $1 RETURNING e.id)
+				INSERT INTO rule_apply_touched SELECT id FROM ch ON CONFLICT DO NOTHING`
+			aargs = []any{a.Priority}
 		case "suppress":
-			sql = fmt.Sprintf(`UPDATE entries e SET suppressed = TRUE WHERE %s AND NOT e.suppressed`, condSQL)
-		case "set_mitre":
-			if len(a.Mitre) == 0 {
+			sql = `WITH ch AS (
+				UPDATE entries e SET suppressed = TRUE FROM rule_apply_match m
+				WHERE e.id = m.id AND NOT e.suppressed RETURNING e.id)
+				INSERT INTO rule_apply_touched SELECT id FROM ch ON CONFLICT DO NOTHING`
+		case "set_mitre", "set_ot":
+			col, codes := "mitre", a.Mitre
+			if a.Type == "set_ot" {
+				col, codes = "ot", a.OT
+			}
+			if len(codes) == 0 {
+				skipped[a.Type] = true
 				continue
 			}
-			codes := arg(a.Mitre)
-			sql = fmt.Sprintf(`UPDATE entries e SET mitre = ARRAY(SELECT DISTINCT unnest(e.mitre || %s::text[]))
-				WHERE %s AND NOT e.mitre @> %s::text[]`, codes, condSQL, codes)
-		case "set_ot":
-			if len(a.OT) == 0 {
-				continue
-			}
-			codes := arg(a.OT)
-			sql = fmt.Sprintf(`UPDATE entries e SET ot = ARRAY(SELECT DISTINCT unnest(e.ot || %s::text[]))
-				WHERE %s AND NOT e.ot @> %s::text[]`, codes, condSQL, codes)
+			sql = fmt.Sprintf(`WITH ch AS (
+				UPDATE entries e SET %[1]s = ARRAY(SELECT DISTINCT unnest(e.%[1]s || $1::text[]))
+				FROM rule_apply_match m
+				WHERE e.id = m.id AND NOT e.%[1]s @> $1::text[] RETURNING e.id)
+				INSERT INTO rule_apply_touched SELECT id FROM ch ON CONFLICT DO NOTHING`, col)
+			aargs = []any{codes}
 		default:
+			// notify (and anything newer) is ingest-only.
+			skipped[a.Type] = true
 			continue
 		}
-		tag, err := s.Pool.Exec(ctx, sql, args...)
-		if err != nil {
-			return total, fmt.Errorf("apply action %s: %w", a.Type, err)
+		if _, err := tx.Exec(ctx, sql, aargs...); err != nil {
+			return ApplyResult{Skipped: []string{}}, fmt.Errorf("apply action %s: %w", a.Type, err)
 		}
-		total += tag.RowsAffected()
 	}
-	return total, nil
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM rule_apply_touched`).Scan(&res.Affected); err != nil {
+		return ApplyResult{Skipped: []string{}}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ApplyResult{Skipped: []string{}}, err
+	}
+	for t := range skipped {
+		res.Skipped = append(res.Skipped, t)
+	}
+	sort.Strings(res.Skipped)
+	return res, nil
 }

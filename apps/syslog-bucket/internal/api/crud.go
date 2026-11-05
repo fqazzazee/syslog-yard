@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -62,6 +64,10 @@ func (s *server) deleteTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.DeleteTag(r.Context(), id); err != nil {
+		if errors.Is(err, store.ErrInUse) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		s.internalError(w, "delete tag", err)
 		return
 	}
@@ -201,7 +207,7 @@ func (s *server) listRules(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) createRule(w http.ResponseWriter, r *http.Request) {
 	var rule store.Rule
-	if !decodeJSON(w, r, &rule) || !validRule(w, rule) {
+	if !decodeJSON(w, r, &rule) || !validRule(w, rule) || !s.ruleRefsExist(w, r, rule) {
 		return
 	}
 	created, err := s.store.CreateRule(r.Context(), rule)
@@ -219,7 +225,7 @@ func (s *server) updateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var rule store.Rule
-	if !decodeJSON(w, r, &rule) || !validRule(w, rule) {
+	if !decodeJSON(w, r, &rule) || !validRule(w, rule) || !s.ruleRefsExist(w, r, rule) {
 		return
 	}
 	rule.ID = id
@@ -265,12 +271,41 @@ func (s *server) applyRule(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	affected, err := s.store.ApplyRuleHistorical(r.Context(), *rule)
+	res, err := s.store.ApplyRuleHistorical(r.Context(), *rule)
 	if err != nil {
 		s.internalError(w, "apply rule", err)
 		return
 	}
-	writeJSON(w, map[string]int64{"affected": affected})
+	writeJSON(w, res)
+}
+
+// ruleRefsExist rejects a rule whose tag or notify actions point at a tag or
+// channel that doesn't exist (400), so a typo or a stale UI can't create a
+// rule that fails every matching insert.
+func (s *server) ruleRefsExist(w http.ResponseWriter, r *http.Request, rule store.Rule) bool {
+	var tags, channels []int64
+	for _, a := range rule.Actions {
+		switch a.Type {
+		case "tag":
+			tags = append(tags, a.TagID)
+		case "notify":
+			channels = append(channels, a.ChannelID)
+		}
+	}
+	missingTags, missingChannels, err := s.store.MissingRuleRefs(r.Context(), tags, channels)
+	if err != nil {
+		s.internalError(w, "check rule references", err)
+		return false
+	}
+	switch {
+	case len(missingTags) > 0:
+		http.Error(w, fmt.Sprintf("tag action refers to unknown tag id(s) %v", missingTags), http.StatusBadRequest)
+		return false
+	case len(missingChannels) > 0:
+		http.Error(w, fmt.Sprintf("notify action refers to unknown channel id(s) %v", missingChannels), http.StatusBadRequest)
+		return false
+	}
+	return true
 }
 
 func validRule(w http.ResponseWriter, rule store.Rule) bool {
