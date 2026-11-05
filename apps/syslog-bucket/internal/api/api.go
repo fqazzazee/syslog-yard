@@ -55,7 +55,7 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Disp
 	if hub != nil {
 		hub.SetOriginPatterns(cfg.WSOrigins)
 	}
-	authSvc.SetTrustedProxies(cfg.TrustedProxies)
+	authSvc.SetTrustedProxies(cfg.TrustedProxies, cfg.TrustedProxyHosts)
 	// Apply stored (or env-fallback) OIDC + session settings to the auth service
 	// before the server starts handling requests.
 	s.applyStoredSettings(context.Background())

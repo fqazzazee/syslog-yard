@@ -22,6 +22,19 @@
 #                          syslog_bucket). Only takes effect on a fresh
 #                          bucket-dbdata volume — see docs/SECURITY.md to
 #                          rotate an existing one.
+#   BUCKET_ADMIN_PASSWORD=…  initial admin password, first start only.
+#                          Unset (the default) generates a random one and
+#                          prints it once in the bucket log.
+#   YARD_TRUSTED_ORIGINS=https://yard.example.com
+#                          the public origin(s) of a reverse proxy in front
+#                          of the UIs, so its requests pass the cross-origin
+#                          guard. See docs/SECURITY.md.
+#   YARD_TRUSTED_PROXIES=… the address or hostname of that reverse proxy, so
+#                          its X-Forwarded-For/-Host are believed. Never the
+#                          yard network's subnet: published ports can make
+#                          any client appear from it. The bucket always
+#                          trusts syslog-hose and syslog-valve by name.
+# deploy/env.example lists them all; copy it to deploy/.env.
 
 name: syslog-yard
 
@@ -82,6 +95,8 @@ services:
       # Guard this UI with the bucket's user accounts (docs/AUTH.md).
       # Remove to run the hose open/standalone.
       YARD_AUTH_URL: "http://syslog-bucket:8080"
+      YARD_TRUSTED_ORIGINS: "${YARD_TRUSTED_ORIGINS:-}"
+      YARD_TRUSTED_PROXIES: "${YARD_TRUSTED_PROXIES:-}"
     volumes:
       - hose-data:/data
     # Distroless, non-root, unprivileged port: needs no capabilities.
@@ -131,6 +146,8 @@ services:
       # Guard this UI with the bucket's user accounts (docs/AUTH.md).
       # Remove to run the valve open/standalone.
       YARD_AUTH_URL: "http://syslog-bucket:8080"
+      YARD_TRUSTED_ORIGINS: "${YARD_TRUSTED_ORIGINS:-}"
+      YARD_TRUSTED_PROXIES: "${YARD_TRUSTED_PROXIES:-}"
       # YARD_SHARES: "archive"     # external shares — see docs/SHARES.md
     volumes:
       - valve-data:/data
@@ -192,12 +209,18 @@ services:
       YARD_LINK_HOSE: "8080"
       YARD_LINK_VALVE: "8081"
       YARD_LINK_BUCKET: "8082"
-      # Initial admin password, first start only. Left unset on purpose so a
+      # Initial admin password, first start only. Empty by default so a
       # strong random password is generated and printed once in the log —
       # find it with `scripts/yardctl logs syslog-bucket | grep -i password`,
       # or set a fresh random one anytime with `scripts/yardctl reset-admin`.
-      # Uncomment to pin a known password instead.
-      # BUCKET_ADMIN_PASSWORD: "change-me"
+      # Set BUCKET_ADMIN_PASSWORD in deploy/.env to pin a known one instead.
+      BUCKET_ADMIN_PASSWORD: "${BUCKET_ADMIN_PASSWORD:-}"
+      YARD_TRUSTED_ORIGINS: "${YARD_TRUSTED_ORIGINS:-}"
+      # Sign-ins through the hose and valve arrive from those containers with
+      # the browser's address in X-Forwarded-For; trusting them by name keeps
+      # the login throttle per browser. Trusting the yard subnet instead would
+      # let a client that reaches this port directly forge the header.
+      YARD_TRUSTED_PROXIES: "syslog-hose syslog-valve ${YARD_TRUSTED_PROXIES:-}"
       # Optional OIDC sign-in (Keycloak / Authentik / Entra ID / Google):
       # BUCKET_OIDC_ISSUER: "https://idp.example.com/realms/yard"
       # BUCKET_OIDC_CLIENT_ID: "syslog-bucket"
@@ -206,17 +229,8 @@ services:
       # BUCKET_OIDC_NAME: "Company SSO"      # login-button label
       # BUCKET_OIDC_DEFAULT_ROLE: "viewer"   # first-time OIDC users' role: viewer (default), analyst or admin
       # BUCKET_COOKIE_SECURE: "true"         # set when serving over HTTPS
-      # Logins made through the hose/valve UIs reach the bucket from those
-      # containers, which pass the browser's address in X-Forwarded-For. The
-      # bucket only believes that header from the peers listed here, so
-      # without it every proxied login shares one throttle budget per tool.
-      # List the yardnet subnet (find it with
-      # `docker network inspect syslog-yard_yardnet | grep -i subnet`, or
-      # podman's equivalent) — see docs/SECURITY.md:
-      # YARD_TRUSTED_PROXIES: "10.89.0.0/24"
-      # Behind a reverse proxy that rewrites Host, accept its public origin
-      # (set this on the hose and valve too) and allow live-tail WebSockets:
-      # YARD_TRUSTED_ORIGINS: "https://yard.example.com"
+      # Behind a reverse proxy that rewrites Host, also allow its live-tail
+      # WebSockets (YARD_TRUSTED_ORIGINS above comes from deploy/.env):
       # BUCKET_WS_ORIGINS: "yard.example.com"
     depends_on:
       bucket-db:

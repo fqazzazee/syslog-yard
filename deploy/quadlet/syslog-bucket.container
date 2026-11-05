@@ -29,9 +29,10 @@ Environment=YARD_LINK_BUCKET=8082
 # Environment=BUCKET_OIDC_REDIRECT_URL=http://localhost:8082/api/auth/oidc/callback
 # Believe X-Forwarded-For from the hose/valve (they proxy logins), so the
 # login throttle sees each browser's address instead of one shared budget
-# per tool. Use the yard network's subnet (podman network inspect yard |
-# grep -i subnet); see docs/SECURITY.md.
-# Environment=YARD_TRUSTED_PROXIES=10.89.0.0/24
+# per tool. Name them: never the yard network's subnet, because a client
+# reaching a published port can appear from it and forge the header. Add a
+# reverse proxy's address here if one sits in front; see docs/SECURITY.md.
+Environment=YARD_TRUSTED_PROXIES=syslog-hose,syslog-valve
 # Non-root image on unprivileged ports: no capabilities needed.
 DropCapability=all
 NoNewPrivileges=true

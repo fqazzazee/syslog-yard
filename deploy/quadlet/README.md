@@ -76,10 +76,12 @@ reuse them.)
   `Notify=healthy`, so `bucket-syslog` starts once the bucket answers.
 - `syslog-bucket` gets a 30 s stop timeout (`PodmanArgs=--stop-timeout=30`)
   so a stop can drain its ingest queue and queued notifications.
-- Logins through the hose and valve are proxied to the bucket. Uncomment
-  `YARD_TRUSTED_PROXIES` in `syslog-bucket.container`, set to the `yard`
-  network's subnet (`podman network inspect yard | grep -i subnet`), so the
-  login throttle counts each browser separately (see
+- Logins through the hose and valve are proxied to the bucket.
+  `syslog-bucket.container` trusts those two containers by name
+  (`YARD_TRUSTED_PROXIES=syslog-hose,syslog-valve`), so the login throttle
+  counts each browser separately. Don't replace the names with the `yard`
+  subnet: a client reaching a published port can appear from that network
+  and would then forge its address (see
   [docs/SECURITY.md](../../docs/SECURITY.md#client-addresses-behind-the-hose-valve-or-a-proxy)).
 - To publish the UIs on loopback only (single-host lab), prefix each
   `PublishPort=` with `127.0.0.1:` — the quadlet equivalent of compose's

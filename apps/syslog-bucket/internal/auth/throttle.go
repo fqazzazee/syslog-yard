@@ -2,7 +2,6 @@ package auth
 
 import (
 	"net/http"
-	"net/netip"
 	"sync"
 	"time"
 
@@ -151,6 +150,9 @@ func (g *guard) succeed(account, ip string) {
 // hose/valve auth proxy (apps/shared/yardauth) overwrites the header with the
 // browser's address, so either rule gives the same answer there. With no
 // trusted proxies configured the header is ignored entirely.
-func clientIP(r *http.Request, trusted []netip.Prefix) string {
-	return (&secure.Policy{TrustedProxies: trusted}).ClientIP(r)
+func clientIP(r *http.Request, proxies *secure.Policy) string {
+	if proxies == nil {
+		proxies = &secure.Policy{}
+	}
+	return proxies.ClientIP(r)
 }
