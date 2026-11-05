@@ -183,10 +183,60 @@ button.live.on {
 }
 
 /* ---------- log table ---------- */
+/* logpane holds the scrolling table plus the "N new" pill above it */
+.logpane {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  position: relative;
+}
 .logtable {
   flex: 1;
   overflow: auto;
   min-width: 0;
+  /* LogTable anchors the view itself while rows arrive above it */
+  overflow-anchor: none;
+}
+.logtable:focus {
+  outline: none;
+}
+.logtable:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+/* spacer rows standing in for the rows outside the rendered window */
+.logtable tbody tr.vpad,
+.logtable tbody tr.vpad:hover {
+  background: none;
+  cursor: default;
+}
+.logtable tr.vpad td {
+  padding: 0;
+  border: 0;
+}
+.new-pill {
+  position: absolute;
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  gap: 4px;
+  min-height: 28px;
+  padding: 2px 12px 2px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  box-shadow: var(--shadow-2);
+}
+.new-pill:hover {
+  filter: brightness(1.08);
+}
+.new-pill:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 .logtable.empty {
   display: flex;
