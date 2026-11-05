@@ -90,6 +90,28 @@ func TestRequestBodyLimits(t *testing.T) {
 	if code, _ := do(t, "POST", ts.URL+"/api/jobs", `{bad json`); code != http.StatusBadRequest {
 		t.Fatalf("bad json: %d", code)
 	}
+	// #63: a preset save over its cap used to answer 400
+	bigPreset := "name: big\n# " + strings.Repeat("x", maxPresetBody) + "\n"
+	if code, body := do(t, "POST", ts.URL+"/api/presets", bigPreset); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized preset: %d %s", code, body)
+	} else if !strings.Contains(string(body), `"error"`) {
+		t.Fatalf("oversized preset body: %s", body)
+	}
+	// routes that read no body are capped too
+	if code, body := do(t, "POST", ts.URL+"/api/jobs/stop-all", strings.Repeat("x", 1<<17)); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized stop-all: %d %s", code, body)
+	}
+	// a body of unknown length is cut off while it is read
+	req, _ := http.NewRequest("POST", ts.URL+"/api/jobs", io.MultiReader(strings.NewReader(huge)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if req.ContentLength != 0 || resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("chunked oversized create: %d (content length %d)", resp.StatusCode, req.ContentLength)
+	}
 }
 
 // A preview cannot be used to allocate unbounded memory through randHex.

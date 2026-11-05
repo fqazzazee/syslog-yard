@@ -19,8 +19,10 @@ type Sender interface {
 
 // NewSender builds a sender for transport "udp", "tcp" or "tls".
 // TCP and TLS use RFC 6587 octet-counting framing and reconnect lazily.
-// Cancelling ctx aborts in-progress dials (and, for streams, writes).
-func NewSender(ctx context.Context, transport, host string, port int, tlsInsecure bool) (Sender, error) {
+// tlsConf (see TLSConfig) applies to "tls" only; nil verifies the
+// receiver against the system roots. Cancelling ctx aborts in-progress
+// dials (and, for streams, writes).
+func NewSender(ctx context.Context, transport, host string, port int, tlsConf *tls.Config) (Sender, error) {
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	switch transport {
 	case "udp":
@@ -31,7 +33,14 @@ func NewSender(ctx context.Context, transport, host string, port int, tlsInsecur
 		}
 		return &udpSender{conn: conn}, nil
 	case "tcp", "tls":
-		return &streamSender{ctx: ctx, addr: addr, useTLS: transport == "tls", insecure: tlsInsecure}, nil
+		s := &streamSender{ctx: ctx, addr: addr}
+		if transport == "tls" {
+			if tlsConf == nil {
+				tlsConf = &tls.Config{}
+			}
+			s.tlsConf = tlsConf
+		}
+		return s, nil
 	default:
 		return nil, fmt.Errorf("unknown transport %q", transport)
 	}
@@ -61,10 +70,9 @@ const (
 //   - only when that fails too does it back off, exponentially with jitter
 //     (capped at backoffMax); messages during the backoff fail fast.
 type streamSender struct {
-	ctx      context.Context
-	addr     string
-	useTLS   bool
-	insecure bool
+	ctx     context.Context
+	addr    string
+	tlsConf *tls.Config // nil = plain TCP
 
 	conn      net.Conn
 	written   bool        // conn has carried at least one frame
@@ -80,8 +88,8 @@ func (s *streamSender) connect() error {
 		conn net.Conn
 		err  error
 	)
-	if s.useTLS {
-		td := tls.Dialer{NetDialer: &d, Config: &tls.Config{InsecureSkipVerify: s.insecure}}
+	if s.tlsConf != nil {
+		td := tls.Dialer{NetDialer: &d, Config: s.tlsConf}
 		conn, err = td.DialContext(s.ctx, "tcp", s.addr)
 	} else {
 		conn, err = d.DialContext(s.ctx, "tcp", s.addr)

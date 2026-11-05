@@ -3,8 +3,8 @@
 // glyphs inline means the suite makes zero external requests and the strict
 // default-src 'self' CSP (see shared/secure) needs no exceptions.
 //
-// One copy for the whole suite: hose, valve and bucket re-export this file
-// (apps/*/web/src/**/Icon.tsx are one-line shims).
+// One copy for the whole suite: hose and valve import it from here; bucket's
+// components/Icon.tsx is a one-line re-export.
 // All paths share Material's 0 -960 960 960 viewBox.
 
 export type IconName =

@@ -14,6 +14,9 @@ func TestClass(t *testing.T) {
 		{"date=2026-06-11", `time=04:54 devname="fw" devid="FGT60FTK2009012345" type="traffic"`, "firewall"},
 		{"asa", "%ASA-6-302013: Built outbound", "firewall"},
 		{"", "%ASA-4-106023: Deny tcp", "firewall"},
+		{"box_Firewall_Activity", "Info FW: Remove: TCP", "firewall"},
+		{"box_Event_eventS", "Info 2026-11-05 Event", "firewall"},
+		{"dropbox_sync", "x", ""},
 		{"nginx", "GET / 200", ""},
 		{"", "", ""},
 	}

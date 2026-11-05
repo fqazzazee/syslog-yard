@@ -6,6 +6,121 @@ All notable changes to syslog-yard are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- hose: a job's last error clears once delivery recovers. A single
+  reconnect used to leave the card flagged red for the rest of the run; the
+  failures still count in `errors`.
+- bucket: Barracuda CloudGen entries (`box_Firewall_Activity`,
+  `box_Event_eventS`, …) are classified as firewall. The `barracuda` hint
+  never matched them, so their device class came out empty.
+- hose and valve: every state-changing route caps its request body and
+  answers an oversized one with 413 and a JSON error. Hose preset saves over
+  1 MiB used to get 400, and the valve capped only graph saves and notify
+  tests. Default cap 64 KiB; hose job saves 128 KiB, preset saves and
+  previews about 1 MiB, valve graph saves 1 MiB ([#63]).
+- bucket: a negated condition (`not`) now matches entries that have no value
+  for the field (no facility or source, a missing structured key) in
+  searches, buckets and apply-to-history, as rules already did at ingest
+  ([#58]).
+- bucket: numeric conditions with a fractional or out-of-range value
+  (`severity < 2.5`, `facility ≠ 40000`) give the same result in searches and
+  apply-to-history as at ingest, instead of being rounded or failing ([#58]).
+- bucket: ingest allocates entry ids before inserting a batch instead of
+  relying on `RETURNING` order, which Postgres doesn't guarantee ([#58]).
+- valve: regenerating the self-signed certificate always leaves the private
+  key readable by its owner only, even after an interrupted earlier run
+  ([#59]).
+- valve and bucket: syslog listeners detect RFC 5424 per message. Before,
+  an RFC 5424 line on a valve IN port or the bucket's port 514 was parsed as
+  RFC 3164: the app became `1` and the host the sender's address (Check
+  Point, Claroty, Juniper and generic-rfc5424 presets). Structured data is
+  now kept at the front of the message instead of being dropped by the
+  valve's forward. Re-apply the valve flow to pick this up. [#26]
+- bucket: FortiGate entries showed App `date=…` and the sender's address as
+  Host. A FortiGate parser now sets App `fortigate`, Host from `devname`, and
+  keeps `logid`, `devid`, `type`, `subtype` and the other pairs in structured
+  fields. SonicWall (`sonicwall`) and PAN-OS CSV (`panos`, with serial, type
+  and subtype) logs get the same treatment, and any other headerless
+  `key=value` line gets its first pair back instead of losing it to App.
+  Already-stored entries keep their old values. [#26]
+- bucket: on a fresh database the header showed "~0 entries" while rows
+  arrived, because the estimate came from table statistics not yet
+  gathered. `/api/stats` now also uses the live-row counter, and counts
+  tables under 10,000 rows exactly (`total_exact: true` in the response).
+  [#64]
+- bucket web: viewers saw rule entries in the nav as disabled buttons titled
+  "Edit rule". They now open a read-only **View rule** dialog, also from the
+  Rules page ([#64]).
+- web: the narrow-screen nav drawer traps Tab and is announced as a modal
+  dialog, sharing Dialog's keyboard handling ([#64]).
+- web: the bucket served no favicon, and hose and valve only answered
+  `/favicon.ico` with their index page. All three ship an SVG favicon in
+  their tool color ([#64]).
+
+### Changed
+
+- docs: the README screenshots show the shared shell, taken from a seeded
+  demo yard ([#45]).
+- bucket: a suppressed entry never notifies. When any matching rule
+  suppresses an entry, the notifications queued for it by `notify` actions
+  are dropped, whatever the rule and action order. Before, suppressed
+  entries still alerted. [#28]
+- All tools parse `YARD_TRUSTED_PROXIES` with one shared parser: entries may
+  be separated by commas or spaces, and an invalid entry is logged and
+  skipped. Before, the bucket accepted commas only and ignored the whole
+  list if one entry was invalid. [#62]
+- bucket and valve: one outbound guard (`apps/shared/netguard`) for all
+  notification delivery. The bucket now also refuses `0.0.0.0/8` and the
+  `fd00:ec2::254` and `100.100.100.200` metadata addresses, and applies the
+  guard to SMTP channels, which had no address filtering. A loopback or
+  link-local SMTP host now fails with "destination address not allowed".
+  `HTTP_PROXY`/`HTTPS_PROXY` are no longer used for notifications unless
+  `YARD_NOTIFY_PROXY=true`. [#61]
+- bucket web: the log table is virtualized, so thousands of entries scroll
+  and update smoothly (only the rows near the viewport are rendered). Keyboard
+  triage and sortable headers work as before. While scrolled away from the
+  top, live arrivals no longer move the view; a **N new** pill counts them
+  and scrolls back up ([#57]).
+- bucket web: in the collapsed icon rail, tags (as a flyout with **Manage
+  tags…**), notification channels and, for admins, the audit log are
+  reachable again ([#64]). The header count drops the "~" when the total is
+  exact.
+- bucket web: the rule editor says next to a notify action that
+  notifications fire only as entries arrive, never on **Save + run on
+  history**, and that a suppressed entry never notifies ([#28]).
+
+### Added
+
+- hose: TLS jobs can trust a CA bundle or pin the receiver's certificate
+  (PEM pasted into the job, checked on save; private keys refused) and
+  override the server name the certificate is checked against, so
+  `tlsInsecure` is no longer the only way to reach a self-signed receiver.
+  A **Trust valve's certificate** button pins syslog-valve's certificate in
+  one step: the hose server fetches it from `HOSE_VALVE_URL` (set to
+  `http://syslog-valve:8081` in the compose and Quadlet stacks) through the
+  hose's `GET /api/valve-cert`. Existing `jobs.json` files load unchanged
+  ([#34]).
+- valve: `GET /api/certs/pem` serves the public certificate of the TLS IN
+  ports (never the key) without a session ([#34]).
+- Tests: Postgres-backed bucket tests for entry pagination and sorting,
+  insert ids, ingest versus apply-to-history parity (including randomized
+  condition trees), migration replay and upgrades, and bucket share
+  permissions through the API ([#58]); tests for the bucket's generic parser,
+  config and rule engine and the valve's certificate package ([#59]).
+- bucket: an audit log ([#27]). Sign-ins (including failures, with the
+  username tried), sign-outs and password changes; account, role and
+  password-reset changes; OIDC, session and network-feed settings; rule,
+  bucket, share, tag, channel and custom-framework edits and rule
+  apply-to-history; and entry status, priority, tag and classification
+  changes are recorded with the actor, client address and a summary that
+  never includes secrets. Admins browse it under **Admin → Audit log**
+  (`#/audit`) or `GET /api/audit`. Rows are kept for
+  `BUCKET_AUDIT_RETENTION_DAYS` (default 180).
+- `YARD_NOTIFY_PROXY=true` (bucket, valve) sends notifications through
+  `HTTP_PROXY`/`HTTPS_PROXY`. Each target is resolved and checked against
+  the outbound guard before it goes to the proxy. [#61]
+
 ## [0.1.1] - 2026-11-05
 
 ### Security
@@ -183,12 +298,15 @@ Released under the MIT License; see the commit history for its contents.
 [#23]: https://github.com/fqazzazee/syslog-yard/issues/23
 [#24]: https://github.com/fqazzazee/syslog-yard/issues/24
 [#25]: https://github.com/fqazzazee/syslog-yard/issues/25
+[#26]: https://github.com/fqazzazee/syslog-yard/issues/26
+[#27]: https://github.com/fqazzazee/syslog-yard/issues/27
 [#28]: https://github.com/fqazzazee/syslog-yard/issues/28
 [#29]: https://github.com/fqazzazee/syslog-yard/issues/29
 [#30]: https://github.com/fqazzazee/syslog-yard/issues/30
 [#31]: https://github.com/fqazzazee/syslog-yard/issues/31
 [#32]: https://github.com/fqazzazee/syslog-yard/issues/32
 [#33]: https://github.com/fqazzazee/syslog-yard/issues/33
+[#34]: https://github.com/fqazzazee/syslog-yard/issues/34
 [#35]: https://github.com/fqazzazee/syslog-yard/issues/35
 [#36]: https://github.com/fqazzazee/syslog-yard/issues/36
 [#37]: https://github.com/fqazzazee/syslog-yard/issues/37
@@ -199,6 +317,7 @@ Released under the MIT License; see the commit history for its contents.
 [#42]: https://github.com/fqazzazee/syslog-yard/issues/42
 [#43]: https://github.com/fqazzazee/syslog-yard/issues/43
 [#44]: https://github.com/fqazzazee/syslog-yard/issues/44
+[#45]: https://github.com/fqazzazee/syslog-yard/issues/45
 [#46]: https://github.com/fqazzazee/syslog-yard/issues/46
 [#47]: https://github.com/fqazzazee/syslog-yard/issues/47
 [#48]: https://github.com/fqazzazee/syslog-yard/issues/48
@@ -213,3 +332,7 @@ Released under the MIT License; see the commit history for its contents.
 [#57]: https://github.com/fqazzazee/syslog-yard/issues/57
 [#58]: https://github.com/fqazzazee/syslog-yard/issues/58
 [#59]: https://github.com/fqazzazee/syslog-yard/issues/59
+[#61]: https://github.com/fqazzazee/syslog-yard/issues/61
+[#62]: https://github.com/fqazzazee/syslog-yard/issues/62
+[#63]: https://github.com/fqazzazee/syslog-yard/issues/63
+[#64]: https://github.com/fqazzazee/syslog-yard/issues/64

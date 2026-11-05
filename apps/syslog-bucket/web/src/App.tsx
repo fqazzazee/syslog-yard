@@ -38,7 +38,7 @@ import { AppShell } from "../../../shared/web/src/AppShell";
 import { useHashRoute } from "../../../shared/web/src/hooks";
 import { ApiError } from "../../../shared/web/src/http";
 import { Login } from "../../../shared/web/src/Login";
-import { Badge, Banner, Button, Loading, PageHeader } from "../../../shared/web/src/ui";
+import { Badge, Banner, Button, EmptyState, Loading, PageHeader } from "../../../shared/web/src/ui";
 import type { IconName } from "../../../shared/web/src/Icon";
 import BucketModal from "./components/BucketModal";
 import ChannelsModal from "./components/ChannelsModal";
@@ -46,6 +46,7 @@ import EntryDetail from "./components/EntryDetail";
 import FilterBar from "./components/FilterBar";
 import FrameworkEditor from "./components/FrameworkEditor";
 import FrameworkView from "./components/FrameworkView";
+import AuditPage from "./components/AuditPage";
 import { BucketsPage, FrameworksPage, RulesPage } from "./components/ListPages";
 import LogTable from "./components/LogTable";
 import MitreView from "./components/MitreView";
@@ -53,7 +54,7 @@ import NetView from "./components/NetView";
 import OTView from "./components/OTView";
 import RuleModal from "./components/RuleModal";
 import SettingsModal from "./components/SettingsModal";
-import Sidebar from "./components/Sidebar";
+import Sidebar, { SidebarRail } from "./components/Sidebar";
 import TagsModal from "./components/TagsModal";
 import { useLiveTail, useVisibleInterval } from "./hooks";
 import { parseRoute, pathFor } from "./routes";
@@ -523,12 +524,21 @@ function Workspace({
                       ? "Network security"
                       : `Tag: ${tagsById.get(selection.id)?.name ?? selection.id}`;
   const title =
-    page === "buckets" ? "Buckets" : page === "rules" ? "Rules" : page === "frameworks" ? "Frameworks" : viewTitle;
+    page === "audit"
+      ? "Audit log"
+      : page === "buckets"
+        ? "Buckets"
+        : page === "rules"
+          ? "Rules"
+          : page === "frameworks"
+            ? "Frameworks"
+            : viewTitle;
 
   const statsMeta = stats && (
     <>
       <span>
-        ~{stats.approx_total.toLocaleString()} entries · {stats.last_minute}/min
+        {stats.total_exact ? "" : "~"}
+        {stats.approx_total.toLocaleString()} entries · {stats.last_minute}/min
       </span>
       {stats.ingest && <IngestHealth ingest={stats.ingest} />}
     </>
@@ -566,8 +576,27 @@ function Workspace({
           onManageChannels={() => setModal({ kind: "channels" })}
         />
       }
+      railContent={
+        <SidebarRail
+          tags={tags}
+          selection={page ? null : selection}
+          page={page}
+          me={me}
+          readOnly={readOnly}
+          onManageTags={() => setModal({ kind: "tags" })}
+          onManageChannels={() => setModal({ kind: "channels" })}
+        />
+      }
     >
-      {page === "buckets" ? (
+      {page === "audit" ? (
+        me.role === "admin" ? (
+          <AuditPage />
+        ) : (
+          <EmptyState icon="history" title="Admins only">
+            The audit log is visible to administrators.
+          </EmptyState>
+        )
+      ) : page === "buckets" ? (
         <BucketsPage buckets={buckets} me={me} readOnly={readOnly} onEdit={(bucket) => setModal({ kind: "bucket", bucket })} />
       ) : page === "rules" ? (
         <RulesPage rules={rules} tagsById={tagsById} readOnly={readOnly} onEdit={(rule) => setModal({ kind: "rule", rule })} />
@@ -673,6 +702,7 @@ function Workspace({
           channels={channels}
           mitreCatalog={mitreCatalog}
           otCatalog={otCatalog}
+          readOnly={readOnly}
           onClose={closeModal}
         />
       )}

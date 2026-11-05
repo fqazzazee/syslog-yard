@@ -54,6 +54,12 @@ var msgHints = []struct {
 // unknown.
 func Class(appName, msg string) string {
 	a := strings.ToLower(strings.TrimSpace(appName))
+	// Barracuda CloudGen names its services box_<Service>_<Log>
+	// (box_Firewall_Activity, box_Event_eventS). A prefix, not a substring,
+	// so "dropbox_sync" stays unclassified.
+	if strings.HasPrefix(a, "box_") {
+		return Firewall
+	}
 	for _, h := range appHints {
 		if strings.Contains(a, h.sub) {
 			return h.class

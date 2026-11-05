@@ -309,13 +309,17 @@ func (s *Server) toEntry(ctx context.Context, rec record) (store.Entry, error) {
 		}
 	}
 
+	// Parse before resolving the source: a vendor parser may replace the
+	// wire-level host with the name the device gives itself (FortiGate
+	// devname), and the source should be recorded under that name.
+	s.registry.Apply(&e)
+
 	id, err := s.sourceID(ctx, e.Host, rec.SourceIP)
 	if err != nil {
 		return e, err
 	}
 	e.SourceID = &id
 
-	s.registry.Apply(&e)
 	// Enrich before the rule engine so rules can match on device class and
 	// MITRE technique: parsers have populated structured fields by now.
 	e.DeviceClass = classify.Class(e.AppName, e.Msg)

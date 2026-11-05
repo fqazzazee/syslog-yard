@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Banner, IconButton } from "../../../../shared/web/src/ui";
 import { applyRule, createRule, deleteRule, updateRule } from "./../api";
 import type { Action, Channel, Cond, MitreCatalog, OTCatalog, Rule, Tag } from "./../types";
@@ -22,6 +22,8 @@ interface Props {
   channels: Channel[];
   mitreCatalog: MitreCatalog | null;
   otCatalog: OTCatalog | null;
+  // Viewers: show the rule without any way to change it.
+  readOnly?: boolean;
   onClose: (changed: boolean) => void;
 }
 
@@ -63,7 +65,14 @@ function CodeList({
   );
 }
 
-export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, otCatalog, onClose }: Props) {
+// What the rule editor says about notify, next to every notify action: it
+// only runs as entries arrive, and suppression wins over it.
+const NOTIFY_NOTE =
+  "Notifications are sent only as new entries arrive, never when a rule runs on history. " +
+  "An entry that any rule suppresses sends no notification.";
+
+export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, otCatalog, readOnly = false, onClose }: Props) {
+  const noteId = useId();
   const [name, setName] = useState(rule?.name ?? seed?.name ?? "");
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
   const [condition, setCondition] = useState<Cond>(rule?.condition ?? seed?.condition ?? {});
@@ -138,111 +147,144 @@ export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, ot
     }
   };
 
+  const hasNotify = actions.some((a) => a.type === "notify");
+
   return (
-    <Modal title={rule ? "Edit rule" : "New rule"} onClose={() => onClose(rule !== null)}>
-      <label>
-        Name
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Tag auth failures" autoFocus />
-      </label>
-      <label className="check">
-        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-        Enabled for incoming entries
-      </label>
+    <Modal title={readOnly ? "View rule" : rule ? "Edit rule" : "New rule"} onClose={() => onClose(!readOnly && rule !== null)}>
+      {readOnly && <Banner kind="info">Read-only: your role can view rules but not change them.</Banner>}
+      {/* A disabled fieldset turns every control below into a read-only view. */}
+      <fieldset className="plain-fieldset" disabled={readOnly}>
+        <label>
+          Name
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Tag auth failures" autoFocus={!readOnly} />
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          Enabled for incoming entries
+        </label>
 
-      <label>When an entry matches</label>
-      <ConditionBuilder value={condition} onChange={setCondition} tags={tags} />
+        <label>When an entry matches</label>
+        <ConditionBuilder value={condition} onChange={setCondition} tags={tags} />
 
-      <label>Do</label>
-      {actions.map((a, i) => (
-        <div className="cond-row" key={i}>
-          <select
-            value={a.type}
-            onChange={(e) =>
-              patchAction(i, {
-                type: e.target.value as Action["type"],
-                tag_id: tags[0]?.id,
-                priority: 2,
-                channel_id: channels[0]?.id,
-                mitre: [],
-                ot: [],
-              })
-            }
-          >
-            <option value="tag">Add tag</option>
-            <option value="set_priority">Set priority</option>
-            <option value="suppress">Suppress</option>
-            <option value="notify">Notify</option>
-            <option value="set_mitre">Set ATT&CK technique</option>
-            <option value="set_ot">Set OT code</option>
-          </select>
-          {a.type === "tag" && (
-            <select value={a.tag_id ?? 0} onChange={(e) => patchAction(i, { tag_id: Number(e.target.value) })}>
-              {tags.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
+        <label>Do</label>
+        {actions.map((a, i) => (
+          <div className="cond-row" key={i}>
+            <select
+              aria-label="Action"
+              aria-describedby={a.type === "notify" ? noteId : undefined}
+              value={a.type}
+              onChange={(e) =>
+                patchAction(i, {
+                  type: e.target.value as Action["type"],
+                  tag_id: tags[0]?.id,
+                  priority: 2,
+                  channel_id: channels[0]?.id,
+                  mitre: [],
+                  ot: [],
+                })
+              }
+            >
+              <option value="tag">Add tag</option>
+              <option value="set_priority">Set priority</option>
+              <option value="suppress">Suppress</option>
+              <option value="notify">Notify</option>
+              <option value="set_mitre">Set ATT&CK technique</option>
+              <option value="set_ot">Set OT code</option>
             </select>
-          )}
-          {a.type === "set_priority" && (
-            <select value={a.priority ?? 0} onChange={(e) => patchAction(i, { priority: Number(e.target.value) })}>
-              {PRIORITY_NAMES.map((p, n) => (
-                <option key={n} value={n}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          )}
-          {a.type === "notify" &&
-            (channels.length > 0 ? (
-              <select value={a.channel_id ?? 0} onChange={(e) => patchAction(i, { channel_id: Number(e.target.value) })}>
-                {channels.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
+            {a.type === "tag" && (
+              <select value={a.tag_id ?? 0} onChange={(e) => patchAction(i, { tag_id: Number(e.target.value) })}>
+                {tags.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
                   </option>
                 ))}
               </select>
-            ) : (
-              <span className="hint">no channels — add one under Channels</span>
-            ))}
-          {a.type === "suppress" && <span className="hint">hidden from views, kept in storage</span>}
-          {a.type === "set_mitre" && mitreCatalog && (
-            <CodeList
-              codes={a.mitre ?? []}
-              options={mitreCatalog.techniques}
-              label="+ technique"
-              onChange={(mitre) => patchAction(i, { mitre })}
-            />
-          )}
-          {a.type === "set_ot" && otCatalog && (
-            <CodeList
-              codes={a.ot ?? []}
-              options={otCatalog.alert_types}
-              label="+ OT code"
-              onChange={(ot) => patchAction(i, { ot })}
-            />
-          )}
-          <IconButton icon="close" label="Remove action" variant="link" iconSize={14} onClick={() => setActions(actions.filter((_, j) => j !== i))} />
-        </div>
-      ))}
-      <button type="button" className="linkish" onClick={() => setActions([...actions, { type: "tag", tag_id: tags[0]?.id }])}>
-        + action
-      </button>
+            )}
+            {a.type === "set_priority" && (
+              <select value={a.priority ?? 0} onChange={(e) => patchAction(i, { priority: Number(e.target.value) })}>
+                {PRIORITY_NAMES.map((p, n) => (
+                  <option key={n} value={n}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            )}
+            {a.type === "notify" &&
+              (channels.length > 0 ? (
+                <select value={a.channel_id ?? 0} onChange={(e) => patchAction(i, { channel_id: Number(e.target.value) })}>
+                  {channels.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="hint">no channels — add one under Channels</span>
+              ))}
+            {a.type === "suppress" && (
+              <span className="hint">hidden from views, kept in storage; sends no notifications</span>
+            )}
+            {a.type === "set_mitre" && mitreCatalog && (
+              <CodeList
+                codes={a.mitre ?? []}
+                options={mitreCatalog.techniques}
+                label="+ technique"
+                onChange={(mitre) => patchAction(i, { mitre })}
+              />
+            )}
+            {a.type === "set_ot" && otCatalog && (
+              <CodeList
+                codes={a.ot ?? []}
+                options={otCatalog.alert_types}
+                label="+ OT code"
+                onChange={(ot) => patchAction(i, { ot })}
+              />
+            )}
+            {!readOnly && (
+              <IconButton icon="close" label="Remove action" variant="link" iconSize={14} onClick={() => setActions(actions.filter((_, j) => j !== i))} />
+            )}
+          </div>
+        ))}
+        {hasNotify && (
+          <p className="hint notify-note" id={noteId}>
+            <Icon name="info" size={14} />
+            {NOTIFY_NOTE}
+          </p>
+        )}
+        {!readOnly && (
+          <button type="button" className="linkish" onClick={() => setActions([...actions, { type: "tag", tag_id: tags[0]?.id }])}>
+            + action
+          </button>
+        )}
+      </fieldset>
 
       {error && <Banner kind="error">{error}</Banner>}
       {notice && <Banner kind="success">{notice}</Banner>}
       <div className="modal-foot">
-        {rule && (
+        {readOnly && (
+          <button className="primary" onClick={() => onClose(false)}>
+            Close
+          </button>
+        )}
+        {!readOnly && rule && (
           <button className="danger danger-left" disabled={busy} onClick={() => void remove()}>
             Delete
           </button>
         )}
-        <button disabled={busy || !name.trim() || actions.length === 0} onClick={() => void saveAndApply()}>
-          Save + run on history
-        </button>
-        <button className="primary" disabled={busy || !name.trim() || actions.length === 0} onClick={() => void saveAndClose()}>
-          Save
-        </button>
+        {!readOnly && (
+          <>
+            <button
+              disabled={busy || !name.trim() || actions.length === 0}
+              title={hasNotify ? "Notify actions are skipped on history: only new entries send notifications." : undefined}
+              onClick={() => void saveAndApply()}
+            >
+              Save + run on history
+            </button>
+            <button className="primary" disabled={busy || !name.trim() || actions.length === 0} onClick={() => void saveAndClose()}>
+              Save
+            </button>
+          </>
+        )}
       </div>
     </Modal>
   );

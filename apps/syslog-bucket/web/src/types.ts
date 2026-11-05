@@ -82,6 +82,7 @@ export type SortKey = "time" | "severity" | "priority" | "host" | "app" | "devic
 
 export interface Stats {
   approx_total: number;
+  total_exact?: boolean; // approx_total is an exact count (newer servers)
   last_minute: number;
   ingest?: IngestStats; // newer servers
 }
@@ -319,3 +320,29 @@ export const PRIORITY_NAMES = ["—", "Low", "Med", "High"] as const;
 export const DEVICE_CLASSES = ["firewall", "network", "host", "windows", "ot"] as const;
 
 export const STATUS_NAMES = ["new", "reviewing", "resolved", "benign"] as const;
+
+// AuditEvent is one row of the admin-only audit log (GET /api/audit).
+// summary is a small object describing the change: plain values, or
+// {from, to} pairs for edits. actor_id is null for failed sign-ins (actor is
+// then the username tried) and for the reset-admin command.
+export interface AuditEvent {
+  id: number;
+  time: string;
+  actor_id: number | null;
+  actor: string;
+  ip: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  summary: Record<string, unknown>;
+  success: boolean;
+}
+
+export interface AuditFilters {
+  actor: string;
+  action: string;
+  targetType: string;
+  result: "" | "success" | "failure";
+  since: string; // datetime-local value, local time
+  until: string;
+}

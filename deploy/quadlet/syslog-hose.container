@@ -12,6 +12,9 @@ Volume=hose-data.volume:/data
 Environment=HOSE_ADDR=:8080
 Environment=HOSE_DATA=/data
 Environment=HOSE_SUGGESTED_DEST=syslog-valve:514
+# "Trust valve's certificate" in the job form fetches the valve's public
+# TLS certificate from here (server-side).
+Environment=HOSE_VALVE_URL=http://syslog-valve:8081
 Environment=YARD_LINK_HOSE=8080
 Environment=YARD_LINK_VALVE=8081
 Environment=YARD_LINK_BUCKET=8082

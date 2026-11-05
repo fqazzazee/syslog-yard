@@ -73,7 +73,8 @@ func TestGenerate(t *testing.T) {
 	for _, want := range []string{
 		"@version: 4.8",
 		`source s_src_1 {`,
-		`network(ip("0.0.0.0") transport("udp") port(514));`,
+		`network(ip("0.0.0.0") transport("udp") port(514) flags(no-parse));`,
+		`parser { syslog-parser(flags(syslog-protocol)); };`,
 		`destination d_fwd_1 {`,
 		`network("bucket-syslog" port(514) transport("udp") persist-name("forward_fwd_1"));`,
 		"log {\n    source(s_src_1);\n    destination(d_fwd_1);\n};",
@@ -91,9 +92,9 @@ func TestGenerateUDPTCPSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "source s_src_1 {\n" +
-		`    network(ip("0.0.0.0") transport("udp") port(6514));` + "\n" +
-		`    network(ip("0.0.0.0") transport("tcp") port(6514));` + "\n};"
+	want := "        source {\n" +
+		`            network(ip("0.0.0.0") transport("udp") port(6514) flags(no-parse));` + "\n" +
+		`            network(ip("0.0.0.0") transport("tcp") port(6514) flags(no-parse));` + "\n        };"
 	if !strings.Contains(conf, want) {
 		t.Errorf("generated config missing dual-transport source:\n%s", conf)
 	}

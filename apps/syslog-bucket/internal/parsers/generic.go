@@ -17,11 +17,15 @@ func (Generic) Match(_ *store.Entry) bool { return true }
 const maxStructuredKeys = 50
 
 func (Generic) Normalize(e *store.Entry) {
-	fields := extractKV(e.Msg)
+	mergeStructured(e, extractKV(e.Msg))
+}
+
+// mergeStructured adds fields on top of anything the ingest layer already
+// recorded in e.Structured (pid, msgid).
+func mergeStructured(e *store.Entry, fields map[string]string) {
 	if len(fields) == 0 {
 		return
 	}
-	// Merge on top of anything the ingest layer already recorded.
 	existing := map[string]string{}
 	if len(e.Structured) > 0 {
 		json.Unmarshal(e.Structured, &existing)

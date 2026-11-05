@@ -1,6 +1,7 @@
 // Dark/light theme, persisted per-browser in localStorage and applied to the
 // <html data-theme> attribute; the stylesheet's :root[data-theme="light"] block
-// supplies the light palette. One copy for the whole suite: the per-app theme.ts files are re-export shims.
+// supplies the light palette. One copy for the whole suite; each app's main.tsx
+// imports it from here.
 export type Theme = "dark" | "light";
 
 const KEY = "yard-theme";

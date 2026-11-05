@@ -22,7 +22,7 @@ func TestShutdownDeliversQueuedThenStops(t *testing.T) {
 	}))
 	defer srv.Close()
 	d := New(nil)
-	d.allowLoopback = true
+	d.guard.AllowLoopback = true
 	d.channels[1] = store.Channel{ID: 1, Kind: "slack", Enabled: true, Config: json.RawMessage(`{"url":"` + srv.URL + `"}`)}
 	ctx, cancel := context.WithCancel(context.Background())
 	go d.Run(ctx)
@@ -47,7 +47,7 @@ func TestShutdownAbandonsSlowDeliveries(t *testing.T) {
 	defer srv.Close()
 	defer close(release)
 	d := New(nil)
-	d.allowLoopback = true
+	d.guard.AllowLoopback = true
 	d.channels[1] = store.Channel{ID: 1, Kind: "slack", Enabled: true, Config: json.RawMessage(`{"url":"` + srv.URL + `"}`)}
 	go d.Run(context.Background())
 	var batch []store.Entry

@@ -223,6 +223,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
         <JobForm
           initial={editing}
           presets={presets}
+          canTrustValve={hints.valveCert === "true"}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);

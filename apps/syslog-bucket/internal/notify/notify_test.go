@@ -37,8 +37,8 @@ func TestDeliverWebhookAndSlack(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	d := New(nil)          // deliver doesn't touch the store
-	d.allowLoopback = true // httptest listens on 127.0.0.1
+	d := New(nil)                // deliver doesn't touch the store
+	d.guard.AllowLoopback = true // httptest listens on 127.0.0.1
 	e := store.Entry{Severity: 2, Host: "fw1", AppName: "fortigate", Msg: "boom", Mitre: []string{"T1190"}}
 
 	// Generic webhook: full entry payload.
@@ -80,7 +80,7 @@ func TestDeliverWebhookError(t *testing.T) {
 	}))
 	defer srv.Close()
 	d := New(nil)
-	d.allowLoopback = true
+	d.guard.AllowLoopback = true
 	ch := store.Channel{Kind: "slack", Config: json.RawMessage(`{"url":"` + srv.URL + `"}`)}
 	if err := d.deliver(context.Background(), ch, store.Entry{}, "x"); err == nil {
 		t.Fatal("expected error on 500 response")
@@ -101,7 +101,7 @@ func TestHandleBurstNewChannelSharesLimiter(t *testing.T) {
 	defer srv.Close()
 
 	d := New(nil)
-	d.allowLoopback = true
+	d.guard.AllowLoopback = true
 	const rate = 5
 	d.mu.Lock()
 	d.channels[1] = store.Channel{ID: 1, Kind: "slack", Enabled: true, RatePerMin: rate,

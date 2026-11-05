@@ -5,6 +5,7 @@
 package secure
 
 import (
+	"log/slog"
 	"mime"
 	"net"
 	"net/http"
@@ -85,33 +86,48 @@ var (
 )
 
 // envPolicy reads YARD_TRUSTED_ORIGINS (comma/space-separated origins) and
-// YARD_TRUSTED_PROXIES (comma/space-separated IPs or CIDRs) once.
-// Unparseable proxy entries are ignored rather than fatal: the guard then
-// simply trusts less.
+// YARD_TRUSTED_PROXIES (see ParseTrustedProxies) once. Unparseable proxy
+// entries are logged and skipped rather than fatal: the guard then simply
+// trusts less.
 func envPolicy() *Policy {
 	envOnce.Do(func() {
+		proxies, rejected := ParseTrustedProxies(os.Getenv("YARD_TRUSTED_PROXIES"))
+		for _, r := range rejected {
+			slog.Warn("YARD_TRUSTED_PROXIES: ignoring entry that is not an IP or CIDR", "entry", r)
+		}
 		envPol = &Policy{
 			TrustedOrigins: fields(os.Getenv("YARD_TRUSTED_ORIGINS")),
-			TrustedProxies: parsePrefixes(fields(os.Getenv("YARD_TRUSTED_PROXIES"))),
+			TrustedProxies: proxies,
 		}
 	})
 	return envPol
 }
 
+// TrustedProxies answers the YARD_TRUSTED_PROXIES list as every yard app
+// reads it: parsed once, invalid entries logged and skipped.
+func TrustedProxies() []netip.Prefix { return envPolicy().TrustedProxies }
+
 func fields(s string) []string {
 	return strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' })
 }
 
-func parsePrefixes(list []string) []netip.Prefix {
-	var out []netip.Prefix
-	for _, s := range list {
+// ParseTrustedProxies parses the YARD_TRUSTED_PROXIES syntax: IP addresses
+// and CIDR prefixes separated by commas and/or whitespace. A bare address
+// becomes a single-host prefix (IPv4-mapped IPv6 unmapped). Entries that
+// parse as neither are returned in rejected, for the caller to report, and
+// left out: one typo narrows the trusted set instead of voiding it.
+func ParseTrustedProxies(v string) (proxies []netip.Prefix, rejected []string) {
+	for _, s := range fields(v) {
 		if p, err := netip.ParsePrefix(s); err == nil {
-			out = append(out, p.Masked())
+			proxies = append(proxies, p.Masked())
 		} else if a, err := netip.ParseAddr(s); err == nil {
-			out = append(out, netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen()))
+			a = a.Unmap()
+			proxies = append(proxies, netip.PrefixFrom(a, a.BitLen()))
+		} else {
+			rejected = append(rejected, s)
 		}
 	}
-	return out
+	return proxies, rejected
 }
 
 // Guard wraps next with the cross-origin checks described on Policy.

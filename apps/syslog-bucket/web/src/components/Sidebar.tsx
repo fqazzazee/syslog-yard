@@ -2,7 +2,12 @@
 // place of the plain section list while the nav is expanded): views,
 // frameworks, buckets, tags, rules and notification channels, each with its
 // create/edit affordances. Views are hash links (see routes.ts).
+//
+// SidebarRail covers the collapsed icon rail, where the shell shows only the
+// bucket's sections: it adds what no section reaches (tags, the tag manager,
+// notification channels, and for admins the audit log).
 import type { ReactNode } from "react";
+import { Menu, type MenuItem } from "../../../../shared/web/src/Menu";
 import { IconButton } from "../../../../shared/web/src/ui";
 import { hrefFor, type Page } from "./../routes";
 import type { Bucket, Channel, Framework, Rule, Selection, Tag, User } from "./../types";
@@ -20,7 +25,7 @@ interface Props {
   me: User;
   readOnly: boolean; // viewer role: no create/edit affordances
   onEditBucket: (b: Bucket | null) => void; // null = new
-  onEditRule: (r: Rule | null) => void;
+  onEditRule: (r: Rule | null) => void; // a read-only view for viewers
   onEditFramework: (f: Framework | null) => void; // null = new custom framework
   onManageTags: () => void;
   onManageChannels: () => void;
@@ -208,12 +213,14 @@ export default function Sidebar({
           key={r.id}
           type="button"
           className={`nav-link nav-button${r.enabled ? "" : " disabled"}`}
-          disabled={readOnly}
-          title={r.enabled ? `Edit rule ${r.name}` : `${r.name} (disabled)`}
-          onClick={() => !readOnly && onEditRule(r)}
+          title={`${readOnly ? "View" : "Edit"} rule ${r.name}${r.enabled ? "" : " (disabled)"}`}
+          onClick={() => onEditRule(r)}
         >
           <Icon name="rule" size={16} />
-          <span className="nav-text">{r.name}</span>
+          <span className="nav-text">
+            {r.name}
+            {!r.enabled && <span className="sr-only"> (disabled)</span>}
+          </span>
         </button>
       ))}
 
@@ -238,6 +245,79 @@ export default function Sidebar({
           {channels.length === 0 && <p className="nav-empty">Webhook / Slack / email destinations.</p>}
         </>
       )}
+
+      {/* Admin-only pages. */}
+      {isAdmin && (
+        <>
+          <SubHead label="Admin" />
+          <NavLink href={hrefFor("audit")} icon="history" active={page === "audit"}>
+            Audit log
+          </NavLink>
+        </>
+      )}
     </div>
+  );
+}
+
+export function SidebarRail({
+  tags,
+  selection,
+  page,
+  me,
+  readOnly,
+  onManageTags,
+  onManageChannels,
+}: {
+  tags: Tag[];
+  selection: Selection | null;
+  page: Page | null;
+  me: User;
+  readOnly: boolean;
+  onManageTags: () => void;
+  onManageChannels: () => void;
+}) {
+  const tagItems: MenuItem[] = tags.map((t) => ({
+    id: `tag-${t.id}`,
+    label: <TagChip tag={t} />,
+    title: `Logs tagged ${t.name}`,
+    onSelect: () => {
+      location.hash = hrefFor({ kind: "tag", id: t.id });
+    },
+  }));
+  if (!readOnly) tagItems.push({ id: "manage", label: "Manage tags…", icon: "tune", onSelect: onManageTags });
+  return (
+    <ul className="nav-list">
+      {tagItems.length > 0 && (
+        <li>
+          <Menu
+            label="Tags"
+            placement="right"
+            items={tagItems}
+            triggerClassName={`nav-link nav-button${selection?.kind === "tag" ? " active" : ""}`}
+            trigger={
+              <>
+                <Icon name="sell" size={17} />
+                <span className="nav-text">Tags</span>
+              </>
+            }
+          />
+        </li>
+      )}
+      {!readOnly && (
+        <li>
+          <button type="button" className="nav-link nav-button" title="Notification channels" onClick={onManageChannels}>
+            <Icon name="notifications" size={17} />
+            <span className="nav-text">Notification channels</span>
+          </button>
+        </li>
+      )}
+      {me.role === "admin" && (
+        <li>
+          <NavLink href={hrefFor("audit")} icon="history" active={page === "audit"} title="Audit log">
+            Audit log
+          </NavLink>
+        </li>
+      )}
+    </ul>
   );
 }

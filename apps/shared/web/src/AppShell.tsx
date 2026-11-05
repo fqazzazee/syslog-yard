@@ -6,12 +6,12 @@
 //   side nav  every tool with its sections; the current tool's sections are
 //             in-app hash links, the other tools' are deep links to their URL
 //             (from /api/hints). Collapses to an icon rail on wide screens and
-//             becomes an overlay drawer on narrow ones.
+//             becomes a modal overlay drawer on narrow ones.
 //   main      the tool's page (landmark target of the skip link)
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { About } from "./About";
 import { AccountMenu } from "./AccountMenu";
-import { focusables } from "./Dialog";
+import { focusables, useModalKeys } from "./Dialog";
 import { useMediaQuery, useStoredState } from "./hooks";
 import { Icon } from "./Icon";
 import type { MenuItem } from "./Menu";
@@ -37,6 +37,10 @@ export interface AppShellProps {
   // A richer navigation for the current tool, shown instead of its plain
   // section list while the nav is expanded (bucket: buckets, tags, rules…).
   navContent?: ReactNode;
+  // Extra icon entries for the current tool in the collapsed rail, after its
+  // sections: whatever navContent offers that no section reaches (bucket:
+  // tags, notification channels). Each entry carries its own label.
+  railContent?: ReactNode;
   // Theme changes, for components that need it in JS (valve's canvas).
   onThemeChange?: (t: Theme) => void;
   children: ReactNode;
@@ -62,21 +66,18 @@ export function AppShell(props: AppShellProps) {
     if (!narrow) setDrawerOpen(false);
   }, [narrow]);
 
-  // The drawer is a modal overlay: focus moves in, Escape closes it and
-  // focus goes back to the toggle.
+  // The drawer is a modal overlay: focus moves in, Tab stays inside (the
+  // same trap as Dialog), Escape closes it and focus goes back to the toggle.
+  const drawerModal = narrow && drawerOpen;
   useEffect(() => {
-    if (!drawerOpen) return;
+    if (!drawerModal) return;
     const nav = navRef.current;
     if (nav) focusables(nav)[0]?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setDrawerOpen(false);
-        toggleRef.current?.focus();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [drawerOpen]);
+  }, [drawerModal]);
+  useModalKeys(navRef, drawerModal, () => {
+    setDrawerOpen(false);
+    toggleRef.current?.focus();
+  });
 
   const rail = !narrow && mode === "rail";
   const expanded = narrow ? drawerOpen : !rail;
@@ -172,6 +173,9 @@ export function AppShell(props: AppShellProps) {
           ref={navRef}
           className="yard-sidenav"
           aria-label="syslog-yard navigation"
+          role={drawerModal ? "dialog" : undefined}
+          aria-modal={drawerModal ? true : undefined}
+          tabIndex={drawerModal ? -1 : undefined}
           onClick={(e) => {
             // Following a link closes the drawer.
             if (narrow && (e.target as HTMLElement).closest("a")) setDrawerOpen(false);
@@ -198,25 +202,30 @@ export function AppShell(props: AppShellProps) {
                   <div className="nav-rich">{props.navContent}</div>
                 ) : (
                   (isCurrent || !rail) && (
-                    <ul className="nav-list">
-                      {t.sections.map((s) => {
-                        const active = isCurrent && s.id === section;
-                        return (
-                          <li key={s.id}>
-                            <a
-                              className={cx("nav-link", active && "active")}
-                              href={toolHref(tool, links, t.id, s.id)!}
-                              aria-current={active ? "page" : undefined}
-                              title={isCurrent ? s.label : `${s.label} — ${t.name}`}
-                            >
-                              <Icon name={s.icon} size={17} />
-                              <span className="nav-text">{s.label}</span>
-                              {isCurrent && props.sectionBadges?.[s.id]}
-                            </a>
-                          </li>
-                        );
-                      })}
-                    </ul>
+                    <>
+                      <ul className="nav-list">
+                        {t.sections.map((s) => {
+                          const active = isCurrent && s.id === section;
+                          return (
+                            <li key={s.id}>
+                              <a
+                                className={cx("nav-link", active && "active")}
+                                href={toolHref(tool, links, t.id, s.id)!}
+                                aria-current={active ? "page" : undefined}
+                                title={isCurrent ? s.label : `${s.label} — ${t.name}`}
+                              >
+                                <Icon name={s.icon} size={17} />
+                                <span className="nav-text">{s.label}</span>
+                                {isCurrent && props.sectionBadges?.[s.id]}
+                              </a>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                      {isCurrent && rail && props.railContent && (
+                        <div className="nav-rail-extra">{props.railContent}</div>
+                      )}
+                    </>
                   )
                 )}
               </div>

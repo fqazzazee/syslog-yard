@@ -130,7 +130,7 @@ export function RulesPage({
                   <th scope="col">Actions</th>
                   <th scope="col">State</th>
                   <th scope="col">
-                    <span className="sr-only">Edit</span>
+                    <span className="sr-only">{readOnly ? "View" : "Edit"}</span>
                   </th>
                 </tr>
               </thead>
@@ -141,7 +141,11 @@ export function RulesPage({
                     <td className="muted">{describeActions(r, tagsById)}</td>
                     <td>{r.enabled ? <Badge tone="success">enabled</Badge> : <Badge>disabled</Badge>}</td>
                     <td className="row-actions">
-                      {!readOnly && (
+                      {readOnly ? (
+                        <Button size="sm" icon="rule" onClick={() => onEdit(r)} aria-label={`View rule ${r.name}`}>
+                          View
+                        </Button>
+                      ) : (
                         <Button size="sm" icon="edit" onClick={() => onEdit(r)} aria-label={`Edit rule ${r.name}`}>
                           Edit
                         </Button>

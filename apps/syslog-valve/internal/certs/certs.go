@@ -55,6 +55,36 @@ func Inspect(certFile string) Status {
 	return st
 }
 
+// PublicPEM returns the certificate chain at certFile as PEM, rebuilt from
+// its CERTIFICATE blocks alone: whatever else the file holds (a key, if a
+// deployment mounted a combined file) is never copied out. A missing file
+// answers an error matching os.ErrNotExist.
+func PublicPEM(certFile string) ([]byte, error) {
+	data, err := os.ReadFile(certFile)
+	if err != nil {
+		return nil, err
+	}
+	var out []byte
+	for {
+		var block *pem.Block
+		block, data = pem.Decode(data)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+			return nil, fmt.Errorf("certificate unreadable: %w", err)
+		}
+		out = append(out, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: block.Bytes})...)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no certificate in %s", filepath.Base(certFile))
+	}
+	return out, nil
+}
+
 // GenerateSelfSigned writes a fresh ECDSA P-256 pair valid for five years,
 // replacing any existing files. hosts become DNS/IP SANs.
 func GenerateSelfSigned(certFile, keyFile string, hosts []string) error {
@@ -99,10 +129,21 @@ func GenerateSelfSigned(certFile, keyFile string, hosts []string) error {
 	return writePEM(certFile, "CERTIFICATE", der, 0o644)
 }
 
-func writePEM(path, blockType string, der []byte, mode os.FileMode) error {
+func writePEM(path, blockType string, der []byte, mode os.FileMode) (err error) {
 	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			os.Remove(tmp)
+		}
+	}()
+	// OpenFile's mode only applies when it creates the file; a temp file
+	// left by an interrupted run keeps its old (maybe world-readable) mode.
+	if err := f.Chmod(mode); err != nil {
+		f.Close()
 		return err
 	}
 	if err := pem.Encode(f, &pem.Block{Type: blockType, Bytes: der}); err != nil {
@@ -112,10 +153,7 @@ func writePEM(path, blockType string, der []byte, mode os.FileMode) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	return nil
+	return os.Rename(tmp, path)
 }
 
 // Require returns a friendly error when the identity files are missing.

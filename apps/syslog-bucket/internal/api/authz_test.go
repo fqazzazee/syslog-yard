@@ -93,6 +93,7 @@ var routePolicy = map[string]policy{
 	"DELETE /api/frameworks/{id}":           admin,
 	"PUT /api/net/config":                   admin,
 	"POST /api/net/refresh":                 admin,
+	"GET /api/audit":                        admin,
 }
 
 var routeRE = regexp.MustCompile(`mux\.HandleFunc\("([A-Z]+ [^"]+)"`)

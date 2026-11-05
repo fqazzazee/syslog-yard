@@ -5,7 +5,7 @@
 // backdrop closes it only when a mousedown starts on the backdrop itself (a
 // text selection that starts in a field and ends outside must not close it).
 // Stacked dialogs work: only the topmost reacts to keys.
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { IconButton } from "./ui";
 
@@ -19,6 +19,53 @@ export function focusables(root: HTMLElement): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
     (el) => !el.closest("[inert]") && el.getClientRects().length > 0,
   );
+}
+
+// useModalKeys gives any modal surface (Dialog, the narrow-screen nav
+// drawer) the same keyboard contract: while active, Tab and Shift+Tab cycle
+// through the focusable elements inside root, and Escape calls onEscape.
+// Modals stack: only the most recently activated one reacts, so a dialog
+// opened from the drawer owns the keys until it closes.
+export function useModalKeys(root: RefObject<HTMLElement | null>, active: boolean, onEscape: () => void): void {
+  const onEscapeRef = useRef(onEscape);
+  onEscapeRef.current = onEscape;
+  useEffect(() => {
+    if (!active) return;
+    const token = Symbol("modal");
+    stack.push(token);
+    const onKey = (e: KeyboardEvent) => {
+      const panel = root.current;
+      if (!panel || stack[stack.length - 1] !== token) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onEscapeRef.current();
+      } else if (e.key === "Tab") {
+        const items = focusables(panel);
+        if (items.length === 0) {
+          e.preventDefault();
+          panel.focus();
+          return;
+        }
+        const first = items[0];
+        const last = items[items.length - 1];
+        const current = document.activeElement;
+        if (e.shiftKey && (current === first || !panel.contains(current))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && (current === last || !panel.contains(current))) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      const i = stack.indexOf(token);
+      if (i >= 0) stack.splice(i, 1);
+    };
+  }, [root, active]);
 }
 
 export interface DialogProps {
@@ -39,12 +86,9 @@ export function Dialog({ title, onClose, children, footer, size = "md", classNam
   const bodyRef = useRef<HTMLDivElement>(null);
   // Captured during render, before any [autoFocus] child grabs focus.
   const [returnTo] = useState(() => document.activeElement as HTMLElement | null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  useModalKeys(panelRef, true, onClose);
 
   useEffect(() => {
-    const token = Symbol("dialog");
-    stack.push(token);
     const panel = panelRef.current!;
     if (!panel.contains(document.activeElement)) {
       const auto = panel.querySelector<HTMLElement>("[autofocus], [data-autofocus]");
@@ -52,37 +96,7 @@ export function Dialog({ title, onClose, children, footer, size = "md", classNam
       (auto ?? first ?? panel).focus();
     }
     if (scrollLocks++ === 0) document.documentElement.classList.add("dialog-open");
-
-    const onKey = (e: KeyboardEvent) => {
-      if (stack[stack.length - 1] !== token) return;
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        onCloseRef.current();
-      } else if (e.key === "Tab") {
-        const items = focusables(panel);
-        if (items.length === 0) {
-          e.preventDefault();
-          panel.focus();
-          return;
-        }
-        const first = items[0];
-        const last = items[items.length - 1];
-        const active = document.activeElement;
-        if (e.shiftKey && (active === first || !panel.contains(active))) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && (active === last || !panel.contains(active))) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    document.addEventListener("keydown", onKey, true);
     return () => {
-      document.removeEventListener("keydown", onKey, true);
-      const i = stack.indexOf(token);
-      if (i >= 0) stack.splice(i, 1);
       if (--scrollLocks === 0) document.documentElement.classList.remove("dialog-open");
       if (returnTo && returnTo.isConnected) returnTo.focus();
     };
