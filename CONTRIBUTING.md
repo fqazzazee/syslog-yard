@@ -46,6 +46,13 @@ thing locally before opening a PR:
 cd apps/syslog-bucket && go test ./...   # repeat for shared / syslog-hose / syslog-valve
 ```
 
+Two kinds of test skip themselves when their dependency is missing (CI
+included): the bucket's Postgres-backed tests need `BUCKET_TEST_DSN` (see
+[apps/syslog-bucket](apps/syslog-bucket/README.md#tests)), and the valve's
+integration tests need `syslog-ng` and `logrotate` on the `PATH`. If you touch
+the bucket's store, ingest or search code, or the valve's config generator,
+run them locally.
+
 A PR needs all four modules green. If your change has a visible effect,
 exercise it through the UI too (`scripts/yardctl up`), not just the tests.
 

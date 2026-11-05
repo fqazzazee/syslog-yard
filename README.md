@@ -29,7 +29,8 @@ Just three small containers and a browser.
 
 - **A visual syslog pipeline** — draw IN ports, filters, and OUT ports on the
   valve's canvas; the graph compiles to syslog-ng with a syntax check, atomic
-  swap, one-click rollback, and live per-wire msgs/sec.
+  swap, a reload syslog-ng must confirm (or the previous config comes back),
+  one-click rollback, and live per-wire msgs/sec.
 - **External syslog sources, with an on/off switch** — a dedicated
   **External IN** block receives traffic from other machines on host port
   **6514** (udp + tcp at once), kept separate from the suite's internal
@@ -138,7 +139,20 @@ them to loopback instead: `echo YARD_BIND=127.0.0.1 >> deploy/.env` and
 `scripts/yardctl up`. The syslog entry port 6514 is unaffected. For anything
 beyond a lab, work through the hardening checklist in
 [docs/SECURITY.md](docs/SECURITY.md) (TLS, a non-default Postgres password,
-trusted origins behind a proxy).
+trusted origins behind a proxy, and trusted proxies so the login throttle
+sees each browser's address).
+
+Settings the compose file reads from your shell or `deploy/.env`:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `YARD_BIND` | `0.0.0.0` | address the three UIs are published on (`127.0.0.1` = loopback only) |
+| `BUCKET_DB_PASSWORD` | `syslog_bucket` | Postgres password, used when the `bucket-dbdata` volume is first created; [rotating it](docs/SECURITY.md#changing-the-postgres-password) on an existing volume takes one `ALTER ROLE` |
+
+Everything else is set per service in `deploy/compose.yaml`; each tool's
+variables are listed in its README ([hose](apps/syslog-hose/README.md#configuration),
+[valve](apps/syslog-valve/README.md#environment),
+[bucket](apps/syslog-bucket/README.md#environment)).
 
 To send external syslog in, add an **External IN** block in the valve (toolbar
 button — a source on container port 6514, udp+tcp, published as host port
@@ -259,13 +273,18 @@ To run the same checks locally:
 cd apps/syslog-bucket && go test ./...   # repeat for shared / syslog-hose / syslog-valve
 ```
 
+The bucket's Postgres-backed tests and the valve's real syslog-ng/logrotate
+tests skip themselves when their dependency is missing, which includes CI. To
+run the Postgres ones, point `BUCKET_TEST_DSN` at a scratch server (see
+[apps/syslog-bucket](apps/syslog-bucket/README.md#tests)).
+
 ## Features by tool
 
 - **syslog-hose**: vendor presets (FortiGate, Cisco, Linux, OT switches, Claroty
   CTD and xDome OT/ICS CEF alerts, and more), rate control, multiple concurrent
   jobs, and a live tail of what it sends.
 - **syslog-valve**: a node-graph canvas compiled to syslog-ng config with a
-  syntax check, atomic swap, and one-click rollback; UDP/TCP/TLS listeners (with
+  syntax check, atomic swap, confirmed reload, and one-click rollback; UDP/TCP/TLS listeners (with
   one-click self-signed certs), including a dual udp+tcp source transport;
   paired **Internal IN / External IN** entry points — internal traffic (the
   hose and other yard services) stays on container port 514 while external
@@ -280,7 +299,9 @@ cd apps/syslog-bucket && go test ./...   # repeat for shared / syslog-hose / sys
   the valve; live per-wire throughput on the canvas (msgs/sec from
   `syslog-ng-ctl stats`); config version history with previews; and graph
   import/export.
-- **syslog-bucket**: syslog-ng-fronted ingest into Postgres; email-style 3-pane
+- **syslog-bucket**: syslog-ng-fronted ingest into Postgres that retries
+  database errors and pushes back on syslog-ng instead of dropping, and
+  drains its queue on shutdown; email-style 3-pane
   triage; virtual buckets (saved searches), color-coded tags, and a rules engine
   that tags, prioritizes, suppresses, and classifies at ingest and
   retroactively; MITRE ATT&CK mapping at ingest with a kill-chain matrix view, a
@@ -314,7 +335,9 @@ a real lab or a small deployment today. What's in place:
   admin/analyst/viewer roles. The bucket is the yard's identity provider
   ([docs/AUTH.md](docs/AUTH.md)).
 - A reviewed security posture: parameterized queries everywhere, CSP and
-  hardening headers, login throttling, and a documented threat model
+  hardening headers, a cross-origin request guard on every tool, login
+  throttling, strictly validated config generation in the valve, guarded
+  outbound notifications, and a documented threat model
   ([docs/SECURITY.md](docs/SECURITY.md)).
 - MITRE ATT&CK mapping with a kill-chain matrix, a Claroty-style OT alert view,
   sorting and filtering, and device classification ([docs/MITRE.md](docs/MITRE.md)).
