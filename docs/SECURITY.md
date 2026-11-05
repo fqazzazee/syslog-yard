@@ -250,7 +250,8 @@ never back into config or commands.
 The login throttle counts failures per (username, client IP). The bucket
 takes the client IP from the TCP connection, unless the connection comes
 from an address listed in `YARD_TRUSTED_PROXIES` (comma-separated IPs or
-CIDRs); then it uses the first address in `X-Forwarded-For`. The same list
+CIDRs); then it walks `X-Forwarded-For` from the right, skipping trusted
+hops, and uses the first address it doesn't trust. The same list
 decides whose `X-Forwarded-Host` the cross-origin guard believes.
 
 Sign-ins made at the hose or valve UI are proxied to the bucket, and the
@@ -278,10 +279,10 @@ published port, so the peer the bucket sees is the runtime's port
 forwarder rather than the valve. A list that doesn't parse is logged
 (`YARD_TRUSTED_PROXIES ignored`) and nothing is trusted.
 
-Only list peers that set `X-Forwarded-For` themselves: the bucket believes
-the *first* entry, so a reverse proxy in front of the bucket must overwrite
-the header (nginx: `proxy_set_header X-Forwarded-For $remote_addr;`) rather
-than append to what the client sent. The hose and valve overwrite it. If a
+Because the walk starts from the right, a reverse proxy in front of the
+bucket may append to the header (nginx's usual
+`$proxy_add_x_forwarded_for`) or overwrite it; entries a client put there
+itself are never reached. The hose and valve overwrite it. If a
 reverse proxy sits in front of the hose or valve instead, list it in
 *their* `YARD_TRUSTED_PROXIES`, so the address they pass on is the
 browser's and not the proxy's.
