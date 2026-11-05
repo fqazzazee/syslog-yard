@@ -6,7 +6,13 @@ All notable changes to syslog-yard are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-05
+
 ### Security
+
+Advisories: [GHSA-6g7h-r7gg-27cj] (critical, valve),
+[GHSA-hgg5-q44j-49gg], [GHSA-qwhv-2c8j-j2cr], [GHSA-7wq3-v3j7-qhrr] and
+[GHSA-rjw7-56hf-frgr]. Upgrade, then re-apply the valve flow.
 
 - All tools: a shared guard rejects cross-origin state-changing API requests.
   Deployments behind a reverse proxy that rewrites `Host` set
@@ -43,6 +49,9 @@ All notable changes to syslog-yard are recorded here. The format follows
 - deploy: containers drop capabilities and run with `no-new-privileges`, the
   bucket image runs as a non-root user, and Postgres sits on its own internal
   network.
+- bucket: dependency updates for advisories reachable from the store
+  (pgx 5.12.0, golang.org/x/text 0.43.0), plus golang.org/x/crypto 0.58.0 and
+  go-jose 4.1.6.
 
 ### Fixed
 
@@ -93,6 +102,18 @@ All notable changes to syslog-yard are recorded here. The format follows
   ([#39]).
 - deploy: `compose.host-net.yaml` points the valve at the bucket's published
   port, so sign-in works ([#40]).
+- valve: two forwards to the same host, port and transport (for example a
+  filter's match and else branches both feeding the bucket) no longer make
+  syslog-ng refuse the config; each gets an explicit persist name.
+- deploy: the bucket relay's config mount is relabelled for SELinux hosts
+  (Fedora, RHEL), where it previously could not be read.
+- Web UI: the bucket filter bar keeps the column sort ([#46]); "Load older"
+  can't duplicate or mix rows ([#47]); a failed poll no longer replaces a
+  whole view ([#48]); forms don't close when a drag ends on the backdrop
+  ([#49]); valve wires stop showing stale rates ([#50]); entry edits report
+  errors and can't race ([#51]); live tails backfill after reconnecting and use
+  unique keys ([#52]); the valve editor confirms rollback and import, warns
+  about unsaved changes and is read-only for viewers ([#53]).
 - docs: one place for vulnerability reports ([#41]) and stale statements after
   the shared-module work ([#44]).
 
@@ -142,8 +163,14 @@ All notable changes to syslog-yard are recorded here. The format follows
 
 Released under the MIT License; see the commit history for its contents.
 
-[Unreleased]: https://github.com/fqazzazee/syslog-yard/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/fqazzazee/syslog-yard/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/fqazzazee/syslog-yard/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/fqazzazee/syslog-yard/releases/tag/v0.1.0
+[GHSA-6g7h-r7gg-27cj]: https://github.com/fqazzazee/syslog-yard/security/advisories/GHSA-6g7h-r7gg-27cj
+[GHSA-hgg5-q44j-49gg]: https://github.com/fqazzazee/syslog-yard/security/advisories/GHSA-hgg5-q44j-49gg
+[GHSA-qwhv-2c8j-j2cr]: https://github.com/fqazzazee/syslog-yard/security/advisories/GHSA-qwhv-2c8j-j2cr
+[GHSA-7wq3-v3j7-qhrr]: https://github.com/fqazzazee/syslog-yard/security/advisories/GHSA-7wq3-v3j7-qhrr
+[GHSA-rjw7-56hf-frgr]: https://github.com/fqazzazee/syslog-yard/security/advisories/GHSA-rjw7-56hf-frgr
 [#14]: https://github.com/fqazzazee/syslog-yard/issues/14
 [#15]: https://github.com/fqazzazee/syslog-yard/issues/15
 [#16]: https://github.com/fqazzazee/syslog-yard/issues/16
@@ -172,7 +199,14 @@ Released under the MIT License; see the commit history for its contents.
 [#42]: https://github.com/fqazzazee/syslog-yard/issues/42
 [#43]: https://github.com/fqazzazee/syslog-yard/issues/43
 [#44]: https://github.com/fqazzazee/syslog-yard/issues/44
+[#46]: https://github.com/fqazzazee/syslog-yard/issues/46
+[#47]: https://github.com/fqazzazee/syslog-yard/issues/47
+[#48]: https://github.com/fqazzazee/syslog-yard/issues/48
+[#49]: https://github.com/fqazzazee/syslog-yard/issues/49
+[#50]: https://github.com/fqazzazee/syslog-yard/issues/50
+[#51]: https://github.com/fqazzazee/syslog-yard/issues/51
 [#52]: https://github.com/fqazzazee/syslog-yard/issues/52
+[#53]: https://github.com/fqazzazee/syslog-yard/issues/53
 [#54]: https://github.com/fqazzazee/syslog-yard/issues/54
 [#55]: https://github.com/fqazzazee/syslog-yard/issues/55
 [#56]: https://github.com/fqazzazee/syslog-yard/issues/56
