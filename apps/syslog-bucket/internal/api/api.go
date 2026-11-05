@@ -59,6 +59,14 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Disp
 	// Apply stored (or env-fallback) OIDC + session settings to the auth service
 	// before the server starts handling requests.
 	s.applyStoredSettings(context.Background())
+	return secure.Headers(authSvc.Middleware(s.routes()))
+}
+
+// routes registers every endpoint. Role checks live in two places: the auth
+// middleware (anonymous → 401, viewer non-GET → 403) and the handlers
+// (requireAdmin, bucket ownership). TestRouteAuthz pins the combination.
+func (s *server) routes() *http.ServeMux {
+	authSvc := s.authSvc
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/healthz", s.healthz)
 	mux.HandleFunc("GET /api/hints", s.getHints)
@@ -125,7 +133,7 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Disp
 	mux.HandleFunc("GET /api/notifications/log", s.notificationLog)
 	mux.HandleFunc("GET /api/ws", s.liveTail)
 	mux.HandleFunc("GET /", s.spa)
-	return secure.Headers(authSvc.Middleware(mux))
+	return mux
 }
 
 func (s *server) healthz(w http.ResponseWriter, r *http.Request) {

@@ -242,6 +242,13 @@ func UserFrom(ctx context.Context) *store.User {
 	return u
 }
 
+// WithUser returns ctx carrying u as the authenticated user, as Middleware
+// does after resolving a session. It lets tests drive the router as a given
+// role without a database.
+func WithUser(ctx context.Context, u *store.User) context.Context {
+	return context.WithValue(ctx, ctxKey{}, u)
+}
+
 // publicAPI lists /api/ paths reachable without a session: liveness, the
 // yard nav hints, and everything the login page itself needs.
 var publicAPI = map[string]bool{
