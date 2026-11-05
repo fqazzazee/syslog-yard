@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Filters } from "./../types";
 import { DEVICE_CLASSES } from "./../types";
 
@@ -34,17 +34,41 @@ interface Props {
   onChange: (f: Filters) => void;
 }
 
+// The fields this bar edits. Sort/direction live in the same Filters object
+// but are owned by the table headers, so they are never part of the draft.
+type BarFields = Pick<Filters, "q" | "host" | "app" | "severity" | "status" | "deviceClass" | "range">;
+const BAR_KEYS: (keyof BarFields)[] = ["q", "host", "app", "severity", "status", "deviceClass", "range"];
+
+function barFields(f: Filters): BarFields {
+  return { q: f.q, host: f.host, app: f.app, severity: f.severity, status: f.status, deviceClass: f.deviceClass, range: f.range };
+}
+
 export default function FilterBar({ filters, onChange }: Props) {
   // Text inputs are local state, applied on Enter/blur so typing doesn't
   // refetch per keystroke.
-  const [draft, setDraft] = useState(filters);
+  const [draft, setDraft] = useState<BarFields>(() => barFields(filters));
 
-  const apply = () => onChange(draft);
-  const set = (patch: Partial<Filters>) => setDraft({ ...draft, ...patch });
-  const setAndApply = (patch: Partial<Filters>) => {
+  // Follow external changes to the bar's own fields (e.g. a reset).
+  const external = barFields(filters);
+  const externalKey = BAR_KEYS.map((k) => external[k]).join("\u0000");
+  useEffect(() => {
+    setDraft(barFields(filters));
+  }, [externalKey]);
+
+  // Merge over the current filters so a column sort chosen since the last
+  // apply is kept. A blur that changed nothing is skipped (it would otherwise
+  // refetch on every focus change); Enter always re-runs the query.
+  const commit = (next: BarFields, force = true) => {
+    if (!force && BAR_KEYS.every((k) => next[k] === filters[k])) return;
+    onChange({ ...filters, ...next });
+  };
+  const apply = () => commit(draft);
+  const applyIfChanged = () => commit(draft, false);
+  const set = (patch: Partial<BarFields>) => setDraft({ ...draft, ...patch });
+  const setAndApply = (patch: Partial<BarFields>) => {
     const next = { ...draft, ...patch };
     setDraft(next);
-    onChange(next);
+    commit(next);
   };
 
   return (
@@ -55,21 +79,21 @@ export default function FilterBar({ filters, onChange }: Props) {
         value={draft.q}
         onChange={(e) => set({ q: e.target.value })}
         onKeyDown={(e) => e.key === "Enter" && apply()}
-        onBlur={apply}
+        onBlur={applyIfChanged}
       />
       <input
         placeholder="host"
         value={draft.host}
         onChange={(e) => set({ host: e.target.value })}
         onKeyDown={(e) => e.key === "Enter" && apply()}
-        onBlur={apply}
+        onBlur={applyIfChanged}
       />
       <input
         placeholder="app"
         value={draft.app}
         onChange={(e) => set({ app: e.target.value })}
         onKeyDown={(e) => e.key === "Enter" && apply()}
-        onBlur={apply}
+        onBlur={applyIfChanged}
       />
       <select value={draft.severity} onChange={(e) => setAndApply({ severity: e.target.value })}>
         {SEVERITY_OPTIONS.map((o) => (
