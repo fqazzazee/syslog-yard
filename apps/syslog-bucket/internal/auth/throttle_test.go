@@ -114,9 +114,11 @@ func TestClientIP(t *testing.T) {
 		{"no proxies: peer wins", "203.0.113.5:4000", "1.2.3.4", nil, "203.0.113.5"},
 		{"untrusted peer: header ignored", "203.0.113.5:4000", "1.2.3.4", trusted, "203.0.113.5"},
 		{"trusted peer: client from header", "10.1.2.3:4000", "198.51.100.8", trusted, "198.51.100.8"},
-		{"trusted peer: left-most entry wins", "10.1.2.3:4000", "198.51.100.8, 192.0.2.1", trusted, "198.51.100.8"},
+		{"trusted peer: trusted hops skipped from the right", "10.1.2.3:4000", "198.51.100.8, 192.0.2.1", trusted, "198.51.100.8"},
+		{"trusted peer: client-supplied prefix ignored", "10.1.2.3:4000", "6.6.6.6, 198.51.100.8", trusted, "198.51.100.8"},
 		{"trusted peer, no header", "10.1.2.3:4000", "", trusted, "10.1.2.3"},
-		{"trusted peer, malformed header", "10.1.2.3:4000", "junk, 198.51.100.8", trusted, "10.1.2.3"},
+		{"trusted peer, malformed prefix", "10.1.2.3:4000", "junk, 198.51.100.8", trusted, "198.51.100.8"},
+		{"trusted peer, malformed header", "10.1.2.3:4000", "junk", trusted, "10.1.2.3"},
 		{"ipv4-mapped peer", "[::ffff:203.0.113.5]:4000", "", nil, "203.0.113.5"},
 	}
 	for _, c := range cases {

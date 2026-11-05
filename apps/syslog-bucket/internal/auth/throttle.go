@@ -2,12 +2,13 @@ package auth
 
 import (
 	"fmt"
-	"net"
 	"net/http"
 	"net/netip"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/syslog-yard/shared/secure"
 )
 
 // throttle is a small in-memory failure counter that locks a key for one
@@ -171,39 +172,14 @@ func ParseTrustedProxies(v string) ([]netip.Prefix, error) {
 }
 
 // clientIP returns the address a request came from: the TCP peer, unless the
-// peer is a trusted proxy (YARD_TRUSTED_PROXIES), in which case the
-// left-most X-Forwarded-For address is used — the hose/valve auth proxy
-// (apps/shared/yardauth) sets that header to the browser's address. With no
-// trusted proxies configured the header is ignored entirely, so clients
-// can't pick their own throttle key.
-//
-// This mirrors secure.ClientIP in apps/shared (same env var, same rules);
-// once that is available here, this can be replaced by it.
+// peer is a trusted proxy (YARD_TRUSTED_PROXIES), in which case
+// X-Forwarded-For is walked from the right, skipping trusted hops, and the
+// first untrusted address is used. Taking the right-most untrusted hop (not
+// the left-most entry) matters: a proxy that appends to a client-supplied
+// header would otherwise let the client choose its own throttle key. The
+// hose/valve auth proxy (apps/shared/yardauth) overwrites the header with the
+// browser's address, so either rule gives the same answer there. With no
+// trusted proxies configured the header is ignored entirely.
 func clientIP(r *http.Request, trusted []netip.Prefix) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	peer, err := netip.ParseAddr(host)
-	if err != nil {
-		return host
-	}
-	peer = peer.Unmap()
-	if !isTrusted(peer, trusted) {
-		return peer.String()
-	}
-	first, _, _ := strings.Cut(r.Header.Get("X-Forwarded-For"), ",")
-	if a, err := netip.ParseAddr(strings.TrimSpace(first)); err == nil {
-		return a.Unmap().String()
-	}
-	return peer.String() // header absent or malformed: the proxy itself
-}
-
-func isTrusted(a netip.Addr, trusted []netip.Prefix) bool {
-	for _, p := range trusted {
-		if p.Contains(a) {
-			return true
-		}
-	}
-	return false
+	return (&secure.Policy{TrustedProxies: trusted}).ClientIP(r)
 }

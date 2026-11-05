@@ -270,7 +270,7 @@ func (p *Policy) ClientIP(r *http.Request) string {
 		peer = r.RemoteAddr
 	}
 	if !p.trusted(peer) {
-		return peer
+		return canonicalIP(peer)
 	}
 	hops := fields(strings.Join(r.Header.Values("X-Forwarded-For"), ","))
 	for i := len(hops) - 1; i >= 0; i-- {
@@ -282,5 +282,14 @@ func (p *Policy) ClientIP(r *http.Request) string {
 			break
 		}
 	}
-	return peer
+	return canonicalIP(peer)
+}
+
+// canonicalIP unmaps IPv4-mapped IPv6 addresses (::ffff:a.b.c.d → a.b.c.d)
+// so one client always yields one key, whichever socket family it used.
+func canonicalIP(s string) string {
+	if a, err := netip.ParseAddr(s); err == nil {
+		return a.Unmap().String()
+	}
+	return s
 }
