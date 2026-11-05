@@ -89,6 +89,7 @@ with violet as its accent colour.
 | `BUCKET_WS_ORIGINS`     | _(unset)_     | extra Origin host patterns (comma-separated, `path.Match` syntax, e.g. `localhost:5173`) allowed to open the live-tail WebSocket; same-origin always works. For development or a proxy that rewrites `Host` |
 | `YARD_TRUSTED_PROXIES`  | _(unset)_     | IPs/CIDRs (comma- or space-separated; invalid entries logged and skipped) whose `X-Forwarded-For` (login throttle) and `X-Forwarded-Host` (cross-origin guard) are believed. See [docs/SECURITY.md](../../docs/SECURITY.md#client-addresses-behind-the-hose-valve-or-a-proxy) |
 | `YARD_TRUSTED_ORIGINS`  | _(unset)_     | extra Origins (e.g. `https://yard.example.com`) accepted on state-changing requests, for a reverse proxy that rewrites `Host` |
+| `YARD_NOTIFY_PROXY`     | _(unset)_     | `true` sends notifications through `HTTP_PROXY`/`HTTPS_PROXY`, checking each target before it goes to the proxy; otherwise the proxy variables are ignored for notifications ([docs/SECURITY.md](../../docs/SECURITY.md)) |
 | `YARD_LINK_HOSE` / `_VALVE` / `_BUCKET` | _(unset)_ | cross-tool nav links: a full URL, or a bare port resolved against the host the browser used |
 
 ## Ingest delivery

@@ -139,16 +139,19 @@ never back into config or commands.
   A tail outlives the request that opened it, so it re-checks its session
   every 30 seconds and closes once the session is gone: logout, a password
   change, or an admin disabling, demoting or resetting the account.
-- **SSRF via notifications** — webhook/Slack/Teams targets (valve notify
-  nodes and bucket channels) are fetched without following redirects (a
-  3xx counts as a failure), and errors carry only the status code or the
-  transport error, never the response body or the URL. The address is
-  checked after DNS resolution, at connect time: loopback, link-local
-  (including cloud metadata at `169.254.169.254`), unspecified and
-  multicast destinations are refused; the valve also refuses `0.0.0.0/8`
-  and the `fd00:ec2::254` and `100.100.100.200` metadata addresses. RFC 1918
-  addresses are allowed on purpose: on-prem chat and ticketing systems live
-  there. Bucket SMTP sends are bounded at 20 seconds end to end; mail
+- **SSRF via notifications** — every notification delivery (valve notify
+  nodes; bucket webhook, Slack/Teams and SMTP channels) goes through one
+  outbound guard, `apps/shared/netguard`. HTTP targets are fetched without
+  following redirects (a 3xx counts as a failure), and errors carry only the
+  status code or the transport error, never the response body or the URL.
+  The address is checked after DNS resolution, at connect time: loopback,
+  unspecified (`0.0.0.0/8`, `::`), link-local (including cloud metadata at
+  `169.254.169.254`) and multicast destinations are refused, and so are the
+  `fd00:ec2::254` and `100.100.100.200` metadata addresses. RFC 1918
+  addresses are allowed on purpose: on-prem chat, ticketing and mail
+  systems live there. `HTTP_PROXY`/`HTTPS_PROXY` is ignored for
+  notifications unless `YARD_NOTIFY_PROXY=true` (see the limitation
+  below). Bucket SMTP sends are bounded at 20 seconds end to end; mail
   headers are stripped of CR/LF and control characters, so device text
   can't add headers; and the `none` TLS mode never upgrades to STARTTLS
   (`starttls`, the default, upgrades when the server offers it).
@@ -200,14 +203,15 @@ never back into config or commands.
   escaping above only apply when a config is generated. A config produced
   by an older version runs until the next Apply, so **re-apply the graph
   after upgrading the valve**.
-- **Outbound proxies bypass the notification address check.** If
-  `HTTP_PROXY`/`HTTPS_PROXY` is set in a tool's environment, webhook
-  requests go through the proxy, and only the proxy's address is checked;
-  the proxy decides what the final destination may be. The shipped
-  deployments set no proxy.
-- **SMTP channels aren't address-filtered.** Webhook targets get the dial
-  check above; a bucket SMTP channel connects to whatever host and port an
-  analyst or admin configures.
+- **Proxied notifications are checked on a best-effort basis.**
+  Notification clients ignore `HTTP_PROXY`/`HTTPS_PROXY` unless
+  `YARD_NOTIFY_PROXY=true` is set on the tool. With it, the tool resolves
+  each target host itself and refuses it if any address is blocked, before
+  handing the request to the proxy; the proxy's own address must be
+  allowed too. The proxy resolves the name again, so a name that changes
+  its answer between the two lookups can still reach a blocked address as
+  seen from the proxy. A target the tool cannot resolve is refused. The
+  shipped deployments set no proxy.
 - **Static default database password.** For compatibility with existing
   volumes, Postgres still defaults to the password `syslog_bucket`. It is
   reachable only from the bucket's container on an internal network, but

@@ -30,16 +30,15 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
+	"github.com/syslog-yard/shared/netguard"
 	"github.com/syslog-yard/syslog-valve/internal/graph"
 )
 
 const (
 	maxPayload  = 16 * 1024
 	httpTimeout = 10 * time.Second
-	dialTimeout = 5 * time.Second
 	logRing     = 100
 	// queueSize is how many messages per node may wait for delivery; more
 	// are dropped (and counted) rather than blocking the socket reader.
@@ -116,73 +115,17 @@ func newDispatcher(allowLoopback bool) *Dispatcher {
 	}
 }
 
-// newClient builds the delivery client with SSRF guards: redirects are not
-// followed, and connections to loopback, link-local (cloud metadata),
-// unspecified and multicast addresses are refused at dial time, after DNS
-// resolution. Private RFC 1918 ranges stay reachable — the usual webhook
-// sink is a container on the same network.
+// newClient builds the delivery client on the suite's shared outbound
+// guard (apps/shared/netguard): redirects are not followed, and loopback,
+// link-local, unspecified, multicast and cloud-metadata destinations are
+// refused at dial time, after DNS resolution. RFC 1918 ranges stay
+// reachable (the usual webhook sink is a container on the same network).
+// HTTP(S)_PROXY is used only with YARD_NOTIFY_PROXY=true, and then the
+// target is checked before it is handed to the proxy.
 func newClient(allowLoopback bool) *http.Client {
-	dialer := &net.Dialer{
-		Timeout: dialTimeout,
-		Control: func(_, address string, _ syscall.RawConn) error {
-			return checkDialAddr(address, allowLoopback)
-		},
-	}
-	return &http.Client{
-		Timeout: httpTimeout,
-		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
-			DialContext:           dialer.DialContext,
-			TLSHandshakeTimeout:   dialTimeout,
-			ResponseHeaderTimeout: httpTimeout,
-			MaxIdleConns:          16,
-			IdleConnTimeout:       90 * time.Second,
-		},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
-}
-
-// Cloud metadata endpoints outside the link-local range.
-var metadataIPs = []net.IP{
-	net.ParseIP("fd00:ec2::254"),   // AWS IMDS over IPv6
-	net.ParseIP("100.100.100.200"), // Alibaba Cloud
-}
-
-func checkDialAddr(address string, allowLoopback bool) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return err
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return fmt.Errorf("refusing to connect to non-IP address %q", host)
-	}
-	if reason := blockedIP(ip, allowLoopback); reason != "" {
-		return fmt.Errorf("refusing to connect to %s address %s", reason, ip)
-	}
-	return nil
-}
-
-func blockedIP(ip net.IP, allowLoopback bool) string {
-	switch {
-	case ip.IsLoopback():
-		if allowLoopback {
-			return ""
-		}
-		return "loopback"
-	case ip.IsUnspecified(), ip.To4() != nil && ip.To4()[0] == 0:
-		return "unspecified"
-	case ip.IsLinkLocalUnicast(), ip.IsLinkLocalMulticast():
-		return "link-local"
-	case ip.IsMulticast():
-		return "multicast"
-	}
-	for _, m := range metadataIPs {
-		if ip.Equal(m) {
-			return "cloud metadata"
-		}
-	}
-	return ""
+	g := netguard.New()
+	g.AllowLoopback = allowLoopback
+	return g.HTTPClient(httpTimeout)
 }
 
 // SetGraph refreshes the notify targets from an applied graph. Existing
@@ -364,7 +307,7 @@ func (d *Dispatcher) send(ctx context.Context, t targetConfig, text string, even
 		if errors.As(err, &ue) {
 			err = ue.Err
 		}
-		return fmt.Errorf("delivery failed: %v", err)
+		return fmt.Errorf("delivery failed: %w", err)
 	}
 	// Drain a little so the connection can be reused; never echo the
 	// body back to the API or logs.

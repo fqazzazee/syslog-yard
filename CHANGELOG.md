@@ -6,6 +6,30 @@ All notable changes to syslog-yard are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `YARD_NOTIFY_PROXY=true` (bucket, valve) sends notifications through
+  `HTTP_PROXY`/`HTTPS_PROXY`. Each target is resolved and checked against
+  the outbound guard before it goes to the proxy. [#61]
+
+### Changed
+
+- bucket: a suppressed entry never notifies. When any matching rule
+  suppresses an entry, the notifications queued for it by `notify` actions
+  are dropped, whatever the rule and action order. Before, suppressed
+  entries still alerted. [#28]
+- All tools parse `YARD_TRUSTED_PROXIES` with one shared parser: entries may
+  be separated by commas or spaces, and an invalid entry is logged and
+  skipped. Before, the bucket accepted commas only and ignored the whole
+  list if one entry was invalid. [#62]
+- bucket and valve: one outbound guard (`apps/shared/netguard`) for all
+  notification delivery. The bucket now also refuses `0.0.0.0/8` and the
+  `fd00:ec2::254` and `100.100.100.200` metadata addresses, and applies the
+  guard to SMTP channels, which had no address filtering. A loopback or
+  link-local SMTP host now fails with "destination address not allowed".
+  `HTTP_PROXY`/`HTTPS_PROXY` are no longer used for notifications unless
+  `YARD_NOTIFY_PROXY=true`. [#61]
+
 ### Fixed
 
 - valve and bucket: syslog listeners detect RFC 5424 per message. Before,
@@ -21,17 +45,6 @@ All notable changes to syslog-yard are recorded here. The format follows
   and subtype) logs get the same treatment, and any other headerless
   `key=value` line gets its first pair back instead of losing it to App.
   Already-stored entries keep their old values. [#26]
-
-### Changed
-
-- bucket: a suppressed entry never notifies. When any matching rule
-  suppresses an entry, the notifications queued for it by `notify` actions
-  are dropped, whatever the rule and action order. Before, suppressed
-  entries still alerted. [#28]
-- All tools parse `YARD_TRUSTED_PROXIES` with one shared parser: entries may
-  be separated by commas or spaces, and an invalid entry is logged and
-  skipped. Before, the bucket accepted commas only and ignored the whole
-  list if one entry was invalid. [#62]
 
 ## [0.1.1] - 2026-11-05
 
@@ -241,4 +254,5 @@ Released under the MIT License; see the commit history for its contents.
 [#57]: https://github.com/fqazzazee/syslog-yard/issues/57
 [#58]: https://github.com/fqazzazee/syslog-yard/issues/58
 [#59]: https://github.com/fqazzazee/syslog-yard/issues/59
+[#61]: https://github.com/fqazzazee/syslog-yard/issues/61
 [#62]: https://github.com/fqazzazee/syslog-yard/issues/62

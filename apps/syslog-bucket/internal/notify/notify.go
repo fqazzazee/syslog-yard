@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/syslog-yard/shared/netguard"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
 
@@ -47,9 +48,10 @@ type Dispatcher struct {
 	client *http.Client
 	queue  chan job
 
-	// allowLoopback disables the webhook dialer's loopback/link-local guard;
-	// tests set it to reach httptest servers.
-	allowLoopback bool
+	// guard is the shared outbound guard (apps/shared/netguard) for every
+	// channel kind: webhook and Slack/Teams through client, SMTP through
+	// guard.Dialer. Tests set guard.AllowLoopback to reach httptest servers.
+	guard *netguard.Guard
 
 	mu       sync.RWMutex
 	channels map[int64]store.Channel
@@ -85,7 +87,8 @@ func New(st *store.Store) *Dispatcher {
 		drops:    map[dropKey]int{},
 	}
 	d.deliverCtx, d.cancelDeliver = context.WithCancel(context.Background())
-	d.client = d.newHTTPClient()
+	d.guard = netguard.New()
+	d.client = d.guard.HTTPClient(httpTimeout)
 	return d
 }
 
