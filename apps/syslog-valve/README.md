@@ -72,8 +72,12 @@ error in its panel.
   and the notify targets from that graph and records the result as a new
   history entry. Graphs archived by older versions are sanitized on load
   (control characters become spaces).
-- **Request limits:** graph saves are capped at 1 MiB and notify tests at
-  64 KiB; larger bodies get **413**.
+- **Request limits:** graph saves are capped at 1 MiB and every other
+  state-changing request at 64 KiB, including the ones that take no body;
+  larger bodies get **413** with `{"error": "..."}`.
+- **Public certificate:** `GET /api/certs/pem` serves the certificate of the
+  TLS IN ports as PEM (never the key) and needs no session, so senders can
+  pin it. syslog-hose's **Trust valve's certificate** uses it.
 - **Notify nodes** default to 60 deliveries/min (0 or empty means the
   default; there's no unlimited setting), with a 32-message queue per node.
   Per-node counters are at `GET /api/notify/stats`. See

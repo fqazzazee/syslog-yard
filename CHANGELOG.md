@@ -6,6 +6,28 @@ All notable changes to syslog-yard are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- hose: TLS jobs can trust a CA bundle or pin the receiver's certificate
+  (PEM pasted into the job, checked on save; private keys refused) and
+  override the server name the certificate is checked against, so
+  `tlsInsecure` is no longer the only way to reach a self-signed receiver.
+  A **Trust valve's certificate** button pins syslog-valve's certificate in
+  one step: the hose server fetches it from `HOSE_VALVE_URL` (set to
+  `http://syslog-valve:8081` in the compose and Quadlet stacks) through the
+  hose's `GET /api/valve-cert`. Existing `jobs.json` files load unchanged
+  ([#34]).
+- valve: `GET /api/certs/pem` serves the public certificate of the TLS IN
+  ports (never the key) without a session ([#34]).
+
+### Fixed
+
+- hose and valve: every state-changing route caps its request body and
+  answers an oversized one with 413 and a JSON error. Hose preset saves over
+  1 MiB used to get 400, and the valve capped only graph saves and notify
+  tests. Default cap 64 KiB; hose job saves 128 KiB, preset saves and
+  previews about 1 MiB, valve graph saves 1 MiB ([#63]).
+
 ## [0.1.1] - 2026-11-05
 
 ### Security
@@ -189,6 +211,7 @@ Released under the MIT License; see the commit history for its contents.
 [#31]: https://github.com/fqazzazee/syslog-yard/issues/31
 [#32]: https://github.com/fqazzazee/syslog-yard/issues/32
 [#33]: https://github.com/fqazzazee/syslog-yard/issues/33
+[#34]: https://github.com/fqazzazee/syslog-yard/issues/34
 [#35]: https://github.com/fqazzazee/syslog-yard/issues/35
 [#36]: https://github.com/fqazzazee/syslog-yard/issues/36
 [#37]: https://github.com/fqazzazee/syslog-yard/issues/37
@@ -213,3 +236,4 @@ Released under the MIT License; see the commit history for its contents.
 [#57]: https://github.com/fqazzazee/syslog-yard/issues/57
 [#58]: https://github.com/fqazzazee/syslog-yard/issues/58
 [#59]: https://github.com/fqazzazee/syslog-yard/issues/59
+[#63]: https://github.com/fqazzazee/syslog-yard/issues/63
