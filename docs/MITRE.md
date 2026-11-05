@@ -35,10 +35,10 @@ anything mapped to T1190".
 
 ### The ATT&CK matrix view
 
-The sidebar's **MITRE ATT&CK** (under **Frameworks**) lays the mapped techniques out as the
-familiar kill-chain: one column per tactic, technique cards showing how many
+**MITRE ATT&CK** in the bucket's side nav (`#/attack`, also a card on the
+**Frameworks** page) lays the mapped techniques out as the familiar kill-chain: one column per tactic, technique cards showing how many
 entries matched in the current time window (the matrix respects the filter
-bar). Click a technique to open its entries. The catalog is served at
+bar). Click a technique to open its entries (`#/attack/<technique>`). The catalog is served at
 `GET /api/mitre`; per-technique counts at `GET /api/mitre/summary`.
 
 ## Sorting & device class (bucket)
@@ -88,9 +88,10 @@ mapping alongside ATT&CK.
 - **Map** — at ingest, `internal/otmap` stamps each entry with the Claroty
   alert-type codes it matches (stored in `entries.ot`), keyed off the CEF alert
   name. `internal/classify` marks these entries `device_class = ot`.
-- **View** — the sidebar's **ICS/OT Alerts** (under **Frameworks**) opens a matrix with a **Security** and
+- **View** — **ICS/OT Alerts** in the side nav (`#/ot`, also a card on the
+  **Frameworks** page) opens a matrix with a **Security** and
   an **Integrity** column; each alert type shows its count in the current
-  window and drills into the matching entries. An `ot` condition leaf makes the
+  window and drills into the matching entries (`#/ot/<alert>`). An `ot` condition leaf makes the
   codes usable in buckets, rules and search, exactly like `mitre`.
 
 | Class | Alert types |
@@ -129,16 +130,18 @@ Shipped:
   (Safety-critical → Low), so you can see how much of the stream comes from
   OT/ICS vs. lower-sensitivity sources.
 
-Each opens from the sidebar's **Frameworks** section — alongside MITRE ATT&CK
-and ICS/OT Alerts — as a matrix (counts in the current window; click a cell for
-the entries). The crosswalks are opinionated and coarse — a standards-aligned
+Each is listed under **Frameworks** in the bucket's side nav and on the
+**Frameworks** page (`#/frameworks`, which also links MITRE ATT&CK and ICS/OT
+Alerts), and opens as a matrix at `#/frameworks/<fw>` (counts in the current
+window; click a cell for the entries, at `#/frameworks/<fw>/<item>`). The crosswalks are opinionated and coarse — a standards-aligned
 overview of what the sensors see, not an audit-grade control assessment.
 Catalogs are served at `GET /api/frameworks`.
 
 ### Custom org frameworks
 
-Admins can define their own framework in the UI (the **+** on the Frameworks
-sidebar section): a name, a flat list of items, and per item the ATT&CK
+Admins can define their own framework in the UI (the **+** beside the
+**Frameworks** heading in the side nav, or **New custom framework** on the
+Frameworks page): a name, a flat list of items, and per item the ATT&CK
 techniques / OT codes / device classes it covers, with a free-text group label
 for its column. Custom frameworks are stored in Postgres (`custom_frameworks`,
 one JSON document per framework) and merged with the built-ins under a

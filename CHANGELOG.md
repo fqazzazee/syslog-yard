@@ -110,6 +110,16 @@ All notable changes to syslog-yard are recorded here. The format follows
 - deploy: `scripts/yardctl up` pulls fresh base images; `status`, `smoke` and
   `reset-admin` also work with the quadlet units ([#42]).
 - deploy: the bucket gets a 30 s stop timeout so shutdown can drain.
+- Web UI: hose, valve and bucket share one app shell: a common top bar (tool
+  switcher, theme, About & help, an account menu with your name and role), a
+  side nav listing every tool's pages that collapses to a rail or a drawer, and
+  hash deep links into every page and selection; the bucket's sidebar moved
+  into the nav, with list pages for buckets, rules and frameworks, and the
+  valve's History became its own page. Text is WCAG AA in both themes, with
+  keyboard support (a skip link, focus handling in dialogs, log-table triage
+  keys), and all three SPAs run React 19 and Vite 8. Polling
+  pauses while a tab is hidden and live-tail updates are batched per frame;
+  long tables are not virtualized yet ([#54], [#55], [#56], [#57]).
 
 ### Added
 
@@ -163,5 +173,9 @@ Released under the MIT License; see the commit history for its contents.
 [#43]: https://github.com/fqazzazee/syslog-yard/issues/43
 [#44]: https://github.com/fqazzazee/syslog-yard/issues/44
 [#52]: https://github.com/fqazzazee/syslog-yard/issues/52
+[#54]: https://github.com/fqazzazee/syslog-yard/issues/54
+[#55]: https://github.com/fqazzazee/syslog-yard/issues/55
+[#56]: https://github.com/fqazzazee/syslog-yard/issues/56
+[#57]: https://github.com/fqazzazee/syslog-yard/issues/57
 [#58]: https://github.com/fqazzazee/syslog-yard/issues/58
 [#59]: https://github.com/fqazzazee/syslog-yard/issues/59

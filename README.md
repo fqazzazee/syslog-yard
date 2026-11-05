@@ -68,6 +68,10 @@ Just three small containers and a browser.
 - **Easy to operate** — three small containers, one compose file, a `yardctl`
   helper (prereqs, firewall, smoke test, and `service-install` to start the
   suite at boot), dark/light themes, free for home labs and internal company use.
+- **One UI for the whole suite** — the three tools share a top bar, a side nav
+  with every tool's pages, and deep links between them. Text meets WCAG AA
+  contrast in both themes, the navigation, menus, dialogs, and the bucket's log
+  table work from the keyboard, and each page has a skip link.
 
 ## Why syslog-yard, and how it compares
 
@@ -124,9 +128,10 @@ scripts/yardctl service-install  # optional: start the suite at boot (systemd)
 ```
 
 The UIs live at hose http://localhost:8080, valve http://localhost:8081, and
-bucket http://localhost:8082. Each one has a small **yard** nav that links to the
-other two. All three share a single sign-in: accounts are defined in the bucket,
-which acts as the yard's identity provider, so signing in at any UI covers the
+bucket http://localhost:8082. They share one app shell, so a tool switcher in
+the top bar and a side nav listing every tool's pages take you between them
+(see [Navigation and deep links](#navigation-and-deep-links)). All three share
+a single sign-in: accounts are defined in the bucket, which acts as the yard's identity provider, so signing in at any UI covers the
 others. On first start the bucket creates an `admin` account with a random
 password that it prints once in its log. Grab it with
 `scripts/yardctl logs syslog-bucket | grep -i password`, or set a new one any
@@ -154,9 +159,9 @@ variables are listed in its README ([hose](apps/syslog-hose/README.md#configurat
 [valve](apps/syslog-valve/README.md#environment),
 [bucket](apps/syslog-bucket/README.md#environment)).
 
-To send external syslog in, add an **External IN** block in the valve (toolbar
-button — a source on container port 6514, udp+tcp, published as host port
-**6514**), wire it, and Apply. Then from another machine:
+To send external syslog in, add an **External IN** block in the valve (**Add
+node** menu on the Flow page — a source on container port 6514, udp+tcp,
+published as host port **6514**), wire it, and Apply. Then from another machine:
 `logger -n <yard-host> -P 6514 -T -p user.err "hello yard"` (`-T` tcp, `-d` udp).
 The block's *enabled* toggle is the "allow external sources" switch: untick and
 Apply to shut external intake off without losing the wiring. Internal hose
@@ -229,6 +234,43 @@ auto-tagged by rules:
 
 ![syslog-bucket](docs/img/syslog-bucket.png)
 
+## Navigation and deep links
+
+The hose, valve, and bucket are separate apps on separate ports, but they share
+one shell:
+
+- **Top bar:** a navigation toggle, the syslog-yard brand, a switcher between
+  hose, valve, and bucket, a theme toggle, **About & help**, and the account
+  menu (your name and role; **Account…** to change your password, **Users…**
+  for admins, **Settings…** for admins in the bucket, **Sign out**).
+- **Side nav:** every tool with its pages. On wide screens it collapses to an
+  icon rail (remembered per tool; the valve starts collapsed to leave room for
+  the canvas). Below 900 px it becomes a drawer. In the bucket the expanded nav
+  also lists frameworks, buckets, tags, rules, and notification channels, with
+  their add and edit buttons.
+
+Every page has a hash route, so you can bookmark it, share it, or use the
+browser's back and forward buttons:
+
+| Tool | Routes |
+|------|--------|
+| hose | `#/jobs`, `#/presets`, `#/presets/<name>`, `#/tail` |
+| valve | `#/flow`, `#/history`, `#/tail` |
+| bucket | `#/logs`, `#/buckets`, `#/buckets/<id>`, `#/tags/<id>`, `#/attack`, `#/attack/<technique>`, `#/ot`, `#/ot/<alert>`, `#/network`, `#/frameworks`, `#/frameworks/<fw>`, `#/frameworks/<fw>/<item>`, `#/rules` |
+
+An unknown route falls back to the tool's first page. Links into another tool
+are built from the base URLs the current tool's server reports in
+`GET /api/hints` (`linkHose`, `linkValve`, `linkBucket`, set from
+`YARD_LINK_HOSE` / `_VALVE` / `_BUCKET`; a bare port resolves against the host
+the browser is on). A tool with no links
+configured, such as a standalone run, shows only itself.
+
+The UI meets WCAG AA contrast in both themes and supports the keyboard: a
+**Skip to content** link comes first, menus and tabs take the arrow keys,
+dialogs trap focus and return it on close, Escape closes the nav drawer, and
+the bucket's log table has triage keys ([details](apps/syslog-bucket/README.md#web-ui)).
+Animations are turned off under `prefers-reduced-motion`.
+
 ## Documentation
 
 | Doc | Covers |
@@ -298,8 +340,8 @@ run the Postgres ones, point `BUCKET_TEST_DSN` at a scratch server (see
   retention compiles to logrotate; in-stream notify nodes (webhook, Slack/Teams)
   that alert on the raw flow before storage; a live tail of everything entering
   the valve; live per-wire throughput on the canvas (msgs/sec from
-  `syslog-ng-ctl stats`); config version history with previews; and graph
-  import/export.
+  `syslog-ng-ctl stats`); a History page of applied configs with previews and
+  rollback; and graph import/export.
 - **syslog-bucket**: syslog-ng-fronted ingest into Postgres that retries
   database errors and pushes back on syslog-ng instead of dropping, and
   drains its queue on shutdown; email-style 3-pane
@@ -322,7 +364,9 @@ run the Postgres ones, point `BUCKET_TEST_DSN` at a scratch server (see
   ranges, and admin-defined CIDR groups, with feed snapshots cached in Postgres
   so a feed refresh retroactively flags history and offline starts keep
   working; curated default buckets for a SOC triage workload; rules that condition and tag on MITRE techniques; device-class
-  tagging and sortable, filterable columns; notifications (webhook, Slack/Teams,
+  tagging and sortable, filterable columns; keyboard triage in the log table;
+  whole-word search with `or`, `-exclusions` and `"phrases"`; an ingest-health
+  badge; notifications (webhook, Slack/Teams,
   SMTP) fired by a notify rule action; a live tail over WebSocket; local accounts
   plus OIDC sign-in with admin/analyst/viewer roles; and buckets shareable
   per-user, view-only or editable.
@@ -359,11 +403,14 @@ a real lab or a small deployment today. What's in place:
   6514, udp+tcp) with an enable toggle, separate from internal yard traffic.
 - Notifications to webhook, Slack/Teams, and SMTP, from the bucket and in-stream
   on the valve ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)).
-- A unified, icon-driven UI across the three tools, with a built-in About/Help
-  panel (the `?` button) and a dark/light theme toggle (remembered per browser)
-  in every top bar.
+- One app shell across the three tools: the same top bar (navigation toggle,
+  tool switcher, a dark/light theme toggle remembered per browser, the About &
+  help dialog, and the account menu), a side nav with every tool's pages, and
+  hash deep links into any page ([Navigation and deep links](#navigation-and-deep-links)).
+  WCAG AA contrast in both themes, keyboard support, and a skip link.
 - Admin-configurable OIDC single sign-on and session idle-timeout, set from the
-  bucket's Settings panel and applied without a restart ([docs/AUTH.md](docs/AUTH.md)).
+  bucket's account menu (**Settings…**) and applied without a restart
+  ([docs/AUTH.md](docs/AUTH.md)).
 
 A few things are still on the radar:
 

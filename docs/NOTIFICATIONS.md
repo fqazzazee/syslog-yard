@@ -15,8 +15,10 @@ severity/program/regex/MITRE technique on the spot.
 
 ## Channels
 
-Manage channels from the bucket sidebar (**Notifications → ＋**). Each channel
-has a kind, kind-specific config, an on/off switch, and a **max/min**
+Manage channels from the bucket's side nav: the **＋** beside the
+**Notifications** heading (or a click on a channel's name) opens the
+**Notification channels** dialog. The heading shows when the nav is expanded;
+on a phone, open the nav drawer first. Each channel has a kind, kind-specific config, an on/off switch, and a **max/min**
 rate cap (0 = unlimited) that guards against alert storms. Analysts and admins
 can manage channels; viewers cannot.
 
@@ -70,7 +72,7 @@ mapped to T1190, page the SOC channel."
 
 ## Valve notify node (in-stream)
 
-Add a **Notify** node from the valve palette and wire a filter's `match` (or
+Add a **Notify** node from the valve's **Add node** menu (Flow page) and wire a filter's `match` (or
 `else`) port into it. Matched messages are delivered in real time by the
 valve's Go app — syslog-ng duplicates them to an internal datagram socket
 tagged with the node, and the dispatcher POSTs them: Slack/Teams get the same
@@ -88,7 +90,9 @@ instead of one log line per drop, the next delivery records a single
 `dropped` entry summarizing how many were lost since the previous one.
 Recent attempts are kept in memory (`GET /api/notify/log`), and
 `GET /api/notify/stats` returns per-node counters since the valve started
-(`node`, `ratePerMin`, `sent`, `failed`, `dropped`), keyed by node id.
+(`node`, `ratePerMin`, `sent`, `failed`, `dropped`), keyed by node id. The
+node's panel on the canvas shows the same sent / failed / dropped counts and
+the limit in effect.
 
 The valve deliberately offers **webhook and Slack/Teams only, not SMTP**: the
 flow graph is inspected, exported, and archived in version history, which is

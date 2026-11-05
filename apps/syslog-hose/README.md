@@ -25,6 +25,12 @@ testing parsers, load-testing pipelines, demos, and lab work.
   matches the setting; the configured rate, and the effective rate after jitter or
   burst multipliers, are capped at 50,000 events/s.
 - **Live tail** — watch exactly what each job is emitting, in the browser.
+- **The shared yard UI** — Jobs (`#/jobs`), Presets (`#/presets`, or
+  `#/presets/<name>` for one preset) and Live tail (`#/tail`) are pages of the
+  suite's app shell, so the other tools can link straight to them (see
+  [Navigation and deep links](../../README.md#navigation-and-deep-links)). The
+  Jobs entry in the side nav shows how many jobs are running, and a collapsible
+  tail sits under the job cards (closed by default on phones).
 - **Boring ops** — one ~20 MB container, no database, runs as non-root, config
   persists as flat files in one volume, jobs marked *autostart* resume on boot.
 
@@ -47,7 +53,7 @@ git clone <repo-url> && cd syslog-yard/apps/syslog-hose
 docker compose up -d --build
 ```
 
-Open **http://localhost:8080**, create a job, point it at your collector's IP:port, hit ▶.
+Open **http://localhost:8080**, create a job (**New job**), point it at your collector's IP:port, and press **Start**.
 
 ### Podman
 
@@ -190,7 +196,7 @@ simulate a whole fleet of differently named devices.
 ## Building from source
 
 ```bash
-make build        # builds web UI (node 20+) then the Go binary (go 1.26+)
+make build        # builds web UI (node 22+) then the Go binary (go 1.26+)
 make test         # go test ./...
 HOSE_DATA=./data ./syslog-hose
 ```

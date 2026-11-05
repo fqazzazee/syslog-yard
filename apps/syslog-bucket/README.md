@@ -45,6 +45,37 @@ Ports (host side, remap in `deploy/docker-compose.yml` as needed):
 > -P 5514 -T …`), or run the stack on a native engine (`podman compose`,
 > rootful dockerd) when you need UDP.
 
+## Web UI
+
+The bucket uses the suite's shared app shell (top bar, tool switcher, side
+nav; see [Navigation and deep links](../../README.md#navigation-and-deep-links)),
+with violet as its accent colour.
+
+- **Side nav.** Expanded, it lists All Logs, MITRE ATT&CK, ICS/OT Alerts and
+  Network, then the frameworks, buckets, tags, rules and (for analysts and
+  admins) notification channels, each heading with its add or manage button.
+  Collapsed to an icon rail it shows only the sections; on a phone it's a
+  drawer. The **Buckets**, **Rules** and **Frameworks** headings open list
+  pages (`#/buckets`, `#/rules`, `#/frameworks`).
+- **Account menu.** **Account…** and **Sign out** for everyone, **Users…**
+  and **Settings…** (single sign-on, session timeout) for admins.
+- **Every view is a link:** `#/logs`, `#/buckets/<id>`, `#/tags/<id>`,
+  `#/attack[/<technique>]`, `#/ot[/<alert>]`, `#/network`,
+  `#/frameworks/<fw>[/<item>]`.
+- **Keyboard triage.** In the log table, `j` / `k` or the arrow keys move
+  between rows, PageUp / PageDown jump 10 rows, Home / End go to the first
+  or last row, Enter (or Space) opens the entry, and Escape closes the
+  detail pane. While the pane is open it follows the keyboard selection.
+  Column headers are buttons, so sorting works from the keyboard too.
+- **Search** takes whole words (ANDed), `or`, `-word` to exclude, and
+  `"quoted phrases"` (see [Rules, search, and the API](#rules-search-and-the-api)).
+  On narrow screens only the search box shows until you open **Filters**, and
+  the log table drops its Pri, Host, App and Class columns as it narrows.
+- **Ingest health.** A badge in the page header reads `ingest ok`, the
+  number of dropped entries, `ingest backlog N%` (queue 80% full or more), or
+  `ingest retrying` (waiting out a database error). Hover it for the
+  counters from `GET /api/stats`.
+
 ## Environment
 
 | Variable                | Default       | Purpose                                  |
