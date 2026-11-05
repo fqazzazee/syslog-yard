@@ -37,6 +37,10 @@ export interface AppShellProps {
   // A richer navigation for the current tool, shown instead of its plain
   // section list while the nav is expanded (bucket: buckets, tags, rules…).
   navContent?: ReactNode;
+  // Extra icon entries for the current tool in the collapsed rail, after its
+  // sections: whatever navContent offers that no section reaches (bucket:
+  // tags, notification channels). Each entry carries its own label.
+  railContent?: ReactNode;
   // Theme changes, for components that need it in JS (valve's canvas).
   onThemeChange?: (t: Theme) => void;
   children: ReactNode;
@@ -198,25 +202,30 @@ export function AppShell(props: AppShellProps) {
                   <div className="nav-rich">{props.navContent}</div>
                 ) : (
                   (isCurrent || !rail) && (
-                    <ul className="nav-list">
-                      {t.sections.map((s) => {
-                        const active = isCurrent && s.id === section;
-                        return (
-                          <li key={s.id}>
-                            <a
-                              className={cx("nav-link", active && "active")}
-                              href={toolHref(tool, links, t.id, s.id)!}
-                              aria-current={active ? "page" : undefined}
-                              title={isCurrent ? s.label : `${s.label} — ${t.name}`}
-                            >
-                              <Icon name={s.icon} size={17} />
-                              <span className="nav-text">{s.label}</span>
-                              {isCurrent && props.sectionBadges?.[s.id]}
-                            </a>
-                          </li>
-                        );
-                      })}
-                    </ul>
+                    <>
+                      <ul className="nav-list">
+                        {t.sections.map((s) => {
+                          const active = isCurrent && s.id === section;
+                          return (
+                            <li key={s.id}>
+                              <a
+                                className={cx("nav-link", active && "active")}
+                                href={toolHref(tool, links, t.id, s.id)!}
+                                aria-current={active ? "page" : undefined}
+                                title={isCurrent ? s.label : `${s.label} — ${t.name}`}
+                              >
+                                <Icon name={s.icon} size={17} />
+                                <span className="nav-text">{s.label}</span>
+                                {isCurrent && props.sectionBadges?.[s.id]}
+                              </a>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                      {isCurrent && rail && props.railContent && (
+                        <div className="nav-rail-extra">{props.railContent}</div>
+                      )}
+                    </>
                   )
                 )}
               </div>

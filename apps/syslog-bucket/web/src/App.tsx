@@ -53,7 +53,7 @@ import NetView from "./components/NetView";
 import OTView from "./components/OTView";
 import RuleModal from "./components/RuleModal";
 import SettingsModal from "./components/SettingsModal";
-import Sidebar from "./components/Sidebar";
+import Sidebar, { SidebarRail } from "./components/Sidebar";
 import TagsModal from "./components/TagsModal";
 import { useLiveTail, useVisibleInterval } from "./hooks";
 import { parseRoute, pathFor } from "./routes";
@@ -562,6 +562,15 @@ function Workspace({
           onEditBucket={(bucket) => setModal({ kind: "bucket", bucket })}
           onEditRule={(rule) => setModal({ kind: "rule", rule })}
           onEditFramework={(framework) => setModal({ kind: "frameworkEditor", framework })}
+          onManageTags={() => setModal({ kind: "tags" })}
+          onManageChannels={() => setModal({ kind: "channels" })}
+        />
+      }
+      railContent={
+        <SidebarRail
+          tags={tags}
+          selection={page ? null : selection}
+          readOnly={readOnly}
           onManageTags={() => setModal({ kind: "tags" })}
           onManageChannels={() => setModal({ kind: "channels" })}
         />

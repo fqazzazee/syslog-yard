@@ -1,7 +1,20 @@
 // Menu is a button that opens a list of actions (WAI-ARIA menu button):
 // arrow keys / Home / End move between items, Escape closes and returns
 // focus to the button, a click outside or Tab closes it.
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+//
+// placement="right" opens the list beside the button as a flyout (the
+// collapsed nav rail). It is positioned fixed, so the rail's own scrolling
+// and overflow clipping don't cut it off.
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { Icon, type IconName } from "./Icon";
 import { cx } from "./ui";
 
@@ -21,6 +34,7 @@ export function Menu({
   className,
   triggerClassName,
   align = "end",
+  placement = "below",
 }: {
   trigger: ReactNode; // button content
   label?: string; // accessible name when the trigger has no text
@@ -28,12 +42,22 @@ export function Menu({
   className?: string;
   triggerClassName?: string;
   align?: "start" | "end";
+  placement?: "below" | "right";
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+  const [flyout, setFlyout] = useState<CSSProperties | undefined>(undefined);
+
+  useLayoutEffect(() => {
+    if (!open || placement !== "right" || !btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    // Beside the button, nudged up when it sits near the bottom edge.
+    const top = Math.max(8, Math.min(r.top, window.innerHeight - 240));
+    setFlyout({ top, left: r.right + 6, maxHeight: window.innerHeight - top - 8 });
+  }, [open, placement]);
 
   const itemEls = () => Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? []);
 
@@ -98,7 +122,8 @@ export function Menu({
       </button>
       {open && (
         <div
-          className={cx("menu-list", align === "start" && "menu-start")}
+          className={cx("menu-list", align === "start" && "menu-start", placement === "right" && "menu-flyout")}
+          style={placement === "right" ? flyout : undefined}
           role="menu"
           id={menuId}
           ref={listRef}

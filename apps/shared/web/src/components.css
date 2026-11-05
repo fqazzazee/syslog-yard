@@ -467,6 +467,14 @@ html.dialog-open {
   right: auto;
   left: 0;
 }
+.menu-list.menu-flyout {
+  position: fixed;
+  right: auto;
+  overflow-y: auto;
+}
+.menu-flyout [role="menuitem"] {
+  flex: none;
+}
 .menu-list [role="menuitem"] {
   justify-content: flex-start;
   width: 100%;

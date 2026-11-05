@@ -263,6 +263,12 @@ body,
 .nav-rail .nav-link.active::before {
   left: 0;
 }
+/* the current tool's extra rail entries (AppShell railContent) */
+.nav-rail-extra {
+  margin-top: 2px;
+  padding-top: 2px;
+  border-top: 1px solid var(--border);
+}
 
 /* narrow screens: the nav becomes an overlay drawer */
 .nav-narrow .yard-sidenav {

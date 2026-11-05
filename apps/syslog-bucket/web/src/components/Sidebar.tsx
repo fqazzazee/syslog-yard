@@ -2,7 +2,12 @@
 // place of the plain section list while the nav is expanded): views,
 // frameworks, buckets, tags, rules and notification channels, each with its
 // create/edit affordances. Views are hash links (see routes.ts).
+//
+// SidebarRail covers the collapsed icon rail, where the shell shows only the
+// bucket's sections: it adds what no section reaches (tags, the tag manager,
+// notification channels).
 import type { ReactNode } from "react";
+import { Menu, type MenuItem } from "../../../../shared/web/src/Menu";
 import { IconButton } from "../../../../shared/web/src/ui";
 import { hrefFor, type Page } from "./../routes";
 import type { Bucket, Channel, Framework, Rule, Selection, Tag, User } from "./../types";
@@ -239,5 +244,57 @@ export default function Sidebar({
         </>
       )}
     </div>
+  );
+}
+
+export function SidebarRail({
+  tags,
+  selection,
+  readOnly,
+  onManageTags,
+  onManageChannels,
+}: {
+  tags: Tag[];
+  selection: Selection | null;
+  readOnly: boolean;
+  onManageTags: () => void;
+  onManageChannels: () => void;
+}) {
+  const tagItems: MenuItem[] = tags.map((t) => ({
+    id: `tag-${t.id}`,
+    label: <TagChip tag={t} />,
+    title: `Logs tagged ${t.name}`,
+    onSelect: () => {
+      location.hash = hrefFor({ kind: "tag", id: t.id });
+    },
+  }));
+  if (!readOnly) tagItems.push({ id: "manage", label: "Manage tags…", icon: "tune", onSelect: onManageTags });
+  return (
+    <ul className="nav-list">
+      {tagItems.length > 0 && (
+        <li>
+          <Menu
+            label="Tags"
+            placement="right"
+            items={tagItems}
+            triggerClassName={`nav-link nav-button${selection?.kind === "tag" ? " active" : ""}`}
+            trigger={
+              <>
+                <Icon name="sell" size={17} />
+                <span className="nav-text">Tags</span>
+              </>
+            }
+          />
+        </li>
+      )}
+      {!readOnly && (
+        <li>
+          <button type="button" className="nav-link nav-button" title="Notification channels" onClick={onManageChannels}>
+            <Icon name="notifications" size={17} />
+            <span className="nav-text">Notification channels</span>
+          </button>
+        </li>
+      )}
+    </ul>
   );
 }
