@@ -5,11 +5,16 @@
 #   docker compose -f compose.yaml -f compose.host-net.yaml up -d
 #
 # Notes:
-# - The valve's IN ports now bind host ports directly (e.g. an IN port on
-#   514 binds host 514 — needs root, CAP_NET_BIND_SERVICE, or
-#   `sysctl net.ipv4.ip_unprivileged_port_start=0`; or just use 5514).
-# - Off yardnet, the valve reaches the bucket via the loopback port
-#   published below: point OUT ports at 127.0.0.1:5515.
+# - The valve's IN ports now bind host ports directly: its UI on 8081, the
+#   External IN block on 6514 (no PublishPort mapping in between). An IN
+#   port below 1024 (e.g. 514) binds host 514 — fine for rootful
+#   docker/podman (the valve keeps NET_BIND_SERVICE); rootless needs
+#   `sysctl net.ipv4.ip_unprivileged_port_start=514`. Or just use 6514.
+# - Off yardnet, container names don't resolve for the valve, so it
+#   reaches the rest of the yard through host-published ports instead:
+#     * OUT ports → bucket-syslog via the loopback port published below
+#       (127.0.0.1:5515);
+#     * sign-in (YARD_AUTH_URL) → the bucket UI's published port 8082.
 services:
   syslog-valve:
     network_mode: host
@@ -19,6 +24,7 @@ services:
       VALVE_ADDR: ":8081"
       VALVE_DATA: /data
       VALVE_SUGGESTED_FORWARD: "127.0.0.1:5515"
+      YARD_AUTH_URL: "http://127.0.0.1:8082"
 
   bucket-syslog:
     ports:
