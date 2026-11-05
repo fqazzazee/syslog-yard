@@ -18,9 +18,17 @@ export default function MitreView({ filters, selection, onSelectTechnique }: Pro
   const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // The catalog is static; a failed load is retried on the next filter change.
   useEffect(() => {
-    fetchMitre().then(setCatalog).catch((e) => setError(String(e)));
-  }, []);
+    if (catalog) return;
+    let stale = false;
+    fetchMitre()
+      .then((c) => !stale && setCatalog(c))
+      .catch((e) => !stale && setError(String(e)));
+    return () => {
+      stale = true;
+    };
+  }, [catalog, filters]);
 
   // Counts follow the filter bar (time range, host, …) but ignore any
   // technique/tactic selection so the whole matrix stays populated.
@@ -28,7 +36,11 @@ export default function MitreView({ filters, selection, onSelectTechnique }: Pro
     const base: Selection = selection.kind === "technique" || selection.kind === "mitre" ? { kind: "all" } : selection;
     let stale = false;
     fetchMitreSummary(filters, base)
-      .then((c) => !stale && setCounts(c))
+      .then((c) => {
+        if (stale) return;
+        setCounts(c);
+        setError(null);
+      })
       .catch((e) => !stale && setError(String(e)));
     fetchCoverage(filters, base)
       .then((c) => !stale && setCoverage(c))
@@ -51,11 +63,11 @@ export default function MitreView({ filters, selection, onSelectTechnique }: Pro
 
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
-  if (error) return <div className="error">{error}</div>;
-  if (!catalog) return <div className="mitre-view empty">Loading ATT&CK matrix…</div>;
+  if (!catalog) return error ? <div className="error">{error}</div> : <div className="mitre-view empty">Loading ATT&CK matrix…</div>;
 
   return (
     <div className="mitre-view">
+      {error && <div className="error">{error}</div>}
       <div className="mitre-head">
         <p className="mitre-intro">
           Events mapped to MITRE ATT&CK at ingest — {total.toLocaleString()} technique hits in this window.

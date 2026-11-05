@@ -35,6 +35,7 @@ export default function FrameworkView({ framework, filters, selection, onSelectI
         setMitre(m);
         setOt(o);
         setKlass(c);
+        setError(null);
       })
       .catch((e) => !stale && setError(String(e)));
     fetchCoverage(filters, { kind: "framework", fw: framework.id })
@@ -71,10 +72,9 @@ export default function FrameworkView({ framework, filters, selection, onSelectI
 
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
-  if (error) return <div className="error">{error}</div>;
-
   return (
     <div className="mitre-view">
+      {error && <div className="error">{error}</div>}
       <div className="mitre-head">
         <p className="mitre-intro">
           {framework.name} — {framework.desc}. {total.toLocaleString()} mapped hits in this window (crosswalked from

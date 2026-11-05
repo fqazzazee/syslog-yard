@@ -60,3 +60,30 @@ export function useLiveTail(
 
   return open;
 }
+
+// useVisibleInterval calls fn now and every ms while the tab is visible. A
+// hidden tab stops polling; becoming visible again refreshes immediately and
+// restarts the interval. fn may change between renders without restarting;
+// a change in deps restarts (and immediately re-runs) it.
+export function useVisibleInterval(fn: () => void, ms: number, deps: unknown[] = []): void {
+  const cb = useRef(fn);
+  cb.current = fn;
+  useEffect(() => {
+    let timer: number | undefined;
+    const start = () => {
+      window.clearInterval(timer);
+      cb.current();
+      timer = window.setInterval(() => cb.current(), ms);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") window.clearInterval(timer);
+      else start();
+    };
+    if (document.visibilityState !== "hidden") start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [ms, ...deps]);
+}

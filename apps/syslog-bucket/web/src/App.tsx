@@ -54,7 +54,7 @@ import TagsModal from "./components/TagsModal";
 import UsersModal from "./components/UsersModal";
 import { YardNav } from "./components/YardNav";
 import { getTheme, toggleTheme } from "./theme";
-import { useLiveTail } from "./hooks";
+import { useLiveTail, useVisibleInterval } from "./hooks";
 
 // Seed for a rule pre-filled from an entry ("promote to detection").
 export interface RuleSeed {
@@ -381,12 +381,9 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
     }, []),
   );
 
-  useEffect(() => {
-    const refresh = () => fetchStats().then(setStats).catch(() => {});
-    refresh();
-    const id = setInterval(refresh, 10_000);
-    return () => clearInterval(id);
-  }, []);
+  useVisibleInterval(() => {
+    fetchStats().then(setStats).catch(() => {});
+  }, 10_000);
 
   const loadOlder = async () => {
     const current = entriesRef.current;

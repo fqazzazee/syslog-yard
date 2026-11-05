@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { fetchNetEntries, fetchNetSummary, putNetConfig, refreshNetFeeds } from "./../api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { fetchNetConfig, fetchNetEntries, fetchNetSummary, putNetConfig, refreshNetFeeds } from "./../api";
+import { useVisibleInterval } from "./../hooks";
 import type { Entry, Filters, NetConfig, NetSummary, User } from "./../types";
 import { Icon } from "./Icon";
 
@@ -35,21 +36,30 @@ export default function NetView({ filters, me }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [drill, setDrill] = useState<{ label: string; q: { class?: string; ip?: string } } | null>(null);
   const [drillEntries, setDrillEntries] = useState<Entry[] | null>(null);
+  const [drillError, setDrillError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const admin = me?.role === "admin";
+  // Only the latest summary request may land (the window can change, and a
+  // manual reload can overlap the poll).
+  const seq = useRef(0);
 
   const reload = useCallback(() => {
-    fetchNetSummary(minutes).then(setSum).catch((e) => setError(String(e)));
+    const n = ++seq.current;
+    fetchNetSummary(minutes)
+      .then((s) => {
+        if (n !== seq.current) return;
+        setSum(s);
+        setError(null);
+      })
+      .catch((e) => n === seq.current && setError(String(e)));
   }, [minutes]);
 
-  useEffect(() => {
-    setDrill(null);
-    reload();
-    const t = setInterval(reload, 30_000);
-    return () => clearInterval(t);
-  }, [reload]);
+  useEffect(() => setDrill(null), [minutes]);
+  // Poll while the tab is visible; keep the last good summary on a blip.
+  useVisibleInterval(reload, 30_000, [reload]);
 
   useEffect(() => {
+    setDrillError(null);
     if (!drill) {
       setDrillEntries(null);
       return;
@@ -58,7 +68,7 @@ export default function NetView({ filters, me }: Props) {
     setDrillEntries(null);
     fetchNetEntries({ ...drill.q, minutes })
       .then((es) => !stale && setDrillEntries(es))
-      .catch((e) => !stale && setError(String(e)));
+      .catch((e) => !stale && setDrillError(String(e)));
     return () => {
       stale = true;
     };
@@ -77,13 +87,15 @@ export default function NetView({ filters, me }: Props) {
     }
   };
 
-  if (error) return <div className="error">{error}</div>;
-  if (!sum) return <div className="mitre-view empty">Classifying recent traffic…</div>;
+  if (!sum) {
+    return error ? <div className="error">{error}</div> : <div className="mitre-view empty">Classifying recent traffic…</div>;
+  }
 
   const malTotal = sum.malicious.reduce((a, h) => a + h.count, 0);
 
   return (
     <div className="mitre-view net-view">
+      {error && <div className="error">{error}</div>}
       <div className="mitre-head">
         <p className="mitre-intro">
           {sum.scanned.toLocaleString()} entries classified by the addresses they mention
@@ -202,7 +214,9 @@ export default function NetView({ filters, me }: Props) {
               <Icon name="close" size={13} /> close
             </button>
           </h3>
-          {!drillEntries ? (
+          {drillError ? (
+            <div className="error">{drillError}</div>
+          ) : !drillEntries ? (
             <div className="muted">Loading…</div>
           ) : drillEntries.length === 0 ? (
             <div className="muted">No matching entries in this window.</div>
@@ -318,15 +332,13 @@ function NetConfigEditor({ onSaved }: { onSaved: () => void }) {
 
   useEffect(() => {
     if (!open || cfg) return;
-    import("./../api").then(({ fetchNetConfig }) =>
-      fetchNetConfig()
-        .then((r) => {
-          // custom ?? []: tolerate an older server answering null here.
-          setCfg({ ...r.config, custom: r.config.custom ?? [] });
-          setLabels(Object.fromEntries(r.feeds.map((f) => [f.id, f.label])));
-        })
-        .catch((e) => setErr(String(e))),
-    );
+    fetchNetConfig()
+      .then((r) => {
+        // custom ?? []: tolerate an older server answering null here.
+        setCfg({ ...r.config, custom: r.config.custom ?? [] });
+        setLabels(Object.fromEntries(r.feeds.map((f) => [f.id, f.label])));
+      })
+      .catch((e) => setErr(String(e)));
   }, [open, cfg]);
 
   const save = async () => {

@@ -19,9 +19,17 @@ export default function OTView({ filters, selection, onSelectAlert }: Props) {
   const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // The catalog is static; a failed load is retried on the next filter change.
   useEffect(() => {
-    fetchOt().then(setCatalog).catch((e) => setError(String(e)));
-  }, []);
+    if (catalog) return;
+    let stale = false;
+    fetchOt()
+      .then((c) => !stale && setCatalog(c))
+      .catch((e) => !stale && setError(String(e)));
+    return () => {
+      stale = true;
+    };
+  }, [catalog, filters]);
 
   // Counts follow the filter bar but ignore any OT selection so the whole
   // matrix stays populated.
@@ -29,7 +37,11 @@ export default function OTView({ filters, selection, onSelectAlert }: Props) {
     const base: Selection = selection.kind === "otalert" || selection.kind === "ot" ? { kind: "all" } : selection;
     let stale = false;
     fetchOtSummary(filters, base)
-      .then((c) => !stale && setCounts(c))
+      .then((c) => {
+        if (stale) return;
+        setCounts(c);
+        setError(null);
+      })
       .catch((e) => !stale && setError(String(e)));
     fetchCoverage(filters, base)
       .then((c) => !stale && setCoverage(c))
@@ -52,11 +64,11 @@ export default function OTView({ filters, selection, onSelectAlert }: Props) {
 
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
-  if (error) return <div className="error">{error}</div>;
-  if (!catalog) return <div className="mitre-view empty">Loading OT alerts…</div>;
+  if (!catalog) return error ? <div className="error">{error}</div> : <div className="mitre-view empty">Loading OT alerts…</div>;
 
   return (
     <div className="mitre-view">
+      {error && <div className="error">{error}</div>}
       <div className="mitre-head">
         <p className="mitre-intro">
           OT/ICS events mapped to Claroty-style alert types at ingest — {total.toLocaleString()} alerts in this window
