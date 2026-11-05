@@ -252,16 +252,24 @@ func (g *Graph) Sanitize() bool {
 	return changed
 }
 
-// Load parses a previously stored graph (the applied version, a history
-// entry): control characters are sanitized away rather than rejected so an
-// old graph keeps loading, then the result must pass Validate. sanitized
+// Decode parses a previously stored graph (the applied version, a history
+// entry) without validating it, replacing control characters in its text
+// fields so graphs saved by older, laxer versions stay loadable. sanitized
 // reports whether the stored data had to be changed.
-func Load(data []byte) (g *Graph, sanitized bool, err error) {
+func Decode(data []byte) (g *Graph, sanitized bool, err error) {
 	g = &Graph{}
 	if err := json.Unmarshal(data, g); err != nil {
 		return nil, false, fmt.Errorf("invalid graph JSON: %w", err)
 	}
-	sanitized = g.Sanitize()
+	return g, g.Sanitize(), nil
+}
+
+// Load is Decode followed by Validate.
+func Load(data []byte) (g *Graph, sanitized bool, err error) {
+	g, sanitized, err = Decode(data)
+	if err != nil {
+		return nil, false, err
+	}
 	if err := g.Validate(); err != nil {
 		return nil, sanitized, err
 	}

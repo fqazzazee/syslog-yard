@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,8 +36,15 @@ type Server struct {
 	rotator   *rotate.Rotator
 	tap       *tap.Tap
 	notify    *notify.Dispatcher
+	httpPort  int        // TCP port of this UI/API; sources may not take it
 	mu        sync.Mutex // serializes graph writes and applies
 }
+
+// Request body caps for the JSON endpoints.
+const (
+	maxGraphBody = 1 << 20
+	maxSmallBody = 1 << 16
+)
 
 // New builds the handler; guard enforces yard auth when YARD_AUTH_URL is
 // set (nil = open, standalone mode).
@@ -51,15 +59,7 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 		tap:       tp,
 		notify:    nd,
 	}
-	// Seed notify targets from the persisted graph so deliveries work after a
-	// restart even before the next apply.
-	if nd != nil {
-		if data, err := s.loadGraph(); err == nil {
-			if g, err := graph.Parse(data); err == nil {
-				nd.SetGraph(g)
-			}
-		}
-	}
+	s.syncActive()
 	s.mux.HandleFunc("GET /api/graph", s.getGraph)
 	s.mux.HandleFunc("PUT /api/graph", s.putGraph)
 	s.mux.HandleFunc("POST /api/apply", s.apply)
@@ -76,6 +76,7 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 	s.mux.HandleFunc("POST /api/certs/selfsigned", s.certGenerate)
 	s.mux.HandleFunc("GET /api/tail", s.tail)
 	s.mux.HandleFunc("GET /api/notify/log", s.notifyLog)
+	s.mux.HandleFunc("GET /api/notify/stats", s.notifyStats)
 	s.mux.HandleFunc("POST /api/notify/test", s.notifyTest)
 	s.mux.HandleFunc("POST /api/rotate", s.rotateNow)
 	s.mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -112,20 +113,46 @@ func (s *Server) getGraph(w http.ResponseWriter, _ *http.Request) {
 	w.Write(data)
 }
 
+// SetHTTPPort records the TCP port the valve's own HTTP server listens on,
+// so a graph can't put a syslog source on it.
+func (s *Server) SetHTTPPort(port int) {
+	s.mu.Lock()
+	s.httpPort = port
+	s.mu.Unlock()
+}
+
+// readBody reads a request body of at most limit bytes.
+func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, int, error) {
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	if err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			return nil, http.StatusRequestEntityTooLarge, fmt.Errorf("request body larger than %d bytes", limit)
+		}
+		return nil, http.StatusBadRequest, err
+	}
+	return data, 0, nil
+}
+
 // putGraph validates and saves the draft graph without applying it.
 func (s *Server) putGraph(w http.ResponseWriter, r *http.Request) {
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	data, code, err := readBody(w, r, maxGraphBody)
 	if err != nil {
-		httpError(w, http.StatusBadRequest, err)
+		httpError(w, code, err)
 		return
 	}
-	if _, err := graph.Parse(data); err != nil {
+	g, err := graph.Parse(data)
+	if err != nil {
 		httpError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := os.WriteFile(s.graphPath, data, 0o644); err != nil {
+	if err := s.checkDeployment(g); err != nil {
+		httpError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	if err := atomicWrite(s.graphPath, data); err != nil {
 		httpError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -146,56 +173,204 @@ func (s *Server) apply(w http.ResponseWriter, _ *http.Request) {
 		httpError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
-	for _, n := range g.Nodes {
+	act, err := s.activate(g, data)
+	if err != nil {
+		httpError(w, statusOf(err), err)
+		return
+	}
+	resp := map[string]any{"ok": true, "config": act.config, "logrotate": act.logrotate}
+	if act.warning != "" {
+		resp["warning"] = act.warning
+	}
+	writeJSON(w, resp)
+}
+
+// rollback re-activates the graph archived with a history entry. It goes
+// through the same path as apply (so codegen fixes and the current checks
+// apply to it) and is recorded as a new history entry.
+func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validHistoryID(id) {
+		httpError(w, http.StatusBadRequest, fmt.Errorf("invalid history id"))
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, err := s.sup.HistoryGraph(id)
+	if err != nil {
+		httpError(w, http.StatusNotFound, err)
+		return
+	}
+	g, sanitized, err := graph.Load(data)
+	if err != nil {
+		httpError(w, http.StatusUnprocessableEntity, fmt.Errorf("history entry %s cannot be restored: %w", id, err))
+		return
+	}
+	if sanitized {
+		if data, err = json.Marshal(g); err != nil {
+			httpError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	act, err := s.activate(g, data)
+	if err != nil {
+		httpError(w, statusOf(err), err)
+		return
+	}
+	resp := map[string]any{"ok": true}
+	if act.warning != "" {
+		resp["warning"] = act.warning
+	}
+	writeJSON(w, resp)
+}
+
+type activation struct {
+	config, logrotate string
+	// warning is set when the config was installed but syslog-ng wasn't
+	// running to confirm it.
+	warning string
+}
+
+// statusError carries the HTTP status an activation failure maps to.
+type statusError struct {
+	code int
+	err  error
+}
+
+func (e *statusError) Error() string { return e.err.Error() }
+func (e *statusError) Unwrap() error { return e.err }
+
+func fail(code int, err error) error { return &statusError{code: code, err: err} }
+
+func statusOf(err error) int {
+	var se *statusError
+	if errors.As(err, &se) {
+		return se.code
+	}
+	return http.StatusInternalServerError
+}
+
+// checkDeployment runs the checks that depend on this process rather than
+// the graph alone. Callers hold s.mu.
+func (s *Server) checkDeployment(g *graph.Graph) error {
+	return g.CheckReservedPort("tcp", s.httpPort, "the valve web UI")
+}
+
+// activate is the single path that makes a validated graph the running
+// flow, used by apply and rollback: compile it, have syslog-ng load and
+// confirm it, then bring everything derived from the applied graph in line
+// (logrotate.conf, notify targets) and save it as the draft. Nothing is
+// touched unless syslog-ng accepted the config. Callers hold s.mu.
+func (s *Server) activate(g *graph.Graph, data []byte) (*activation, error) {
+	if err := s.checkDeployment(g); err != nil {
+		return nil, fail(http.StatusUnprocessableEntity, err)
+	}
+	for _, n := range g.Enabled().Nodes {
 		if n.Type == graph.TypeSource && n.Config.Transport == "tls" {
 			if err := certs.Require(codegen.CertFile, codegen.KeyFile); err != nil {
-				httpError(w, http.StatusUnprocessableEntity, err)
-				return
+				return nil, fail(http.StatusUnprocessableEntity, err)
 			}
 			break
 		}
 	}
 	conf, err := codegen.Generate(g, s.sup.Version(), s.shares)
 	if err != nil {
-		httpError(w, http.StatusUnprocessableEntity, err)
-		return
+		return nil, fail(http.StatusUnprocessableEntity, err)
 	}
 	lr, err := codegen.GenerateLogrotate(g, s.shares)
 	if err != nil {
-		httpError(w, http.StatusUnprocessableEntity, err)
-		return
+		return nil, fail(http.StatusUnprocessableEntity, err)
 	}
+	act := &activation{config: conf, logrotate: lr}
 	if err := s.sup.Apply(conf, data); err != nil {
-		httpError(w, http.StatusUnprocessableEntity, fmt.Errorf("syslog-ng rejected the config: %w", err))
-		return
+		var re *supervisor.ReloadError
+		switch {
+		case errors.Is(err, supervisor.ErrNotRunning):
+			act.warning = err.Error()
+		case errors.As(err, &re):
+			return nil, fail(http.StatusUnprocessableEntity, err)
+		default:
+			return nil, fail(http.StatusUnprocessableEntity, fmt.Errorf("syslog-ng rejected the config: %w", err))
+		}
 	}
-	if err := os.WriteFile(s.rotator.ConfPath, []byte(lr), 0o644); err != nil {
-		httpError(w, http.StatusInternalServerError, fmt.Errorf("writing logrotate config: %w", err))
-		return
+	if err := s.syncDerived(g, lr); err != nil {
+		return nil, fail(http.StatusInternalServerError, err)
+	}
+	if err := atomicWrite(s.graphPath, data); err != nil {
+		return nil, fail(http.StatusInternalServerError, fmt.Errorf("saving graph: %w", err))
+	}
+	return act, nil
+}
+
+// syncDerived points logrotate and the notify dispatcher at the applied
+// graph.
+func (s *Server) syncDerived(g *graph.Graph, logrotate string) error {
+	if s.rotator != nil {
+		if err := atomicWrite(s.rotator.ConfPath, []byte(logrotate)); err != nil {
+			return fmt.Errorf("writing logrotate config: %w", err)
+		}
 	}
 	if s.notify != nil {
 		s.notify.SetGraph(g)
 	}
-	writeJSON(w, map[string]any{"ok": true, "config": conf, "logrotate": lr})
+	return nil
 }
 
-func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {
-	if !validHistoryID(r.PathValue("id")) {
-		httpError(w, http.StatusBadRequest, fmt.Errorf("invalid history id"))
+// syncActive runs at startup: it regenerates logrotate.conf and the notify
+// targets from the graph archived with the config syslog-ng is running, so
+// they match it even if an older version wrote them. A stored graph that
+// fails today's validation is sanitized and used anyway (codegen escapes
+// on its own) — it must never keep the valve from starting.
+func (s *Server) syncActive() {
+	data, id, ok := s.sup.ActiveGraph()
+	if !ok {
+		// Nothing applied through the valve matches the running config
+		// (fresh install). Seed notify targets from the saved draft, as
+		// before, and leave logrotate.conf alone.
+		if s.notify == nil {
+			return
+		}
+		if data, err := s.loadGraph(); err == nil {
+			if g, _, err := graph.Decode(data); err == nil {
+				s.notify.SetGraph(g)
+			}
+		}
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	graphJSON, err := s.sup.Rollback(r.PathValue("id"))
+	g, sanitized, err := graph.Decode(data)
 	if err != nil {
-		httpError(w, http.StatusUnprocessableEntity, err)
+		slog.Warn("active graph unreadable; logrotate config and notify targets not refreshed", "history", id, "err", err)
 		return
 	}
-	if err := os.WriteFile(s.graphPath, graphJSON, 0o644); err != nil {
-		httpError(w, http.StatusInternalServerError, err)
+	if sanitized {
+		slog.Warn("active graph contained control characters; sanitized them", "history", id)
+	}
+	if err := g.Validate(); err != nil {
+		slog.Warn("active graph fails current validation; re-apply after fixing it", "history", id, "err", err)
+	}
+	lr, err := codegen.GenerateLogrotate(g, s.shares)
+	if err != nil {
+		// e.g. a share that is no longer mounted. The existing file stays:
+		// an old one could only carry injected directives via line breaks
+		// in a dir, and those are sanitized above, so regenerating such a
+		// graph succeeds and overwrites it.
+		slog.Warn("cannot regenerate logrotate config; keeping the existing one", "err", err)
+		if s.notify != nil {
+			s.notify.SetGraph(g)
+		}
 		return
 	}
-	writeJSON(w, map[string]bool{"ok": true})
+	if err := s.syncDerived(g, lr); err != nil {
+		slog.Warn("startup sync", "err", err)
+	}
+}
+
+func atomicWrite(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func (s *Server) history(w http.ResponseWriter, _ *http.Request) {
@@ -367,6 +542,16 @@ func (s *Server) notifyLog(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.notify.Recent())
 }
 
+// notifyStats returns per-notify-node delivery counters (sent, failed,
+// dropped), keyed by node ident.
+func (s *Server) notifyStats(w http.ResponseWriter, _ *http.Request) {
+	if s.notify == nil {
+		writeJSON(w, map[string]any{})
+		return
+	}
+	writeJSON(w, s.notify.Stats())
+}
+
 // notifyTest delivers a synthetic notification to a channel config so the user
 // can confirm wiring before applying the graph.
 func (s *Server) notifyTest(w http.ResponseWriter, r *http.Request) {
@@ -378,12 +563,25 @@ func (s *Server) notifyTest(w http.ResponseWriter, r *http.Request) {
 		Kind string `json:"kind"`
 		URL  string `json:"url"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
+	data, code, err := readBody(w, r, maxSmallBody)
+	if err != nil {
+		httpError(w, code, err)
+		return
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		httpError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.Kind != "webhook" && body.Kind != "slack" {
+		httpError(w, http.StatusBadRequest, fmt.Errorf("kind must be webhook or slack"))
+		return
+	}
+	if err := graph.CheckNotifyURL(body.URL); err != nil {
 		httpError(w, http.StatusBadRequest, err)
 		return
 	}
 	if err := s.notify.TestSend(r.Context(), body.Kind, body.URL); err != nil {
-		httpError(w, http.StatusBadGateway, fmt.Errorf("delivery failed: %w", err))
+		httpError(w, http.StatusBadGateway, err)
 		return
 	}
 	writeJSON(w, map[string]bool{"ok": true})
