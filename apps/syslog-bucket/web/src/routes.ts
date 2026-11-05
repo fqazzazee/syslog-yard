@@ -10,9 +10,10 @@
 //   #/network                      network security view
 //   #/frameworks       #/frameworks/<fw>[/<item>]  framework list / matrix / logs
 //   #/rules                        rule list
+//   #/audit                        audit log (admins)
 import type { Selection } from "./types";
 
-export type Page = "buckets" | "frameworks" | "rules";
+export type Page = "buckets" | "frameworks" | "rules" | "audit";
 
 // A route is a log/matrix selection or one of the list pages.
 export type Route = { section: string; selection: Selection } | { section: string; page: Page };
@@ -46,6 +47,8 @@ export function parseRoute(path: string[]): Route | null {
       };
     case "rules":
       return { section: "rules", page: "rules" };
+    case "audit":
+      return { section: "audit", page: "audit" };
     default:
       return null;
   }
