@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -254,12 +255,43 @@ func (s *Store) InsertEntries(ctx context.Context, entries []Entry) (err error) 
 	return tx.Commit(ctx)
 }
 
+// insertEntryRows draws the batch's ids from the sequence first and inserts
+// them explicitly, so entries[i] gets its id by construction. Matching
+// RETURNING rows to VALUES rows by position would rely on an ordering
+// Postgres doesn't promise.
 func insertEntryRows(ctx context.Context, tx pgx.Tx, entries []Entry) error {
+	ids := make([]int64, 0, len(entries))
+	rows, err := tx.Query(ctx,
+		`SELECT nextval(pg_get_serial_sequence('entries', 'id')) FROM generate_series(1, $1)`, len(entries))
+	if err != nil {
+		return fmt.Errorf("allocate entry ids: %w", err)
+	}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("allocate entry ids: %w", err)
+	}
+	if len(ids) != len(entries) {
+		return fmt.Errorf("allocate entry ids: got %d for %d rows", len(ids), len(entries))
+	}
+	// Ascending in batch order, so the id-keyed time sort keeps arrival order.
+	slices.Sort(ids)
+
+	// The ids travel as one array parameter ($1) to keep the statement text
+	// stable per batch size and the bind count at 15 per row.
 	const cols = 15
 	var sb strings.Builder
 	sb.WriteString(`INSERT INTO entries
-		(received_at, device_time, source_id, facility, severity, app_name, host, msg, structured, priority, status, suppressed, device_class, mitre, ot) VALUES `)
-	args := make([]any, 0, len(entries)*cols)
+		(id, received_at, device_time, source_id, facility, severity, app_name, host, msg, structured, priority, status, suppressed, device_class, mitre, ot) VALUES `)
+	args := make([]any, 0, 1+len(entries)*cols)
+	args = append(args, ids)
 	for i := range entries {
 		e := &entries[i]
 		structured := e.Structured
@@ -277,36 +309,24 @@ func insertEntryRows(ctx context.Context, tx pgx.Tx, entries []Entry) error {
 		if i > 0 {
 			sb.WriteByte(',')
 		}
-		sb.WriteByte('(')
+		fmt.Fprintf(&sb, "(($1::bigint[])[%d]", i+1)
 		for j := 0; j < cols; j++ {
-			if j > 0 {
-				sb.WriteByte(',')
-			}
-			fmt.Fprintf(&sb, "$%d", i*cols+j+1)
+			fmt.Fprintf(&sb, ",$%d", 2+i*cols+j)
 		}
 		sb.WriteByte(')')
 		args = append(args, e.ReceivedAt, e.DeviceTime, e.SourceID, e.Facility, e.Severity,
 			e.AppName, e.Host, e.Msg, structured, e.Priority, e.Status, e.Suppressed, e.DeviceClass, mitre, ot)
 	}
-	// RETURNING rows come back in VALUES order for a plain INSERT.
-	sb.WriteString(" RETURNING id")
 
-	rows, err := tx.Query(ctx, sb.String(), args...)
+	tag, err := tx.Exec(ctx, sb.String(), args...)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	n := 0
-	for ; rows.Next(); n++ {
-		if err := rows.Scan(&entries[n].ID); err != nil {
-			return err
-		}
+	if n := tag.RowsAffected(); n != int64(len(entries)) {
+		return fmt.Errorf("insert entries: %d rows stored for %d entries", n, len(entries))
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if n != len(entries) {
-		return fmt.Errorf("insert entries: %d ids returned for %d rows", n, len(entries))
+	for i := range entries {
+		entries[i].ID = ids[i]
 	}
 	return nil
 }
