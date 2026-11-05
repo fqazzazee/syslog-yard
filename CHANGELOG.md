@@ -60,6 +60,8 @@ All notable changes to syslog-yard are recorded here. The format follows
 
 ### Changed
 
+- docs: the README screenshots show the shared shell, taken from a seeded
+  demo yard ([#45]).
 - bucket: a suppressed entry never notifies. When any matching rule
   suppresses an entry, the notifications queued for it by `notify` actions
   are dropped, whatever the rule and action order. Before, suppressed
@@ -315,6 +317,7 @@ Released under the MIT License; see the commit history for its contents.
 [#42]: https://github.com/fqazzazee/syslog-yard/issues/42
 [#43]: https://github.com/fqazzazee/syslog-yard/issues/43
 [#44]: https://github.com/fqazzazee/syslog-yard/issues/44
+[#45]: https://github.com/fqazzazee/syslog-yard/issues/45
 [#46]: https://github.com/fqazzazee/syslog-yard/issues/46
 [#47]: https://github.com/fqazzazee/syslog-yard/issues/47
 [#48]: https://github.com/fqazzazee/syslog-yard/issues/48
