@@ -88,6 +88,10 @@ func (e *env) restart() {
 
 func (e *env) do(method, path string, body []byte) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	if len(body) > 0 {
+		// secure.Headers rejects non-JSON bodies on state-changing requests.
+		req.Header.Set("Content-Type", "application/json")
+	}
 	rec := httptest.NewRecorder()
 	e.srv.ServeHTTP(rec, req)
 	return rec

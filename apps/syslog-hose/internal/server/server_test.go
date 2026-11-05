@@ -41,6 +41,10 @@ func do(t *testing.T, method, url, body string) (int, []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if body != "" {
+		// secure.Headers rejects non-JSON bodies on state-changing requests.
+		req.Header.Set("Content-Type", "application/json")
+	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
