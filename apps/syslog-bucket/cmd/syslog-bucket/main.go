@@ -126,7 +126,7 @@ func run() error {
 	netMgr.Load(ctx)
 	go netMgr.Run(ctx)
 
-	registry := parsers.NewRegistry(parsers.Generic{})
+	registry := parsers.Default()
 	ing := ingest.New(st, registry, eng, hub, dispatcher, cfg.IngestAddr)
 
 	ingestErr := make(chan error, 1)

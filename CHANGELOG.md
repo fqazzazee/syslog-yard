@@ -14,6 +14,13 @@ All notable changes to syslog-yard are recorded here. The format follows
   Point, Claroty, Juniper and generic-rfc5424 presets). Structured data is
   now kept at the front of the message instead of being dropped by the
   valve's forward. Re-apply the valve flow to pick this up. [#26]
+- bucket: FortiGate entries showed App `date=…` and the sender's address as
+  Host. A FortiGate parser now sets App `fortigate`, Host from `devname`, and
+  keeps `logid`, `devid`, `type`, `subtype` and the other pairs in structured
+  fields. SonicWall (`sonicwall`) and PAN-OS CSV (`panos`, with serial, type
+  and subtype) logs get the same treatment, and any other headerless
+  `key=value` line gets its first pair back instead of losing it to App.
+  Already-stored entries keep their old values. [#26]
 
 ## [0.1.1] - 2026-11-05
 
