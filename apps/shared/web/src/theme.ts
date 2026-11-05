@@ -31,6 +31,8 @@ export function toggleTheme(): Theme {
 }
 
 // Apply the saved theme once, before first render, to avoid a flash of dark.
-export function initTheme(): void {
+// tool selects that tool's accent hue (tokens.css :root[data-tool]).
+export function initTheme(tool?: "hose" | "valve" | "bucket"): void {
+  if (tool) document.documentElement.dataset.tool = tool;
   applyTheme(getTheme());
 }
