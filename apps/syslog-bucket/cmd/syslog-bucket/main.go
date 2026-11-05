@@ -151,6 +151,11 @@ func run() error {
 	httpSrv := &http.Server{
 		Addr:    cfg.APIAddr,
 		Handler: api.New(st, eng, hub, dispatcher, dist, hints, authSvc, cfg, netMgr, ing),
+		// Same limits as hose and valve. No Read/WriteTimeout: they would
+		// cut long-lived WebSocket live tails.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20,
 	}
 	httpErr := make(chan error, 1)
 	go func() {
