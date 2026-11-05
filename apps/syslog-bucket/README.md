@@ -174,8 +174,9 @@ needed if you point the UI at the backend some other way.
 ### Tests
 
 `go test ./...` runs the unit tests. The Postgres-backed tests (store,
-ingest, and the rule/SQL search parity checks) skip themselves unless
-`BUCKET_TEST_DSN` points at a server where the role may `CREATE DATABASE`;
+ingest, migrations, share permissions through the API, and the parity checks
+between ingest-time rules and SQL search/apply-to-history) skip themselves
+unless `BUCKET_TEST_DSN` points at a server where the role may `CREATE DATABASE`;
 each test creates, migrates and drops its own throwaway database
 (`internal/store/storetest`):
 

@@ -8,6 +8,7 @@ package rules
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -169,7 +170,11 @@ func (c Cond) compile(arg func(any) string) string {
 	case len(c.Any) > 0:
 		return c.compileJoin(c.Any, " OR ", arg)
 	case c.Not != nil:
-		return "NOT (" + c.Not.compile(arg) + ")"
+		// A leaf over a NULL column (facility, source_id, a missing
+		// structured key) is NULL in SQL, and NOT NULL is still NULL, which
+		// WHERE drops. Match treats such a leaf as false, so its negation
+		// matches; COALESCE gives SQL the same two-valued answer.
+		return "NOT COALESCE(" + c.Not.compile(arg) + ", FALSE)"
 	case c.Field != "":
 		return c.compileLeaf(arg)
 	case c.Text != "":
@@ -219,12 +224,44 @@ func (c Cond) compileLeaf(arg func(any) string) string {
 		}
 	case kindNum:
 		v, _ := numValue(c.Value)
-		return col + " " + sqlOp(c.Op) + " " + arg(v)
+		return numLeaf(col, c.Op, v, arg)
 	case kindTime:
 		v, _ := timeValue(c.Value)
 		return col + " " + sqlOp(c.Op) + " " + arg(v)
 	}
 	return "FALSE" // unreachable on a validated tree
+}
+
+// numLeaf compares an integer column (every numeric field is one) with v.
+// The bound goes to Postgres as a bigint: sent as a float it would be coerced
+// to the column's type, rounding 2.5 or failing outside smallint's range, and
+// the SQL would disagree with Match. A fractional bound becomes the integer
+// that keeps the comparison exact (severity < 2.5 is severity < 3).
+func numLeaf(col, op string, v float64, arg func(any) string) string {
+	if math.IsNaN(v) {
+		if op == "ne" {
+			return "TRUE"
+		}
+		return "FALSE"
+	}
+	whole := v == math.Trunc(v)
+	switch op {
+	case "eq":
+		if !whole {
+			return "FALSE"
+		}
+	case "ne":
+		if !whole {
+			return "TRUE" // like Match: NULL fields included
+		}
+	case "lt", "gte":
+		v = math.Ceil(v)
+	case "lte", "gt":
+		v = math.Floor(v)
+	}
+	const limit = 1 << 62 // beyond any stored value, and safe to convert
+	v = max(-limit, min(limit, v))
+	return col + " " + sqlOp(op) + " " + arg(int64(v)) + "::bigint"
 }
 
 func sqlOp(op string) string {
