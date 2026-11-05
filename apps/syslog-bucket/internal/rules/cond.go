@@ -8,6 +8,7 @@ package rules
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -223,12 +224,44 @@ func (c Cond) compileLeaf(arg func(any) string) string {
 		}
 	case kindNum:
 		v, _ := numValue(c.Value)
-		return col + " " + sqlOp(c.Op) + " " + arg(v)
+		return numLeaf(col, c.Op, v, arg)
 	case kindTime:
 		v, _ := timeValue(c.Value)
 		return col + " " + sqlOp(c.Op) + " " + arg(v)
 	}
 	return "FALSE" // unreachable on a validated tree
+}
+
+// numLeaf compares an integer column (every numeric field is one) with v.
+// The bound goes to Postgres as a bigint: sent as a float it would be coerced
+// to the column's type, rounding 2.5 or failing outside smallint's range, and
+// the SQL would disagree with Match. A fractional bound becomes the integer
+// that keeps the comparison exact (severity < 2.5 is severity < 3).
+func numLeaf(col, op string, v float64, arg func(any) string) string {
+	if math.IsNaN(v) {
+		if op == "ne" {
+			return "TRUE"
+		}
+		return "FALSE"
+	}
+	whole := v == math.Trunc(v)
+	switch op {
+	case "eq":
+		if !whole {
+			return "FALSE"
+		}
+	case "ne":
+		if !whole {
+			return "TRUE" // like Match: NULL fields included
+		}
+	case "lt", "gte":
+		v = math.Ceil(v)
+	case "lte", "gt":
+		v = math.Floor(v)
+	}
+	const limit = 1 << 62 // beyond any stored value, and safe to convert
+	v = max(-limit, min(limit, v))
+	return col + " " + sqlOp(op) + " " + arg(int64(v)) + "::bigint"
 }
 
 func sqlOp(op string) string {
