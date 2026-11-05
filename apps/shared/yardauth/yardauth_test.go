@@ -204,3 +204,28 @@ func TestHealthzIsPublic(t *testing.T) {
 		}
 	}
 }
+
+func TestAllowAnonymous(t *testing.T) {
+	bucket := fakeBucket(t)
+	g := New(bucket.URL, false)
+	g.AllowAnonymous("/api/certs/pem")
+	h := g.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }))
+	for path, want := range map[string]int{"/api/certs/pem": 200, "/api/certs": 401} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if w.Code != want {
+			t.Errorf("GET %s without a session: got %d, want %d", path, w.Code, want)
+		}
+	}
+}
+
+func TestLoginBodyTooLarge(t *testing.T) {
+	bucket := fakeBucket(t)
+	mux := http.NewServeMux()
+	New(bucket.URL, false).Routes(mux)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(strings.Repeat("x", 1<<17))))
+	if w.Code != http.StatusRequestEntityTooLarge || !strings.Contains(w.Body.String(), `"error"`) {
+		t.Fatalf("got %d %s, want 413 with a JSON error", w.Code, w.Body)
+	}
+}

@@ -221,8 +221,9 @@ an existing admin can change its role under **Users…** in the account menu.
   same goes for the valve's syslog IN ports: auth covers UIs/APIs, not
   syslog traffic.
 - `GET /api/healthz` and `GET /api/hints` stay unauthenticated (liveness
-  probes, cross-tool nav); everything else under `/api/` requires a
-  session, on every tool.
+  probes, cross-tool nav), as does the valve's `GET /api/certs/pem` (its
+  public TLS certificate, which every TLS client receives anyway);
+  everything else under `/api/` requires a session, on every tool.
 - State-changing requests (POST/PUT/PATCH/DELETE) must come from the UI's
   own origin: every tool rejects cross-site/same-site fetch metadata and a
   mismatched `Origin`, and the bucket additionally requires POSTs to its API

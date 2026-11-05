@@ -108,6 +108,7 @@ compose, as the suite's own files do.
 | `HOSE_ADDR` | `:8080` | Web UI / API listen address (the `healthcheck` subcommand probes it too) |
 | `HOSE_DATA` | `/data` | Jobs + custom presets directory  |
 | `HOSE_SUGGESTED_DEST` | _(unset)_ | Default destination (`host:port`) pre-filled for new jobs |
+| `HOSE_VALVE_URL` | _(unset)_ | syslog-valve API base URL as reachable from the hose (e.g. `http://syslog-valve:8081`); enables **Trust valve's certificate** ([TLS verification](#tls-verification)) |
 | `YARD_AUTH_URL` | _(unset)_ | Guard the UI with syslog-bucket's accounts (unset = open) |
 | `YARD_COOKIE_SECURE` | `false` | Mark session cookies `Secure` (HTTPS) |
 | `YARD_TRUSTED_ORIGINS` | _(unset)_ | Extra Origins accepted on state-changing requests, for a reverse proxy that rewrites `Host` |
@@ -136,15 +137,51 @@ buffer when it closes without reading them (a restart of the collector,
 say). Use a protocol with acknowledgements downstream if every message
 matters.
 
+## TLS verification
+
+A TLS job verifies the receiver's certificate against the system roots by
+default. A lab receiver with a private CA or a self-signed certificate (such
+as syslog-valve's) needs one of the job's TLS settings:
+
+- **Trusted CA or certificate** (`tlsCA` in `jobs.json`): PEM text with one
+  or more certificates. A CA bundle trusts what that CA signed; the
+  receiver's own certificate pins it (a self-signed certificate is its own
+  root). Saving checks the PEM; a private key is refused, so never paste
+  one. The host name is still checked against the certificate.
+- **Server name** (`tlsServerName`): the name the certificate is checked
+  against, when it differs from the destination host. Example: sending to
+  `10.0.0.5` when the certificate names `syslog-valve`.
+- **Skip certificate verification** (`tlsInsecure`): no check at all. Lab
+  use only, and it can't be combined with a trusted certificate.
+
+Jobs saved before these fields existed load unchanged.
+
+**Trust valve's certificate.** With `HOSE_VALVE_URL` set (the compose stack
+sets `http://syslog-valve:8081`), the job form offers a button that pins
+the valve's certificate in one step. The hose server fetches it from the
+valve's `GET /api/certs/pem`, which serves the public certificate only and
+needs no session. The browser can't fetch it directly, because the UI's CSP
+allows same-origin requests only. The hose's own endpoint is
+`GET /api/valve-cert`, answering `{"pem", "subject", "notAfter", "names"}`.
+Generate the valve's certificate first (TLS IN node, **Generate self-signed
+cert**) and send to a name it covers (`syslog-valve`, `localhost`,
+`127.0.0.1` or the valve's host name). The fetch runs over the plain-HTTP
+API inside the yard network, so it trusts that network the way first use of
+any self-signed certificate does. If the valve regenerates its certificate,
+pin it again. Without `HOSE_VALVE_URL`, copy the valve's `/data/certs/valve.crt`
+into the field by hand.
+
 ## Jobs and limits
 
 - **Stop is idempotent.** Stopping a job that is idle or already stopping is
   a no-op; a stop waits up to 10 s for the job to wind down. Starting a job
   that is still stopping returns an error ("job is still stopping, try
   again").
-- **Request bodies** are capped: job create/update at 64 KiB, preset saves at
-  1 MiB, previews at about 1 MiB (a whole preset plus the job). Oversized job
-  and preview requests get **413**.
+- **Request bodies** are capped on every state-changing route: job
+  create/update at 128 KiB (room for a CA bundle of up to 64 KiB), preset
+  saves at 1 MiB, previews at about 1 MiB (a whole preset plus the job), and
+  everything else at 64 KiB. An oversized body gets **413** with
+  `{"error": "..."}`.
 - **Templates** are bounded: `randHex` returns at most 1024 characters, a
   rendered message may be at most 64 KiB (the job reports an error past
   that), and a job keeps at most 256 distinct `seq` counter names (a further

@@ -55,6 +55,36 @@ func Inspect(certFile string) Status {
 	return st
 }
 
+// PublicPEM returns the certificate chain at certFile as PEM, rebuilt from
+// its CERTIFICATE blocks alone: whatever else the file holds (a key, if a
+// deployment mounted a combined file) is never copied out. A missing file
+// answers an error matching os.ErrNotExist.
+func PublicPEM(certFile string) ([]byte, error) {
+	data, err := os.ReadFile(certFile)
+	if err != nil {
+		return nil, err
+	}
+	var out []byte
+	for {
+		var block *pem.Block
+		block, data = pem.Decode(data)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+			return nil, fmt.Errorf("certificate unreadable: %w", err)
+		}
+		out = append(out, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: block.Bytes})...)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no certificate in %s", filepath.Base(certFile))
+	}
+	return out, nil
+}
+
 // GenerateSelfSigned writes a fresh ECDSA P-256 pair valid for five years,
 // replacing any existing files. hosts become DNS/IP SANs.
 func GenerateSelfSigned(certFile, keyFile string, hosts []string) error {

@@ -13,6 +13,10 @@ export interface Job {
   port: number;
   transport: "udp" | "tcp" | "tls";
   tlsInsecure: boolean;
+  // PEM: CA bundle or pinned receiver certificate ("" = system roots)
+  tlsCA?: string;
+  // name the certificate is checked against ("" = host)
+  tlsServerName?: string;
   format: string;
   rate: number;
   rateMode: string;
@@ -41,6 +45,14 @@ export interface PresetSummary {
   format: string;
   builtin: boolean;
   eventCount: number;
+}
+
+// The valve's public TLS certificate, fetched by the hose server.
+export interface ValveCert {
+  pem: string;
+  subject: string;
+  notAfter: string;
+  names: string[];
 }
 
 export interface TailEvent {
@@ -78,6 +90,7 @@ export const api = {
   deletePreset: (name: string) =>
     req<void>(`/api/presets/${encodeURIComponent(name)}`, { method: "DELETE" }),
   hints: () => req<Record<string, string>>("/api/hints"),
+  valveCert: () => req<ValveCert>("/api/valve-cert"),
   ...authApi,
   preview: (body: {
     preset?: string;
