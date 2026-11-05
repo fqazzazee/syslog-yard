@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -59,6 +60,18 @@ type Dispatcher struct {
 	// never turns into an INSERT per dropped delivery on the ingest goroutine.
 	dropMu sync.Mutex
 	drops  map[dropKey]int
+
+	// Shutdown plumbing: workers deliver under deliverCtx (not Run's ctx) so
+	// queued jobs can still go out after the process starts stopping;
+	// Shutdown closes the queue and, past its deadline, cancels deliverCtx
+	// and sets abandon so leftover jobs are counted as dropped.
+	deliverCtx    context.Context
+	cancelDeliver context.CancelFunc
+	closeMu       sync.RWMutex
+	closed        bool
+	abandon       atomic.Bool
+	workerWG      sync.WaitGroup
+	started       bool // workers running; guarded by closeMu
 }
 
 type dropKey struct{ channelID, ruleID int64 }
@@ -71,6 +84,7 @@ func New(st *store.Store) *Dispatcher {
 		limiters: map[int64]*limiter{},
 		drops:    map[dropKey]int{},
 	}
+	d.deliverCtx, d.cancelDeliver = context.WithCancel(context.Background())
 	d.client = d.newHTTPClient()
 	return d
 }
@@ -105,11 +119,14 @@ func (d *Dispatcher) Reload(ctx context.Context) error {
 }
 
 // Run starts the worker pool plus periodic reload and log pruning until ctx
-// is cancelled.
+// is cancelled. The workers outlive ctx: they keep draining the queue until
+// Shutdown.
 func (d *Dispatcher) Run(ctx context.Context) {
-	for i := 0; i < workers; i++ {
-		go d.worker(ctx)
+	d.closeMu.Lock()
+	if !d.closed {
+		d.startWorkersLocked()
 	}
+	d.closeMu.Unlock()
 	reload := time.NewTicker(reloadInterval)
 	prune := time.NewTicker(pruneInterval)
 	dropFlush := time.NewTicker(dropFlushEvery)
@@ -139,8 +156,14 @@ func (d *Dispatcher) Run(ctx context.Context) {
 // if the queue is saturated the delivery is dropped and counted (flushed to
 // the log periodically by flushDrops), never stalling ingest.
 func (d *Dispatcher) Dispatch(entries []store.Entry) {
+	d.closeMu.RLock()
+	defer d.closeMu.RUnlock()
 	for _, e := range entries {
 		for _, n := range e.Notifies {
+			if d.closed {
+				d.countDrop(n.ChannelID, n.RuleID)
+				continue
+			}
 			select {
 			case d.queue <- job{entry: e, channelID: n.ChannelID, ruleID: n.RuleID}:
 			default:
@@ -170,15 +193,63 @@ func (d *Dispatcher) flushDrops() {
 	}
 }
 
-func (d *Dispatcher) worker(ctx context.Context) {
-	for {
+// startWorkersLocked starts the pool once; the caller holds closeMu, which
+// orders every workerWG.Add before Shutdown's Wait.
+func (d *Dispatcher) startWorkersLocked() {
+	if d.started {
+		return
+	}
+	d.started = true
+	for i := 0; i < workers; i++ {
+		d.workerWG.Add(1)
+		go d.worker()
+	}
+}
+
+func (d *Dispatcher) worker() {
+	defer d.workerWG.Done()
+	for j := range d.queue {
+		if d.abandon.Load() {
+			d.countDrop(j.channelID, j.ruleID)
+			continue
+		}
+		d.handle(d.deliverCtx, j)
+	}
+}
+
+// Shutdown stops accepting deliveries and gives the workers up to timeout to
+// send what is already queued. Past that, in-flight sends are cancelled and
+// the remainder is counted as dropped. Call it after ingest has stopped (no
+// more Dispatch calls are expected; late ones are counted as dropped).
+func (d *Dispatcher) Shutdown(timeout time.Duration) {
+	d.closeMu.Lock()
+	if d.closed {
+		d.closeMu.Unlock()
+		return
+	}
+	d.startWorkersLocked() // Run may not have started them yet
+	d.closed = true
+	close(d.queue)
+	d.closeMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		d.workerWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		slog.Warn("notify: shutdown deadline passed, abandoning queued deliveries", "queued", len(d.queue))
+		d.abandon.Store(true)
+		d.cancelDeliver()
 		select {
-		case <-ctx.Done():
-			return
-		case j := <-d.queue:
-			d.handle(ctx, j)
+		case <-done:
+		case <-time.After(time.Second):
 		}
 	}
+	d.cancelDeliver()
+	d.flushDrops()
 }
 
 // channel returns the channel snapshot and its limiter. Reload normally

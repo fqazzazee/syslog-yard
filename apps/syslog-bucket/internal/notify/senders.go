@@ -95,6 +95,7 @@ func (d *Dispatcher) sendWebhook(ctx context.Context, ch store.Channel, e store.
 	if err := json.Unmarshal(ch.Config, &cfg); err != nil || strings.TrimSpace(cfg.URL) == "" {
 		return fmt.Errorf("webhook channel needs a url")
 	}
+	e.Normalize() // [] / {} rather than null, matching the REST API
 	body, err := compactJSON(map[string]any{
 		"channel": ch.Name,
 		"text":    text,
