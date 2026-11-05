@@ -6,6 +6,7 @@ Description=syslog-hose — syslog traffic generator
 Image=localhost/syslog-hose:latest
 ContainerName=syslog-hose
 Network=yard.network
+# Prefix with 127.0.0.1: to publish on loopback only (single-host lab).
 PublishPort=8080:8080
 Volume=hose-data.volume:/data
 Environment=HOSE_ADDR=:8080
@@ -16,6 +17,16 @@ Environment=YARD_LINK_VALVE=8081
 Environment=YARD_LINK_BUCKET=8082
 # Guard this UI with the bucket's user accounts (docs/AUTH.md); remove to run open.
 Environment=YARD_AUTH_URL=http://syslog-bucket:8080
+# Distroless, non-root, unprivileged port: no capabilities needed.
+DropCapability=all
+NoNewPrivileges=true
+# No shell or wget in the image (exec form, not sh -c): the binary probes
+# its own /api/healthz.
+HealthCmd=["/syslog-hose", "healthcheck"]
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=10s
 
 [Service]
 Restart=always

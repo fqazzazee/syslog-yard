@@ -12,11 +12,24 @@
 # bucket's receiver is internal-only.
 # (6514 = IANA syslog-TLS; chosen over 5514 which collided with a local
 # ssh forward on this host. Run `scripts/yardctl firewall` to open ports.)
+#
+# Optional settings (export them, or put them in deploy/.env):
+#   YARD_BIND=127.0.0.1    publish the three UIs on loopback only — for a
+#                          single-host lab, or behind a local reverse proxy.
+#                          Default 0.0.0.0 (all IPv4 interfaces). The syslog
+#                          entry port 6514 is not affected.
+#   BUCKET_DB_PASSWORD=…   Postgres password (default: the historical static
+#                          syslog_bucket). Only takes effect on a fresh
+#                          bucket-dbdata volume — see docs/SECURITY.md to
+#                          rotate an existing one.
 
 name: syslog-yard
 
 networks:
   yardnet:
+  # Postgres lives here, alone with syslog-bucket; internal = no route out.
+  bucket-dbnet:
+    internal: true
 
 volumes:
   hose-data:
@@ -51,7 +64,7 @@ services:
     image: syslog-hose:latest
     networks: [yardnet]
     ports:
-      - "8080:8080"
+      - "${YARD_BIND:-0.0.0.0}:8080:8080"
     environment:
       HOSE_ADDR: ":8080"
       HOSE_DATA: /data
@@ -68,6 +81,17 @@ services:
       YARD_AUTH_URL: "http://syslog-bucket:8080"
     volumes:
       - hose-data:/data
+    # Distroless, non-root, unprivileged port: needs no capabilities.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      # The image has no shell or wget; the binary probes its own
+      # /api/healthz.
+      test: ["CMD", "/syslog-hose", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   syslog-valve:
@@ -78,7 +102,7 @@ services:
     image: syslog-valve:latest
     networks: [yardnet]
     ports:
-      - "8081:8081"
+      - "${YARD_BIND:-0.0.0.0}:8081:8081"
       # External senders target the HOST port (e.g. <yard-host>:6514) and
       # land on the valve's "External IN" block (container port 6514) —
       # wire one in the UI and Apply. Add more pairs to publish listeners
@@ -108,14 +132,36 @@ services:
     volumes:
       - valve-data:/data
       # - logshare-nfs:/shares/archive
+    # The valve stays root inside the container: syslog-ng binds the
+    # listeners you draw (514 included) and existing valve-data volumes
+    # are root-owned. Everything else is dropped. Kept: NET_BIND_SERVICE
+    # for ports <1024; CHOWN/DAC_OVERRIDE/FOWNER so syslog-ng and
+    # logrotate can write, rotate and re-own cache files on volumes and
+    # bind-mounted shares owned by another uid. (SETUID/SETGID/KILL are
+    # not needed: nothing switches user, and the valve only signals its
+    # own syslog-ng child.)
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE, CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8081/api/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   bucket-db:
     image: docker.io/library/postgres:17-alpine
-    networks: [yardnet]
+    # Own internal network: only syslog-bucket can reach Postgres.
+    networks: [bucket-dbnet]
     environment:
       POSTGRES_USER: syslog_bucket
-      POSTGRES_PASSWORD: syslog_bucket
+      # Used only when the volume is first initialised. The default is the
+      # historical static password, kept so existing volumes keep working;
+      # set BUCKET_DB_PASSWORD (e.g. in deploy/.env) for a new install, or
+      # rotate it as described in docs/SECURITY.md.
+      POSTGRES_PASSWORD: ${BUCKET_DB_PASSWORD:-syslog_bucket}
       POSTGRES_DB: syslog_bucket
     volumes:
       - bucket-dbdata:/var/lib/postgresql/data
@@ -132,11 +178,12 @@ services:
       context: ../apps
       dockerfile: syslog-bucket/Dockerfile
     image: syslog-bucket:latest
-    networks: [yardnet]
+    networks: [yardnet, bucket-dbnet]
     ports:
-      - "8082:8080"
+      - "${YARD_BIND:-0.0.0.0}:8082:8080"
     environment:
-      BUCKET_DB_URL: postgres://syslog_bucket:syslog_bucket@bucket-db:5432/syslog_bucket?sslmode=disable
+      # Keep the password URL-safe (e.g. `openssl rand -hex 24`).
+      BUCKET_DB_URL: postgres://syslog_bucket:${BUCKET_DB_PASSWORD:-syslog_bucket}@bucket-db:5432/syslog_bucket?sslmode=disable
       BUCKET_API_ADDR: ":8080"
       BUCKET_INGEST_ADDR: ":6601"
       YARD_LINK_HOSE: "8080"
@@ -154,11 +201,21 @@ services:
       # BUCKET_OIDC_CLIENT_SECRET: "…"
       # BUCKET_OIDC_REDIRECT_URL: "http://localhost:8082/api/auth/oidc/callback"
       # BUCKET_OIDC_NAME: "Company SSO"      # login-button label
-      # BUCKET_OIDC_DEFAULT_ROLE: "analyst"  # role for first-time OIDC users
+      # BUCKET_OIDC_DEFAULT_ROLE: "analyst"  # first-time OIDC users' role (default: viewer)
       # BUCKET_COOKIE_SECURE: "true"         # set when serving over HTTPS
     depends_on:
       bucket-db:
         condition: service_healthy
+    # Runs as an unprivileged user on unprivileged ports: no capabilities.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      # /api/healthz also pings Postgres.
+      test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8080/api/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   bucket-syslog:
@@ -169,5 +226,6 @@ services:
       - ./syslog-ng/bucket.conf:/etc/syslog-ng/syslog-ng.conf:ro
     # Internal-only: reached via the valve (or other yardnet services).
     depends_on:
-      - syslog-bucket
+      syslog-bucket:
+        condition: service_healthy
     restart: unless-stopped

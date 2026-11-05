@@ -14,7 +14,8 @@
 #   reaches the rest of the yard through host-published ports instead:
 #     * OUT ports → bucket-syslog via the loopback port published below
 #       (127.0.0.1:5515);
-#     * sign-in (YARD_AUTH_URL) → the bucket UI's published port 8082.
+#     * sign-in (YARD_AUTH_URL) → the bucket UI's published port 8082,
+#       over loopback — so leave YARD_BIND at 0.0.0.0 or 127.0.0.1.
 services:
   syslog-valve:
     network_mode: host
