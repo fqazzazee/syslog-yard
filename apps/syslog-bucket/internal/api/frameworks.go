@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/syslog-yard/syslog-bucket/internal/audit"
 	"github.com/syslog-yard/syslog-bucket/internal/classify"
 	"github.com/syslog-yard/syslog-bucket/internal/frameworks"
 	"github.com/syslog-yard/syslog-bucket/internal/mitre"
@@ -151,6 +152,7 @@ func (s *server) createFramework(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "create framework", err)
 		return
 	}
+	s.record(r, audit.FrameworkCreate, "framework", created.ID, map[string]any{"name": created.Name, "items": len(created.Items)})
 	writeJSON(w, created)
 }
 
@@ -177,6 +179,7 @@ func (s *server) updateFramework(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.ID = id
+	s.record(r, audit.FrameworkUpdate, "framework", id, map[string]any{"name": f.Name, "items": len(f.Items)})
 	writeJSON(w, f)
 }
 
@@ -184,7 +187,9 @@ func (s *server) deleteFramework(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return
 	}
-	ok, err := s.store.DeleteCustomFramework(r.Context(), r.PathValue("id"))
+	id := r.PathValue("id")
+	gone, _ := s.store.GetCustomFramework(r.Context(), id)
+	ok, err := s.store.DeleteCustomFramework(r.Context(), id)
 	if err != nil {
 		s.internalError(w, "delete framework", err)
 		return
@@ -193,5 +198,6 @@ func (s *server) deleteFramework(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	s.record(r, audit.FrameworkDelete, "framework", id, map[string]any{"name": gone.Name})
 	w.WriteHeader(http.StatusNoContent)
 }

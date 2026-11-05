@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/syslog-yard/syslog-bucket/internal/audit"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
 
@@ -53,7 +54,8 @@ type Service struct {
 	mu      sync.RWMutex
 	oidc    *OIDC // nil = OIDC disabled
 	idleTTL time.Duration
-	trusted []netip.Prefix // proxies whose X-Forwarded-For is believed
+	trusted []netip.Prefix  // proxies whose X-Forwarded-For is believed
+	audit   *audit.Recorder // nil = not recorded
 }
 
 func New(st *store.Store, cookieSecure bool) *Service {
@@ -80,6 +82,30 @@ func (s *Service) clientIP(r *http.Request) string {
 	trusted := s.trusted
 	s.mu.RUnlock()
 	return clientIP(r, trusted)
+}
+
+// ClientIP is the client address of r as the login throttle sees it: the TCP
+// peer, or the X-Forwarded-For client when the peer is a trusted proxy. The
+// audit log records the same address.
+func (s *Service) ClientIP(r *http.Request) string { return s.clientIP(r) }
+
+// SetAuditor routes sign-in, sign-out and password-change events to rec.
+func (s *Service) SetAuditor(rec *audit.Recorder) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.audit = rec
+}
+
+// record stamps ev with r's client address and queues it. Never blocks.
+func (s *Service) record(r *http.Request, ev audit.Event) {
+	s.mu.RLock()
+	rec := s.audit
+	s.mu.RUnlock()
+	if rec == nil {
+		return
+	}
+	ev.ActorIP = s.clientIP(r)
+	rec.Record(ev)
 }
 
 // SetOIDC swaps the live identity-provider config (nil disables SSO). The next
@@ -382,6 +408,13 @@ func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !checkPassword(u, req.Password) {
 		s.loginGuard.fail(key, ip)
+		// The actor is whoever claimed the username; no account is resolved
+		// (or revealed) for a failed attempt. Throttled attempts above are not
+		// recorded: they are cheap to send and would let anyone flood the log.
+		s.record(r, audit.Event{
+			ActorName: strings.TrimSpace(req.Username), Action: audit.SignIn, TargetType: "user",
+			Summary: map[string]any{"method": "password", "reason": "invalid credentials"},
+		})
 		// Flat delay + uniform message: no username/password oracle.
 		time.Sleep(500 * time.Millisecond)
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
@@ -392,6 +425,10 @@ func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	s.record(r, audit.Event{
+		Action: audit.SignIn, TargetType: "user", TargetID: strconv.FormatInt(u.ID, 10), Success: true,
+		Summary: map[string]any{"method": "password"},
+	}.As(u))
 	writeJSON(w, u)
 }
 
@@ -403,6 +440,11 @@ func (s *Service) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		Name: sessionCookie, Value: "", Path: "/", MaxAge: -1,
 		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: s.cookieSecure,
 	})
+	if u := UserFrom(r.Context()); u != nil {
+		s.record(r, audit.Event{
+			Action: audit.SignOut, TargetType: "user", TargetID: strconv.FormatInt(u.ID, 10), Success: true,
+		}.As(u))
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -451,6 +493,10 @@ func (s *Service) HandlePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if !checkPassword(u, req.Old) {
 		s.pwGuard.fail(key, ip)
+		s.record(r, audit.Event{
+			Action: audit.PasswordChange, TargetType: "user", TargetID: strconv.FormatInt(u.ID, 10),
+			Summary: map[string]any{"reason": "current password incorrect"},
+		}.As(u))
 		http.Error(w, "current password is incorrect", http.StatusForbidden)
 		return
 	}
@@ -469,6 +515,10 @@ func (s *Service) HandlePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.store.DeleteUserSessions(r.Context(), u.ID)
+	s.record(r, audit.Event{
+		Action: audit.PasswordChange, TargetType: "user", TargetID: strconv.FormatInt(u.ID, 10), Success: true,
+		Summary: map[string]any{"sessions_revoked": true},
+	}.As(u))
 	if err := s.issueSession(r.Context(), w, u.ID); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

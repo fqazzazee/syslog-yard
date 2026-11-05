@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/syslog-yard/syslog-bucket/internal/audit"
 	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
@@ -154,8 +155,9 @@ func (s *server) putOIDCSettings(w http.ResponseWriter, r *http.Request) {
 	// (which never receives the secret) doesn't wipe it — but only for the same
 	// issuer: the secret is sent to the issuer's token endpoint, so carrying it
 	// over to a new issuer would hand it to whoever runs that one.
-	if in.ClientSecret == "" {
-		prev, _ := s.resolveOIDC(r.Context())
+	prev, _ := s.resolveOIDC(r.Context())
+	secretSent := in.ClientSecret != ""
+	if !secretSent {
 		kept, err := keepClientSecret(prev, in)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -173,6 +175,7 @@ func (s *server) putOIDCSettings(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "save oidc settings", err)
 		return
 	}
+	s.record(r, audit.SettingsOIDC, "settings", "oidc", oidcAuditSummary(prev, in, secretSent))
 	o := buildOIDC(in)
 	s.authSvc.SetOIDC(o)
 	// Discovery probe gives immediate feedback without blocking the save.
@@ -206,6 +209,33 @@ func keepClientSecret(prev, in oidcSettings) (string, error) {
 	return "", nil
 }
 
+// oidcAuditSummary describes an OIDC settings save for the audit log: the
+// non-secret fields that changed, and only whether the client secret was
+// replaced, kept or cleared — never the secret itself.
+func oidcAuditSummary(prev, in oidcSettings, secretSent bool) map[string]any {
+	sum := map[string]any{}
+	diff := func(key string, from, to any) {
+		if from != to {
+			sum[key] = change(from, to)
+		}
+	}
+	diff("enabled", prev.Enabled, in.Enabled)
+	diff("issuer", prev.Issuer, in.Issuer)
+	diff("client_id", prev.ClientID, in.ClientID)
+	diff("redirect_url", prev.RedirectURL, in.RedirectURL)
+	diff("name", prev.Name, in.Name)
+	diff("default_role", prev.DefaultRole, in.DefaultRole)
+	switch {
+	case secretSent:
+		sum["client_secret"] = "replaced"
+	case in.ClientSecret != "":
+		sum["client_secret"] = "kept"
+	case prev.ClientSecret != "":
+		sum["client_secret"] = "cleared"
+	}
+	return sum
+}
+
 func normIssuer(s string) string {
 	return strings.TrimRight(strings.TrimSpace(s), "/")
 }
@@ -222,10 +252,13 @@ func (s *server) putSessionSettings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "idle_minutes must be between 1 and 525600", http.StatusBadRequest)
 		return
 	}
+	before := s.resolveIdleMinutes(r.Context())
 	if err := s.store.PutSetting(r.Context(), "session", in); err != nil {
 		s.internalError(w, "save session settings", err)
 		return
 	}
+	s.record(r, audit.SettingsSession, "settings", "session",
+		map[string]any{"idle_minutes": change(before, in.IdleMinutes)})
 	idle := time.Duration(in.IdleMinutes) * time.Minute
 	s.authSvc.SetIdleTTL(idle)
 	s.capSessions(r.Context(), idle)
