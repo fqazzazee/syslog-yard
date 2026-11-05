@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -95,6 +95,35 @@ const NEW_NAMES: Record<NodeType, string> = {
 
 type AuthState = { enabled: boolean; user: AuthUser | null };
 
+// useVisibleInterval calls fn every ms while the tab is visible; a hidden
+// tab stops polling and becoming visible again refreshes immediately.
+function useVisibleInterval(fn: () => void, ms: number): void {
+  const cb = useRef(fn);
+  cb.current = fn;
+  useEffect(() => {
+    let timer: number | undefined;
+    const start = (now: boolean) => {
+      window.clearInterval(timer);
+      if (now) cb.current();
+      timer = window.setInterval(() => cb.current(), ms);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") window.clearInterval(timer);
+      else start(true);
+    };
+    if (document.visibilityState !== "hidden") start(false);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [ms]);
+}
+
+// graphKey is a stable fingerprint of what Save would send, used to tell
+// whether the canvas differs from the last saved graph.
+const graphKey = (g: Graph) => JSON.stringify(g);
+
 // App gates the workspace behind yard auth when the deployment enables it
 // (YARD_AUTH_URL); standalone runs stay open.
 export default function App() {
@@ -147,14 +176,21 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   const [aboutOpen, setAboutOpen] = useState(false);
   const [theme, setTheme] = useState(getTheme());
   const importInput = useRef<HTMLInputElement>(null);
+  const [savedKey, setSavedKey] = useState<string | null>(null);
   const readOnly = user?.role === "viewer";
 
   // applyStatus stores the status and turns the cumulative per-node counters
   // into a per-second rate from the delta since the previous poll.
   const applyStatus = useCallback((st: Status | null) => {
     setStatus(st);
-    const tp = st?.throughput;
-    if (!tp) return;
+    // No counters (syslog-ng down, or the status call failed): clear the
+    // rates and the baseline so wires don't keep showing the last number.
+    const tp = st?.running ? st.throughput : undefined;
+    if (!tp) {
+      prevTp.current = null;
+      setEps((e) => (Object.keys(e).length === 0 ? e : {}));
+      return;
+    }
     const now = Date.now();
     const prev = prevTp.current;
     if (prev) {
@@ -172,7 +208,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   }, []);
 
   const refresh = useCallback(() => {
-    api.status().then(applyStatus).catch(() => setStatus(null));
+    api.status().then(applyStatus).catch(() => applyStatus(null));
     api.config().then(setConf).catch(() => {});
     api.history().then(setHistory).catch(() => {});
   }, [applyStatus]);
@@ -184,37 +220,65 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
         const f = toFlow(g);
         setNodes(f.nodes);
         setEdges(f.edges);
+        setSavedKey(graphKey(fromFlow(f.nodes, f.edges)));
       })
       .catch((e) => setBanner({ kind: "err", text: String(e) }));
     api.hints().then(setHints).catch(() => {});
     refresh();
-    const t = setInterval(() => api.status().then(applyStatus).catch(() => setStatus(null)), 3000);
-    return () => clearInterval(t);
-  }, [refresh, applyStatus, setNodes, setEdges]);
+  }, [refresh, setNodes, setEdges]);
 
-  // Re-label the wires with live throughput whenever the rates update. A wire
-  // into a sink shows that sink's rate (post-filter delivered); a wire out of a
-  // source shows the source's rate. Filter→filter wires have no driver counter.
+  // Status every 3s while the tab is visible.
+  useVisibleInterval(() => {
+    api.status().then(applyStatus).catch(() => applyStatus(null));
+  }, 3000);
+
+  // Unsaved-changes tracking: compare the canvas with the last graph loaded
+  // from or saved to the server (savedKey is null until the first load).
+  const dirty = savedKey !== null && graphKey(fromFlow(nodes, edges)) !== savedKey;
   useEffect(() => {
+    if (!dirty || readOnly) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty, readOnly]);
+
+  // Label the wires with live throughput. A wire into a sink shows that
+  // sink's rate (post-filter delivered); a wire out of a source shows the
+  // source's rate. Filter→filter wires have no driver counter. Derived at
+  // render (not written back into edge state) so wires loaded or drawn after
+  // the last poll are labelled too, and nothing animates while syslog-ng is
+  // not running.
+  const running = status?.running ?? false;
+  const typeKey = nodes.map((n) => `${n.id}\u0000${n.data.g.type}`).join("\u0001");
+  const nodeType = useMemo(() => {
     const type: Record<string, string> = {};
     for (const n of nodesRef.current) type[n.id] = n.data.g.type;
-    setEdges((es) =>
-      es.map((e) => {
+    return type;
+  }, [typeKey]);
+  const shownEdges = useMemo(
+    () =>
+      edges.map((e) => {
         const isElse = e.sourceHandle === "else";
         let rate: number | undefined;
-        if (["forward", "cache", "notify"].includes(type[e.target])) rate = eps[e.target];
-        else if (type[e.source] === "source") rate = eps[e.source];
+        if (["forward", "cache", "notify"].includes(nodeType[e.target])) rate = eps[e.target];
+        else if (nodeType[e.source] === "source") rate = eps[e.source];
         const rateLabel = fmtEps(rate);
         const label = [isElse ? "else" : null, rateLabel].filter(Boolean).join(" · ") || undefined;
-        return { ...e, label, animated: rate === undefined ? true : rate > 0, className: isElse ? "edge-else" : undefined };
+        const animated = running && (rate === undefined ? true : rate > 0);
+        return { ...e, label, animated, className: isElse ? "edge-else" : undefined };
       }),
-    );
-  }, [eps, setEdges]);
+    [edges, eps, running, nodeType],
+  );
 
   const onConnect = useCallback(
-    (c: Connection) =>
-      setEdges((es) => addEdge(mkEdge(c.source!, c.target!, c.sourceHandle), es)),
-    [setEdges],
+    (c: Connection) => {
+      if (readOnly) return;
+      setEdges((es) => addEdge(mkEdge(c.source!, c.target!, c.sourceHandle), es));
+    },
+    [setEdges, readOnly],
   );
 
   const addNode = (type: NodeType, init?: { name: string; config: Partial<GraphNode["config"]> }) => {
@@ -242,6 +306,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   };
 
   const updateSelected = (g: GraphNode) => {
+    if (readOnly) return;
     setNodes((ns) => (ns.map((n) => (n.id === g.id ? { ...n, data: { g } } : n))));
   };
 
@@ -255,7 +320,9 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
 
   const save = async (): Promise<boolean> => {
     try {
-      await api.saveGraph(fromFlow(nodes, edges));
+      const g = fromFlow(nodes, edges);
+      await api.saveGraph(g);
+      setSavedKey(graphKey(g));
       return true;
     } catch (e) {
       setBanner({ kind: "err", text: String(e) });
@@ -274,13 +341,19 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
     }
   };
 
-  const rollback = async (id: string) => {
+  const rollback = async (id: string, time: string) => {
+    const lose = dirty ? " Unsaved changes on the canvas will be lost." : "";
+    if (!confirm(`Roll back to the config applied ${new Date(time).toLocaleString()}? This reloads syslog-ng now and replaces the graph.${lose}`)) {
+      return;
+    }
     try {
       await api.rollback(id);
       const g = await api.getGraph();
       const f = toFlow(g);
       setNodes(f.nodes);
       setEdges(f.edges);
+      setSavedKey(graphKey(fromFlow(f.nodes, f.edges)));
+      setSelected(null);
       setBanner({ kind: "ok", text: `Rolled back to ${id}` });
       refresh();
     } catch (e) {
@@ -302,12 +375,17 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   };
 
   const importGraph = async (file: File) => {
+    const lose = dirty ? " Unsaved changes on the canvas will be lost." : "";
+    if (!confirm(`Import ${file.name}? It replaces the saved graph immediately (Apply is still needed to activate it).${lose}`)) {
+      return;
+    }
     try {
       const g = JSON.parse(await file.text()) as Graph;
       await api.saveGraph(g);
       const f = toFlow(g);
       setNodes(f.nodes);
       setEdges(f.edges);
+      setSavedKey(graphKey(fromFlow(f.nodes, f.edges)));
       setSelected(null);
       setBanner({ kind: "ok", text: `Imported ${file.name} — Apply to activate` });
     } catch (e) {
@@ -392,6 +470,11 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
                   e.target.value = "";
                 }}
               />
+              {dirty && (
+                <span className="muted" title="The canvas differs from the saved graph">
+                  unsaved changes
+                </span>
+              )}
               <button className="primary" onClick={apply}>
                 <Icon name="check" size={15} /> Apply
               </button>
@@ -420,11 +503,14 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
         <div className="canvas">
           <ReactFlow
             nodes={nodes}
-            edges={edges}
+            edges={shownEdges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            nodesDraggable={!readOnly}
+            nodesConnectable={!readOnly}
+            edgesReconnectable={!readOnly}
             onNodeClick={(_, n) => setSelected(n.id)}
             onPaneClick={() => setSelected(null)}
             deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
@@ -444,7 +530,9 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
         <aside>
           {sel ? (
             <NodePanel
+              key={sel.id}
               node={sel}
+              readOnly={readOnly}
               shares={shares}
               onChange={updateSelected}
               onDelete={readOnly ? undefined : () => deleteNode(sel.id)}
@@ -465,7 +553,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
                   <button onClick={() => togglePreview(h.id)}>
                     {preview?.id === h.id ? "hide" : "view"}
                   </button>
-                  {!readOnly && <button onClick={() => rollback(h.id)}>roll back</button>}
+                  {!readOnly && <button onClick={() => rollback(h.id, h.time)}>roll back</button>}
                 </div>
                 {preview?.id === h.id && <pre>{preview.conf}</pre>}
               </div>
@@ -492,7 +580,9 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
 // TailDrawer streams every message entering the valve (SSE from the tap
 // socket), labeled with the IN port it arrived on.
 function TailDrawer() {
-  const [events, setEvents] = useState<TailEvent[]>([]);
+  // uid: a client-side key; the server's seq restarts with the server.
+  const [events, setEvents] = useState<(TailEvent & { uid: number })[]>([]);
+  const nextUid = useRef(0);
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
   pausedRef.current = paused;
@@ -506,8 +596,14 @@ function TailDrawer() {
     const es = new EventSource("/api/tail");
     es.onmessage = (m) => {
       if (pausedRef.current) return;
-      const ev = JSON.parse(m.data) as TailEvent;
-      setEvents((prev) => [...prev, ev].slice(-300));
+      let ev: TailEvent;
+      try {
+        ev = JSON.parse(m.data) as TailEvent;
+      } catch {
+        return; // skip a malformed frame
+      }
+      const row = { ...ev, uid: ++nextUid.current };
+      setEvents((prev) => [...prev, row].slice(-300));
     };
     return () => es.close();
   }, []);
@@ -525,7 +621,7 @@ function TailDrawer() {
       <div className="tail-body" ref={bodyRef}>
         {events.length === 0 && <div className="muted">Waiting for traffic…</div>}
         {events.map((e) => (
-          <div className="tail-line" key={e.seq}>
+          <div className="tail-line" key={e.uid}>
             <span className="tail-src">{e.src}</span>
             <span className="tail-meta">
               {e.time.slice(11, 19)} {e.host} {e.program}:

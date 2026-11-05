@@ -13,11 +13,13 @@ const TITLES: Record<GraphNode["type"], string> = {
 export function NodePanel({
   node,
   shares,
+  readOnly,
   onChange,
   onDelete,
 }: {
   node: GraphNode;
   shares: string[];
+  readOnly?: boolean; // viewer role: every field (and test/cert action) disabled
   onChange: (g: GraphNode) => void;
   onDelete?: () => void;
 }) {
@@ -27,230 +29,233 @@ export function NodePanel({
   return (
     <div className="panel">
       <h3>{TITLES[node.type]}</h3>
-      <label>
-        Name
-        <input
-          value={node.name}
-          onChange={(e) => onChange({ ...node, name: e.target.value })}
-        />
-      </label>
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={!node.disabled}
-          onChange={(e) => onChange({ ...node, disabled: e.target.checked ? undefined : true })}
-        />
-        enabled — off keeps the block but leaves it out on Apply
-      </label>
+      {/* A disabled fieldset disables every control inside it at once. */}
+      <fieldset disabled={readOnly} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+        <label>
+          Name
+          <input
+            value={node.name}
+            onChange={(e) => onChange({ ...node, name: e.target.value })}
+          />
+        </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={!node.disabled}
+            onChange={(e) => onChange({ ...node, disabled: e.target.checked ? undefined : true })}
+          />
+          enabled — off keeps the block but leaves it out on Apply
+        </label>
 
-      {(node.type === "source" || node.type === "forward") && (
-        <>
-          <label>
-            Transport
-            <select
-              value={node.config.transport}
-              onChange={(e) => set({ transport: e.target.value as NonNullable<GraphNode["config"]["transport"]> })}
-            >
-              <option value="udp">udp</option>
-              <option value="tcp">tcp</option>
-              {node.type === "source" && <option value="udp+tcp">udp + tcp (both)</option>}
-              <option value="tls">tls (RFC 5425)</option>
-            </select>
-          </label>
-          {node.type === "source" ? (
+        {(node.type === "source" || node.type === "forward") && (
+          <>
             <label>
-              Bind address
+              Transport
+              <select
+                value={node.config.transport}
+                onChange={(e) => set({ transport: e.target.value as NonNullable<GraphNode["config"]["transport"]> })}
+              >
+                <option value="udp">udp</option>
+                <option value="tcp">tcp</option>
+                {node.type === "source" && <option value="udp+tcp">udp + tcp (both)</option>}
+                <option value="tls">tls (RFC 5425)</option>
+              </select>
+            </label>
+            {node.type === "source" ? (
+              <label>
+                Bind address
+                <input
+                  value={node.config.bind ?? ""}
+                  placeholder="0.0.0.0"
+                  onChange={(e) => set({ bind: e.target.value })}
+                />
+              </label>
+            ) : (
+              <label>
+                Destination host
+                <input
+                  value={node.config.host ?? ""}
+                  placeholder="host or IP"
+                  onChange={(e) => set({ host: e.target.value })}
+                />
+              </label>
+            )}
+            <label>
+              Port
               <input
-                value={node.config.bind ?? ""}
-                placeholder="0.0.0.0"
-                onChange={(e) => set({ bind: e.target.value })}
+                type="number"
+                min={1}
+                max={65535}
+                value={node.config.port ?? 514}
+                onChange={(e) => set({ port: Number(e.target.value) })}
               />
             </label>
-          ) : (
+            {node.type === "source" && (
+              <p className="muted">
+                {node.config.port === 6514
+                  ? "External entry point: the deployment publishes host port 6514 onto this port, so off-host senders land here. The enabled toggle above is the external on/off switch."
+                  : `Internal: yard services reach this at syslog-valve:${node.config.port ?? 514} (the hose sends here by default). Not reachable from outside the host unless published in deploy/compose.yaml.`}
+              </p>
+            )}
+            {node.config.transport === "tls" && node.type === "source" && <CertPanel />}
+            {node.config.transport === "tls" && node.type === "forward" && (
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={node.config.tlsVerify ?? false}
+                  onChange={(e) => set({ tlsVerify: e.target.checked })}
+                />
+                verify server certificate (system CAs)
+              </label>
+            )}
+          </>
+        )}
+
+        {node.type === "filter" && (
+          <>
             <label>
-              Destination host
+              Severity at least
+              <select
+                value={node.config.severityMax ?? -1}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  set({ severityMax: v < 0 ? undefined : v });
+                }}
+              >
+                <option value={-1}>— any severity —</option>
+                {SEVERITIES.map((s, i) => (
+                  <option key={s} value={i}>
+                    {s} or worse (≤ {i})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Program equals
               <input
-                value={node.config.host ?? ""}
-                placeholder="host or IP"
-                onChange={(e) => set({ host: e.target.value })}
+                value={node.config.program ?? ""}
+                placeholder="e.g. sshd (optional)"
+                onChange={(e) => set({ program: e.target.value })}
               />
             </label>
-          )}
-          <label>
-            Port
-            <input
-              type="number"
-              min={1}
-              max={65535}
-              value={node.config.port ?? 514}
-              onChange={(e) => set({ port: Number(e.target.value) })}
+            <label>
+              Message matches (regex)
+              <input
+                value={node.config.match ?? ""}
+                placeholder={'e.g. subtype="ips" (optional)'}
+                onChange={(e) => set({ match: e.target.value })}
+              />
+            </label>
+            <TechniqueSelect
+              value={node.config.technique ?? ""}
+              onChange={(technique) => set({ technique: technique || undefined })}
             />
-          </label>
-          {node.type === "source" && (
             <p className="muted">
-              {node.config.port === 6514
-                ? "External entry point: the deployment publishes host port 6514 onto this port, so off-host senders land here. The enabled toggle above is the external on/off switch."
-                : `Internal: yard services reach this at syslog-valve:${node.config.port ?? 514} (the hose sends here by default). Not reachable from outside the host unless published in deploy/compose.yaml.`}
+              Conditions are ANDed. Matching messages leave via <b>match</b>, the
+              rest via <b>else</b>.
             </p>
-          )}
-          {node.config.transport === "tls" && node.type === "source" && <CertPanel />}
-          {node.config.transport === "tls" && node.type === "forward" && (
+          </>
+        )}
+
+        {node.type === "notify" && (
+          <>
+            <label>
+              Destination
+              <select
+                value={node.config.notifyKind ?? "slack"}
+                onChange={(e) => set({ notifyKind: e.target.value as "webhook" | "slack" })}
+              >
+                <option value="slack">Slack / Teams ({"{text}"})</option>
+                <option value="webhook">Webhook (JSON)</option>
+              </select>
+            </label>
+            <label>
+              Webhook URL
+              <input
+                value={node.config.url ?? ""}
+                placeholder="https://hooks.example.com/…"
+                onChange={(e) => set({ url: e.target.value })}
+              />
+            </label>
+            <label>
+              Max notifications/min (0 = unlimited)
+              <input
+                type="number"
+                min={0}
+                value={node.config.ratePerMin ?? 30}
+                onChange={(e) => set({ ratePerMin: Number(e.target.value) })}
+              />
+            </label>
+            <NotifyTest kind={node.config.notifyKind ?? "slack"} url={node.config.url ?? ""} />
+            <p className="muted">
+              Matched messages are delivered in real time, before storage. For email, use a
+              syslog-bucket channel. Changes take effect on Apply.
+            </p>
+          </>
+        )}
+
+        {node.type === "cache" && (
+          <>
+            <label>
+              Location
+              <select
+                value={node.config.location ?? ""}
+                onChange={(e) => set({ location: e.target.value })}
+              >
+                <option value="">local (/data/cache)</option>
+                {shares.map((s) => (
+                  <option key={s} value={s}>
+                    share: {s} (/shares/{s})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Folder
+              <input
+                value={node.config.dir ?? ""}
+                placeholder="subfolder name"
+                onChange={(e) => set({ dir: e.target.value })}
+              />
+            </label>
+            <label>
+              Rotate when size reaches (MB, 0 = daily)
+              <input
+                type="number"
+                min={0}
+                value={node.config.maxSizeMB ?? 0}
+                onChange={(e) => set({ maxSizeMB: Number(e.target.value) })}
+              />
+            </label>
+            <label>
+              Rotations kept
+              <input
+                type="number"
+                min={1}
+                value={node.config.rotate ?? 7}
+                onChange={(e) => set({ rotate: Number(e.target.value) })}
+              />
+            </label>
+            <label>
+              Delete rotated logs older than (days, 0 = never)
+              <input
+                type="number"
+                min={0}
+                value={node.config.maxAgeDays ?? 0}
+                onChange={(e) => set({ maxAgeDays: Number(e.target.value) })}
+              />
+            </label>
             <label className="check">
               <input
                 type="checkbox"
-                checked={node.config.tlsVerify ?? false}
-                onChange={(e) => set({ tlsVerify: e.target.checked })}
+                checked={node.config.compress ?? false}
+                onChange={(e) => set({ compress: e.target.checked })}
               />
-              verify server certificate (system CAs)
+              compress rotated logs
             </label>
-          )}
-        </>
-      )}
-
-      {node.type === "filter" && (
-        <>
-          <label>
-            Severity at least
-            <select
-              value={node.config.severityMax ?? -1}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                set({ severityMax: v < 0 ? undefined : v });
-              }}
-            >
-              <option value={-1}>— any severity —</option>
-              {SEVERITIES.map((s, i) => (
-                <option key={s} value={i}>
-                  {s} or worse (≤ {i})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Program equals
-            <input
-              value={node.config.program ?? ""}
-              placeholder="e.g. sshd (optional)"
-              onChange={(e) => set({ program: e.target.value })}
-            />
-          </label>
-          <label>
-            Message matches (regex)
-            <input
-              value={node.config.match ?? ""}
-              placeholder={'e.g. subtype="ips" (optional)'}
-              onChange={(e) => set({ match: e.target.value })}
-            />
-          </label>
-          <TechniqueSelect
-            value={node.config.technique ?? ""}
-            onChange={(technique) => set({ technique: technique || undefined })}
-          />
-          <p className="muted">
-            Conditions are ANDed. Matching messages leave via <b>match</b>, the
-            rest via <b>else</b>.
-          </p>
-        </>
-      )}
-
-      {node.type === "notify" && (
-        <>
-          <label>
-            Destination
-            <select
-              value={node.config.notifyKind ?? "slack"}
-              onChange={(e) => set({ notifyKind: e.target.value as "webhook" | "slack" })}
-            >
-              <option value="slack">Slack / Teams ({"{text}"})</option>
-              <option value="webhook">Webhook (JSON)</option>
-            </select>
-          </label>
-          <label>
-            Webhook URL
-            <input
-              value={node.config.url ?? ""}
-              placeholder="https://hooks.example.com/…"
-              onChange={(e) => set({ url: e.target.value })}
-            />
-          </label>
-          <label>
-            Max notifications/min (0 = unlimited)
-            <input
-              type="number"
-              min={0}
-              value={node.config.ratePerMin ?? 30}
-              onChange={(e) => set({ ratePerMin: Number(e.target.value) })}
-            />
-          </label>
-          <NotifyTest kind={node.config.notifyKind ?? "slack"} url={node.config.url ?? ""} />
-          <p className="muted">
-            Matched messages are delivered in real time, before storage. For email, use a
-            syslog-bucket channel. Changes take effect on Apply.
-          </p>
-        </>
-      )}
-
-      {node.type === "cache" && (
-        <>
-          <label>
-            Location
-            <select
-              value={node.config.location ?? ""}
-              onChange={(e) => set({ location: e.target.value })}
-            >
-              <option value="">local (/data/cache)</option>
-              {shares.map((s) => (
-                <option key={s} value={s}>
-                  share: {s} (/shares/{s})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Folder
-            <input
-              value={node.config.dir ?? ""}
-              placeholder="subfolder name"
-              onChange={(e) => set({ dir: e.target.value })}
-            />
-          </label>
-          <label>
-            Rotate when size reaches (MB, 0 = daily)
-            <input
-              type="number"
-              min={0}
-              value={node.config.maxSizeMB ?? 0}
-              onChange={(e) => set({ maxSizeMB: Number(e.target.value) })}
-            />
-          </label>
-          <label>
-            Rotations kept
-            <input
-              type="number"
-              min={1}
-              value={node.config.rotate ?? 7}
-              onChange={(e) => set({ rotate: Number(e.target.value) })}
-            />
-          </label>
-          <label>
-            Delete rotated logs older than (days, 0 = never)
-            <input
-              type="number"
-              min={0}
-              value={node.config.maxAgeDays ?? 0}
-              onChange={(e) => set({ maxAgeDays: Number(e.target.value) })}
-            />
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={node.config.compress ?? false}
-              onChange={(e) => set({ compress: e.target.checked })}
-            />
-            compress rotated logs
-          </label>
-        </>
-      )}
+          </>
+        )}
+      </fieldset>
 
       <p className="muted">Changes take effect on Apply.</p>
       {onDelete && (
