@@ -35,6 +35,11 @@ type Config struct {
 	// "localhost:5173") allowed to open the live-tail WebSocket. Same-origin
 	// is always allowed; leave empty outside development.
 	WSOrigins []string
+
+	// TrustedProxies is a comma-separated list of IPs/CIDRs of reverse
+	// proxies whose X-Forwarded-For the login throttle believes. Empty means
+	// the TCP peer address is always the client.
+	TrustedProxies string
 }
 
 func FromEnv() Config {
@@ -53,7 +58,8 @@ func FromEnv() Config {
 		OIDCName:         getenv("BUCKET_OIDC_NAME", "SSO"),
 		OIDCDefaultRole:  getenv("BUCKET_OIDC_DEFAULT_ROLE", "analyst"),
 
-		WSOrigins: splitList(os.Getenv("BUCKET_WS_ORIGINS")),
+		WSOrigins:      splitList(os.Getenv("BUCKET_WS_ORIGINS")),
+		TrustedProxies: os.Getenv("BUCKET_TRUSTED_PROXIES"),
 	}
 }
 
