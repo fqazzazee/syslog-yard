@@ -20,8 +20,8 @@ appropriate for a lab or when you front it with reverse-proxy auth instead.
 On first start with an empty database the bucket creates an `admin`
 account:
 
-- **unset (the shipped default)** → a strong random password is generated
-  and printed once in the log. Retrieve it with
+- **unset (the shipped default)** → a random 128-bit password (32 hex
+  characters) is generated and printed once in the log. Retrieve it with
   `scripts/yardctl logs syslog-bucket | grep -i password` (or
   `docker compose logs syslog-bucket | grep -i password`).
 - `BUCKET_ADMIN_PASSWORD` set → that password is used instead. Useful for
@@ -44,8 +44,9 @@ reset-admin` (append a password to set a known one).
 
 Every yard UI carries the same **👤 account menu**: password change under
 **Account…**, and for admins **Users…** — add local users, change roles,
-reset passwords, disable (revokes all sessions immediately), or delete.
-On the hose and valve these actions are proxied to the bucket, which
+reset passwords, disable, or delete. Disabling an account, lowering its
+role, and resetting its password all revoke its sessions immediately;
+promotions keep them. On the hose and valve these actions are proxied to the bucket, which
 enforces the roles. You cannot demote, disable, or delete your own
 account.
 
@@ -80,7 +81,10 @@ You can configure it two ways:
   immediately, no restart: the login page's "Sign in with …" button appears (or
   disappears) right away. The client secret is stored but never sent back to the
   browser, so leaving the secret field blank on a later save keeps the existing
-  one. On save the bucket probes the issuer's discovery document and warns (non
+  one — as long as the issuer stays the same. Change the issuer and the stored
+  secret is discarded (it would otherwise be sent to the new issuer's token
+  endpoint): saving an enabled config with a new issuer and a blank secret
+  answers 400 and asks you to re-enter it. On save the bucket probes the issuer's discovery document and warns (non
   fatally) if it can't be reached yet.
 - **By environment variable** (legacy / infrastructure-as-code): set the vars
   below. They seed the config when nothing has been saved in the UI; once you
@@ -98,10 +102,15 @@ You can configure it two ways:
 The settings live in the bucket's `app_settings` table, so they survive
 restarts and are shared by every bucket replica pointed at the same database.
 
-The bucket's login page gains a "Sign in with …" button. First sign-in
-auto-provisions an account bound to the OIDC subject (username from
+The bucket's login page gains a "Sign in with …" button. The sign-in uses
+the authorization-code flow with `state`, PKCE (`S256`) and an ID-token
+`nonce`, so the provider must accept PKCE (every current one does). If the
+callback fails for any reason, the browser gets a generic "Single sign-on
+failed" page and the reason goes to the bucket's log (`oidc sign-in failed`,
+with the step). First sign-in auto-provisions an account bound to the OIDC subject (username from
 `preferred_username`/`email`); admins can adjust its role afterwards like
-any other account. OIDC accounts have no local password — password
+any other account. New SSO users start as `viewer` (read-only) unless you
+pick another default role. OIDC accounts have no local password — password
 management stays at the IdP. OIDC users sign in **at the bucket**; on a
 same-host deployment the resulting session covers the hose and valve too
 (their own login forms take local credentials only).
@@ -151,7 +160,7 @@ https://authentik.example.com/application/o/syslog-bucket/
 | Client secret | from step 1 |
 | Redirect URL | `https://bucket.example.com/api/auth/oidc/callback` |
 | Button label | `authentik` |
-| Default role | `analyst` (promote specific users to admin afterwards) |
+| Default role | `viewer` (the default; promote people explicitly afterwards) |
 
 Save. The bucket probes discovery and warns if the issuer isn't reachable; a
 clean save means it resolved.
@@ -172,15 +181,31 @@ an existing admin can change its role under Users.
 ## Sessions & deployment notes
 
 - Sessions are opaque cookies (`HttpOnly`, `SameSite=Lax`); only a SHA-256 of
-  the token is stored server-side. Password changes and account disables revoke
-  existing sessions; the hose/valve verification cache means revocation reaches
-  them within ~30 seconds.
+  the token is stored server-side. Changing your own password signs out your
+  other sessions; an admin disabling, demoting, or resetting the password of
+  an account signs out all of its sessions. The hose/valve verification cache
+  means revocation reaches them within ~30 seconds, and an open live tail in
+  the bucket re-checks its session every 30 seconds and closes once it's
+  gone.
 - **Idle timeout (login timeout).** A session expires after a configurable
   period of inactivity (default 30 days). Admins set it under **Settings →
   Session**. Any authenticated request slides the expiry forward, so the timeout
   effectively starts once a browser tab is closed or left idle. Note that an open
   tab polling the UI counts as activity. The expiry is throttled to at most one
-  write per minute per session, so it adds no meaningful load.
+  write per minute per session, so it adds no meaningful load. Lowering the
+  timeout also shortens sessions that are already open; raising it doesn't
+  extend them.
+- **Failed sign-ins are throttled.** Ten wrong passwords for one username
+  from one client address lock that pair out for 5 minutes (the count keeps
+  growing while failures arrive less than 5 minutes apart); 100 failures for
+  one username from all addresses within 15 minutes lock the account for 15
+  minutes. Password changes are throttled the same way, per user. Unknown
+  usernames cost the same bcrypt comparison as real ones and get the same
+  answer. Logins made through the hose or valve arrive from those
+  containers, so unless the bucket trusts them as proxies, all of them share
+  one per-address budget per tool — see
+  [SECURITY.md](SECURITY.md#client-addresses-behind-the-hose-valve-or-a-proxy)
+  for `YARD_TRUSTED_PROXIES`.
 - Serving over HTTPS (recommended outside a lab)? Set
   `BUCKET_COOKIE_SECURE=true` on the bucket and `YARD_COOKIE_SECURE=true`
   on the hose/valve so cookies are marked `Secure`.
@@ -196,7 +221,9 @@ an existing admin can change its role under Users.
   session, on every tool.
 - State-changing requests (POST/PUT/PATCH/DELETE) must come from the UI's
   own origin: every tool rejects cross-site/same-site fetch metadata and a
-  mismatched `Origin`. Behind a reverse proxy that rewrites `Host`, set
+  mismatched `Origin`, and the bucket additionally requires POSTs to its API
+  to be `application/json` (415 otherwise; logout is exempt). Behind a
+  reverse proxy that rewrites `Host`, set
   `YARD_TRUSTED_ORIGINS=https://yard.example.com` (or
   `YARD_TRUSTED_PROXIES=<proxy IP/CIDR>` to honour its `X-Forwarded-Host`)
   on each tool, and `BUCKET_WS_ORIGINS` on the bucket for live tail. See

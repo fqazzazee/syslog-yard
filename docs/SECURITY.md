@@ -41,16 +41,34 @@ never back into config or commands.
 - **syslog-ng / logrotate config injection** — quoting alone isn't the
   defence (a Go `%q` string is not a syslog-ng string: escapes and newlines
   differ), so the valve validates the graph strictly before generating
-  anything: control characters are rejected in every free-text field, node
-  IDs are restricted to a safe identifier charset, the transport is an enum,
-  ports are range-checked, regexes must compile, and a cache `Dir` must
-  match `[A-Za-z0-9._/-]` with no `..` and no leading `/`. Comment text is
-  sanitized before it lands in a `#` line, and logrotate paths are quoted.
-  The generator is fuzz-tested, and its output is checked against the real
-  `syslog-ng --syntax-only` and logrotate parsers. Every apply still runs
-  `syslog-ng --syntax-only` before an atomic swap, with last-known-good
-  kept for one-click rollback; the child process is exec'd with a fixed
-  argv (no shell).
+  anything:
+  - every free-text field rejects control characters (U+0000–001F,
+    U+007F–009F, and the U+2028/U+2029 line and paragraph separators) and
+    has a length limit (200 bytes for names, 2048 for URLs, 4096 for match
+    patterns, 512 for the rest);
+  - node IDs must match `[A-Za-z0-9_.-]{1,64}`, and IDs that would compile
+    to the same syslog-ng identifier are refused;
+  - the transport is an enum, ports are range-checked, regexes must compile;
+  - a cache `Dir` must match `^[A-Za-z0-9._/-]+$` with no `..` segment and
+    no leading `/`, and a share name `^[A-Za-z0-9._-]+$`;
+  - a notify node's URL must be an absolute `http(s)://` URL with a host.
+
+  The generator then quotes defensively as well: strings are `%q`-quoted
+  *and* backticks are doubled, because syslog-ng expands backtick
+  references everywhere in the config text, inside quoted strings and
+  comments included. Comment text is flattened to one line (backticks
+  doubled there too). logrotate has no escapes inside quotes, so logrotate
+  paths are double-quoted and restricted to a safe character set
+  (letters, digits, space and `/._-+@:,=`). Graphs stored by older versions
+  (the applied one, history entries) are sanitized on load, control
+  characters replaced with spaces, so they can still be opened and rolled
+  back to. The generator is fuzz-tested, and integration tests check its
+  output against the real `syslog-ng --syntax-only` and logrotate parsers
+  (they run where those binaries are installed). Every apply still runs
+  `syslog-ng --syntax-only` before an atomic swap and then waits for
+  syslog-ng to confirm the reload, restoring the previous config if it
+  refuses; last-known-good is kept for one-click rollback, and the child
+  process is exec'd with a fixed argv (no shell).
 - **Path traversal** — the valve's history endpoints constrain the id to
   `[0-9.\-]`; cache dirs are whitelisted as above; SPA file serving cleans
   the path and stats within the embedded FS. The hose/valve account proxy
@@ -63,20 +81,35 @@ never back into config or commands.
   `Referrer-Policy: no-referrer` on every response from all three tools.
 - **Credential handling** — passwords are bcrypt-hashed; session tokens are
   256-bit `crypto/rand`, stored only as their SHA-256, and delivered as
-  `HttpOnly`, `SameSite=Lax` cookies. The valve's TLS private key is written
-  `0600`. A stored SMTP password is discarded when a notification channel's
-  target (SMTP server or account) changes, so editing the target can't
-  redirect the saved secret to a server of the editor's choosing.
-- **Brute force** — failed logins are throttled per (username, client IP),
-  so an attacker can't lock a real user out from elsewhere, and password
-  changes are throttled too. Logins proxied through the hose/valve carry
-  the real client address in `X-Forwarded-For`; the bucket believes that
-  header only from peers it is configured to trust as proxies, so a client
-  can't pick its own IP. A flat delay and a uniform error message avoid a
-  username/password oracle.
+  `HttpOnly`, `SameSite=Lax` cookies. A generated admin password carries 128
+  bits (16 random bytes, printed as 32 hex characters) and is logged once.
+  The valve's TLS private key is written `0600`. Stored secrets stay bound
+  to where they are sent: a channel's SMTP password is discarded when its
+  kind, host, port, username or TLS mode changes, and the OIDC client
+  secret when the issuer changes. An edit that still needs the secret
+  answers 400 and asks for it again, so an editor can't redirect a saved
+  secret to a server of their choosing. Webhook and Slack/Teams URLs are
+  bearer secrets too: viewers see them cut down to scheme and host (with a
+  `has_url` flag), and URLs quoted in delivery errors are masked the same
+  way.
+- **Brute force** — ten failed logins for one (username, client IP) pair
+  lock that pair out for 5 minutes, so an attacker can't lock a real user
+  out from elsewhere; an account-wide ceiling of 100 failures within 15
+  minutes, from all addresses, locks the account for 15 minutes to catch a
+  brute force spread over many IPs. Password changes go through the same
+  throttle, keyed per user, so a stolen session can't be used to guess the
+  real password. Unknown, disabled and SSO-only usernames are compared
+  against a dummy bcrypt hash, and every failure gets a flat delay and the
+  same message, so neither timing nor wording reveals which usernames
+  exist. Logins proxied through the hose/valve carry the real client
+  address in `X-Forwarded-For`; the bucket believes that header only from
+  peers listed in `YARD_TRUSTED_PROXIES`, so a client can't pick its own
+  IP (see [below](#client-addresses-behind-the-hose-valve-or-a-proxy)).
 - **OIDC** — the authorization-code flow uses `state`, a `nonce` checked in
-  the ID token, and PKCE. First-time SSO users get the `viewer` role unless
-  `BUCKET_OIDC_DEFAULT_ROLE` (or the UI setting) says otherwise.
+  the ID token, and PKCE (`S256`). The public callback page shows only a
+  generic failure message; the reason goes to the server log. First-time
+  SSO users get the `viewer` role unless `BUCKET_OIDC_DEFAULT_ROLE` (or the
+  UI setting) says otherwise.
 - **No shipped default password** — the bucket has no built-in credentials;
   on first start it generates a random admin password and logs it once
   (`BUCKET_ADMIN_PASSWORD` can pin a known one for automated bootstraps).
@@ -97,20 +130,38 @@ never back into config or commands.
   `Host`, list the public origin in `YARD_TRUSTED_ORIGINS`
   (e.g. `https://yard.example.com`), or list the proxy's address in
   `YARD_TRUSTED_PROXIES` so its `X-Forwarded-Host` is believed — set them
-  on each tool.
+  on each tool. The bucket is stricter still: every POST to its API must be
+  `Content-Type: application/json` (415 otherwise), whatever the headers
+  say; logout, which has no body, is exempt.
 - **Cross-origin WebSocket** — the bucket's live-tail WebSocket accepts
   only same-origin handshakes; add other origins (e.g. a proxy's public
-  name) with `BUCKET_WS_ORIGINS`.
+  name, as host patterns like `yard.example.com`) with `BUCKET_WS_ORIGINS`.
+  A tail outlives the request that opened it, so it re-checks its session
+  every 30 seconds and closes once the session is gone: logout, a password
+  change, or an admin disabling, demoting or resetting the account.
 - **SSRF via notifications** — webhook/Slack/Teams targets (valve notify
-  nodes and bucket channels) are fetched without following redirects,
-  their response bodies are never echoed back to the UI, and loopback and
-  link-local destinations (including cloud metadata at `169.254.169.254`)
-  are blocked. RFC 1918 addresses are allowed on purpose: on-prem chat and
-  ticketing systems live there.
+  nodes and bucket channels) are fetched without following redirects (a
+  3xx counts as a failure), and errors carry only the status code or the
+  transport error, never the response body or the URL. The address is
+  checked after DNS resolution, at connect time: loopback, link-local
+  (including cloud metadata at `169.254.169.254`), unspecified and
+  multicast destinations are refused; the valve also refuses `0.0.0.0/8`
+  and the `fd00:ec2::254` and `100.100.100.200` metadata addresses. RFC 1918
+  addresses are allowed on purpose: on-prem chat and ticketing systems live
+  there. Bucket SMTP sends are bounded at 20 seconds end to end; mail
+  headers are stripped of CR/LF and control characters, so device text
+  can't add headers; and the `none` TLS mode never upgrades to STARTTLS
+  (`starttls`, the default, upgrades when the server offers it).
 - **Resource exhaustion** — ingest lines are capped (1 MiB), the ingest
   queue has bounded depth with backpressure, slow WebSocket clients drop
-  frames rather than stalling ingest, and JSON request bodies are size-
-  limited.
+  frames rather than stalling ingest, and request bodies are size-limited
+  (hose: 64 KiB for jobs, 1 MiB for presets and a little more for
+  previews; valve: 1 MiB for graphs, 64 KiB for notify tests; oversized JSON
+  bodies get a 413). Hose templates are bounded too: `randHex` output at
+  1024 characters, a rendered message at 64 KiB, and 256 distinct `seq`
+  counters per job. The hose and valve bound header reads at 10 seconds.
+  Notification queues are bounded and drop (counting the drops) rather
+  than block.
 - **Privilege escalation** — roles (admin/analyst/viewer) are enforced
   server-side in middleware on every tool, not just hidden in the UI; user
   management requires admin at the bucket regardless of entry point; bucket
@@ -144,6 +195,19 @@ never back into config or commands.
   and verified forwarding (the node's "verify peer" option) in production.
 - **Single workspace.** v1 is single-tenant (the `org_id` columns are
   reserved but unused); every analyst shares one tag/rule namespace.
+- **Configs generated before an upgrade keep running.** The valve restarts
+  with the `current.conf` it last applied, and the stricter validation and
+  escaping above only apply when a config is generated. A config produced
+  by an older version runs until the next Apply, so **re-apply the graph
+  after upgrading the valve**.
+- **Outbound proxies bypass the notification address check.** If
+  `HTTP_PROXY`/`HTTPS_PROXY` is set in a tool's environment, webhook
+  requests go through the proxy, and only the proxy's address is checked;
+  the proxy decides what the final destination may be. The shipped
+  deployments set no proxy.
+- **SMTP channels aren't address-filtered.** Webhook targets get the dial
+  check above; a bucket SMTP channel connects to whatever host and port an
+  analyst or admin configures.
 - **Static default database password.** For compatibility with existing
   volumes, Postgres still defaults to the password `syslog_bucket`. It is
   reachable only from the bucket's container on an internal network, but
@@ -170,12 +234,57 @@ never back into config or commands.
    Behind a reverse proxy, set `YARD_TRUSTED_ORIGINS` (or
    `YARD_TRUSTED_PROXIES`) on each tool and `BUCKET_WS_ORIGINS` on the
    bucket — see the CSRF entry above.
-7. Keep base images current: `scripts/yardctl up` rebuilds with
+7. Set `YARD_TRUSTED_PROXIES` on the bucket so the login throttle sees each
+   browser's address (see the next section).
+8. Keep base images current: `scripts/yardctl up` rebuilds with
    `--pull`, so each run picks up the latest `golang:1.26-alpine`,
    `node:22-alpine`, `alpine:3.22` and distroless base layers, and
    re-pulls `postgres:17-alpine` and `balabit/syslog-ng`. Under quadlet,
    rebuild with `podman build --pull …` (see deploy/quadlet/README.md).
-8. Replace the default Postgres password (see below).
+9. Replace the default Postgres password (see below).
+10. After upgrading, re-apply the valve's graph so its running config is
+    regenerated by the new version (see residual risks).
+
+### Client addresses behind the hose, valve, or a proxy
+
+The login throttle counts failures per (username, client IP). The bucket
+takes the client IP from the TCP connection, unless the connection comes
+from an address listed in `YARD_TRUSTED_PROXIES` (comma-separated IPs or
+CIDRs); then it uses the first address in `X-Forwarded-For`. The same list
+decides whose `X-Forwarded-Host` the cross-origin guard believes.
+
+Sign-ins made at the hose or valve UI are proxied to the bucket, and the
+hose/valve put the browser's address in `X-Forwarded-For`. **If the bucket
+doesn't trust them, every login through the hose shares one per-address
+budget, and so does every login through the valve**: ten bad passwords for
+`admin` from anyone, via the hose, lock `admin` out of the hose's sign-in
+for everyone for 5 minutes (sign-in at the bucket itself is unaffected).
+Nothing becomes spoofable either way; trusting the proxies restores
+per-browser accounting.
+
+Under compose, find the subnet of the yard network:
+
+```sh
+docker network inspect syslog-yard_yardnet | grep -i subnet   # or: podman network inspect ...
+```
+
+and add it to the `syslog-bucket` service's `environment` in
+`deploy/compose.yaml` (there's a commented example), e.g.
+`YARD_TRUSTED_PROXIES: "10.89.0.0/24"`, then run `scripts/yardctl up`. Under
+quadlet the network is called `yard` (`podman network inspect yard`); add an
+`Environment=YARD_TRUSTED_PROXIES=...` line to `syslog-bucket.container`.
+With `compose.host-net.yaml` the valve reaches the bucket through its
+published port, so the peer the bucket sees is the runtime's port
+forwarder rather than the valve. A list that doesn't parse is logged
+(`YARD_TRUSTED_PROXIES ignored`) and nothing is trusted.
+
+Only list peers that set `X-Forwarded-For` themselves: the bucket believes
+the *first* entry, so a reverse proxy in front of the bucket must overwrite
+the header (nginx: `proxy_set_header X-Forwarded-For $remote_addr;`) rather
+than append to what the client sent. The hose and valve overwrite it. If a
+reverse proxy sits in front of the hose or valve instead, list it in
+*their* `YARD_TRUSTED_PROXIES`, so the address they pass on is the
+browser's and not the proxy's.
 
 ### Changing the Postgres password
 
