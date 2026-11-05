@@ -104,7 +104,7 @@ func TestFixedThrottleWindowExpires(t *testing.T) {
 }
 
 func TestClientIP(t *testing.T) {
-	trusted, _ := secure.ParseTrustedProxies("10.0.0.0/8, 192.0.2.1")
+	trusted, _, _ := secure.ParseTrustedProxies("10.0.0.0/8, 192.0.2.1")
 	cases := []struct {
 		name, remote, xff string
 		trusted           []netip.Prefix
@@ -126,7 +126,7 @@ func TestClientIP(t *testing.T) {
 		if c.xff != "" {
 			r.Header.Set("X-Forwarded-For", c.xff)
 		}
-		if got := clientIP(r, c.trusted); got != c.want {
+		if got := clientIP(r, &secure.Policy{TrustedProxies: c.trusted}); got != c.want {
 			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
 		}
 	}

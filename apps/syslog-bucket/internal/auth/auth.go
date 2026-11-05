@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/syslog-yard/shared/secure"
 	"github.com/syslog-yard/syslog-bucket/internal/audit"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
@@ -54,7 +55,7 @@ type Service struct {
 	mu      sync.RWMutex
 	oidc    *OIDC // nil = OIDC disabled
 	idleTTL time.Duration
-	trusted []netip.Prefix  // proxies whose X-Forwarded-For is believed
+	proxies *secure.Policy  // proxies whose X-Forwarded-For is believed
 	audit   *audit.Recorder // nil = not recorded
 }
 
@@ -71,17 +72,20 @@ func New(st *store.Store, cookieSecure bool) *Service {
 // SetTrustedProxies sets the reverse proxies whose X-Forwarded-For header is
 // used to find the client address for brute-force throttling. Empty (the
 // default) means the TCP peer address is always used.
-func (s *Service) SetTrustedProxies(p []netip.Prefix) {
+//
+// hosts are proxies named by hostname (by default the syslog-hose and
+// syslog-valve containers), resolved on use.
+func (s *Service) SetTrustedProxies(p []netip.Prefix, hosts []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.trusted = p
+	s.proxies = &secure.Policy{TrustedProxies: p, TrustedHosts: hosts}
 }
 
 func (s *Service) clientIP(r *http.Request) string {
 	s.mu.RLock()
-	trusted := s.trusted
+	proxies := s.proxies
 	s.mu.RUnlock()
-	return clientIP(r, trusted)
+	return clientIP(r, proxies)
 }
 
 // ClientIP is the client address of r as the login throttle sees it: the TCP

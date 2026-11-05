@@ -6,6 +6,25 @@ All notable changes to syslog-yard are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-05
+
+Upgrade, then re-apply the valve flow once so syslog-ng picks up per-message
+RFC 5424 detection. If you followed the v0.1.1 advice to put the yard
+network's subnet in the bucket's `YARD_TRUSTED_PROXIES`, remove it: the
+bucket now trusts the hose and valve by name.
+
+### Security
+
+- Trusting the yard network's subnet in `YARD_TRUSTED_PROXIES`, as the
+  v0.1.1 docs advised, let a client that reached the bucket's published port
+  directly forge `X-Forwarded-For` and pick a fresh login-throttle key for
+  every guess. Rootless podman delivers such connections from an address on
+  the yard network, and Docker's userland proxy from its gateway. The list
+  now accepts hostnames, compose and quadlet set the bucket's to
+  `syslog-hose syslog-valve`, the docs no longer recommend the subnet, and
+  every tool warns at startup when a trusted range covers its own address.
+  The default (unset) was never affected.
+
 ### Fixed
 
 - hose: a job's last error clears once delivery recovers. A single
@@ -60,6 +79,10 @@ All notable changes to syslog-yard are recorded here. The format follows
 
 ### Changed
 
+- deploy: `deploy/.env` now also sets `BUCKET_ADMIN_PASSWORD`,
+  `YARD_TRUSTED_ORIGINS` and `YARD_TRUSTED_PROXIES`, so a reverse proxy or a
+  pinned admin password no longer means editing `compose.yaml`.
+  `deploy/env.example` lists every setting.
 - docs: the README screenshots show the shared shell, taken from a seeded
   demo yard ([#45]).
 - bucket: a suppressed entry never notifies. When any matching rule
@@ -278,7 +301,8 @@ Advisories: [GHSA-6g7h-r7gg-27cj] (critical, valve),
 
 Released under the MIT License; see the commit history for its contents.
 
-[Unreleased]: https://github.com/fqazzazee/syslog-yard/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/fqazzazee/syslog-yard/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/fqazzazee/syslog-yard/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/fqazzazee/syslog-yard/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/fqazzazee/syslog-yard/releases/tag/v0.1.0
 [GHSA-6g7h-r7gg-27cj]: https://github.com/fqazzazee/syslog-yard/security/advisories/GHSA-6g7h-r7gg-27cj

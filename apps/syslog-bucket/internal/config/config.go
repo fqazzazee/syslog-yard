@@ -47,6 +47,9 @@ type Config struct {
 	// tool (invalid entries logged and skipped). Empty means the TCP peer is
 	// always the client.
 	TrustedProxies []netip.Prefix
+	// TrustedProxyHosts are the hostnames in YARD_TRUSTED_PROXIES (compose
+	// lists syslog-hose and syslog-valve), resolved when a request needs them.
+	TrustedProxyHosts []string
 
 	// AuditRetentionDays is how long audit-log rows are kept
 	// (BUCKET_AUDIT_RETENTION_DAYS, default 180). 0 keeps them forever.
@@ -73,8 +76,9 @@ func FromEnv() Config {
 		OIDCName:         getenv("BUCKET_OIDC_NAME", "SSO"),
 		OIDCDefaultRole:  getenv("BUCKET_OIDC_DEFAULT_ROLE", "viewer"), // read-only until promoted
 
-		WSOrigins:      splitList(os.Getenv("BUCKET_WS_ORIGINS")),
-		TrustedProxies: secure.TrustedProxies(),
+		WSOrigins:         splitList(os.Getenv("BUCKET_WS_ORIGINS")),
+		TrustedProxies:    secure.TrustedProxies(),
+		TrustedProxyHosts: secure.TrustedProxyHosts(),
 
 		AuditRetentionDays: auditRetentionDays(os.Getenv("BUCKET_AUDIT_RETENTION_DAYS")),
 	}

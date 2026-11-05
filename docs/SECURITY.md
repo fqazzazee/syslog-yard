@@ -244,8 +244,10 @@ never back into config or commands.
    Behind a reverse proxy, set `YARD_TRUSTED_ORIGINS` (or
    `YARD_TRUSTED_PROXIES`) on each tool and `BUCKET_WS_ORIGINS` on the
    bucket — see the CSRF entry above.
-7. Set `YARD_TRUSTED_PROXIES` on the bucket so the login throttle sees each
-   browser's address (see the next section).
+7. Leave the bucket trusting only `syslog-hose` and `syslog-valve` by name
+   (the compose and quadlet default) and add a reverse proxy, if any, by its
+   own address. Never trust the yard network's subnet (see the next
+   section).
 8. Keep base images current: `scripts/yardctl up` rebuilds with
    `--pull`, so each run picks up the latest `golang:1.26-alpine`,
    `node:22-alpine`, `alpine:3.22` and distroless base layers, and
@@ -259,37 +261,46 @@ never back into config or commands.
 
 The login throttle counts failures per (username, client IP). The bucket
 takes the client IP from the TCP connection, unless the connection comes
-from an address listed in `YARD_TRUSTED_PROXIES` (IPs or CIDRs separated by
-commas and/or spaces); then it walks `X-Forwarded-For` from the right, skipping trusted
-hops, and uses the first address it doesn't trust. The same list
-decides whose `X-Forwarded-Host` the cross-origin guard believes.
+from a peer listed in `YARD_TRUSTED_PROXIES`: IPs, CIDRs and hostnames,
+separated by commas and/or spaces. Then it walks `X-Forwarded-For` from the
+right, skipping trusted hops, and uses the first address it doesn't trust.
+The same list decides whose `X-Forwarded-Host` the cross-origin guard
+believes. Hostnames are resolved when a request needs them and cached for
+30 seconds, so a container that restarts at a new address is followed.
 
 Sign-ins made at the hose or valve UI are proxied to the bucket, and the
-hose/valve put the browser's address in `X-Forwarded-For`. **If the bucket
-doesn't trust them, every login through the hose shares one per-address
-budget, and so does every login through the valve**: ten bad passwords for
-`admin` from anyone, via the hose, lock `admin` out of the hose's sign-in
-for everyone for 5 minutes (sign-in at the bucket itself is unaffected).
-Nothing becomes spoofable either way; trusting the proxies restores
-per-browser accounting.
+hose/valve put the browser's address in `X-Forwarded-For`. The compose file
+and the quadlet units therefore set the bucket's list to
+`syslog-hose syslog-valve`, by name, which keeps the throttle per browser.
+Anything you add in `deploy/.env` (`YARD_TRUSTED_PROXIES=…`) is appended to
+those two names. Untrusted, every login through the hose would share one
+per-address budget, and so would every login through the valve: ten bad
+passwords for `admin` from anyone, via the hose, would lock `admin` out of
+the hose's sign-in for everyone for 5 minutes.
 
-Under compose, find the subnet of the yard network:
+**Never trust the yard network's subnet.** A client that connects to a
+published port does not always arrive from its own address. Rootless podman
+(pasta) hands the connection to the container from an address on the yard
+network, often the container's own, and Docker's userland proxy (used for
+loopback connections) connects from the network's gateway. With the subnet
+trusted, such a client is a "trusted proxy" and can put any address in
+`X-Forwarded-For`, choosing a fresh throttle key for every guess. Earlier
+versions of this guide recommended the subnet; replace it with the names.
+Each tool logs a warning at startup when a trusted range contains one of
+its own addresses (`YARD_TRUSTED_PROXIES covers this container's own
+network`).
 
-```sh
-docker network inspect syslog-yard_yardnet | grep -i subnet   # or: podman network inspect ...
-```
+The same address rewriting means that under rootless podman, the hose and
+valve themselves see every browser at one address, so through them the
+throttle is per tool rather than per browser. Rootful Docker and podman
+keep real client addresses for LAN connections.
 
-and add it to the `syslog-bucket` service's `environment` in
-`deploy/compose.yaml` (there's a commented example), e.g.
-`YARD_TRUSTED_PROXIES: "10.89.0.0/24"`, then run `scripts/yardctl up`. Under
-quadlet the network is called `yard` (`podman network inspect yard`); add an
-`Environment=YARD_TRUSTED_PROXIES=...` line to `syslog-bucket.container`.
 With `compose.host-net.yaml` the valve reaches the bucket through its
-published port, so the peer the bucket sees is the runtime's port
-forwarder rather than the valve. All three tools parse the list the same
-way: an entry that is neither an IP nor a CIDR is logged at startup
+published port, so its name does not resolve on the yard network and its
+sign-ins share one budget. All three tools parse the list the same way:
+an entry that is not an IP, CIDR or hostname is logged at startup
 (`YARD_TRUSTED_PROXIES: ignoring entry …`) and skipped, and the rest of the
-list still applies.
+list still applies; a name that does not resolve is trusted nowhere.
 
 Because the walk starts from the right, a reverse proxy in front of the
 bucket may append to the header (nginx's usual
