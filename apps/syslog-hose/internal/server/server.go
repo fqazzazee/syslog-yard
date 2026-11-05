@@ -4,6 +4,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -77,6 +78,30 @@ func writeErr(w http.ResponseWriter, code int, err error) {
 	writeJSON(w, code, map[string]string{"error": err.Error()})
 }
 
+// Request body caps: job configs are a few hundred bytes; a preview may
+// carry a whole preset YAML (same cap as saving one).
+const (
+	maxJobBody     = 64 << 10
+	maxPresetBody  = 1 << 20
+	maxPreviewBody = maxPresetBody + 64<<10
+)
+
+// decodeJSON reads at most limit bytes of JSON into v, answering 413/400
+// itself on failure.
+func decodeJSON(w http.ResponseWriter, r *http.Request, limit int64, v any) bool {
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit)).Decode(v)
+	if err == nil {
+		return true
+	}
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
+		writeErr(w, http.StatusRequestEntityTooLarge, fmt.Errorf("request body over %d bytes", tooBig.Limit))
+	} else {
+		writeErr(w, http.StatusBadRequest, err)
+	}
+	return false
+}
+
 // --- jobs ---
 
 func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
@@ -85,8 +110,7 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 	var cfg engine.JobConfig
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-		writeErr(w, 400, err)
+	if !decodeJSON(w, r, maxJobBody, &cfg) {
 		return
 	}
 	st, err := s.mgr.Create(cfg)
@@ -99,8 +123,7 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) updateJob(w http.ResponseWriter, r *http.Request) {
 	var cfg engine.JobConfig
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-		writeErr(w, 400, err)
+	if !decodeJSON(w, r, maxJobBody, &cfg) {
 		return
 	}
 	st, err := s.mgr.Update(r.PathValue("id"), cfg)
@@ -180,7 +203,7 @@ func (s *Server) getPreset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) savePreset(w http.ResponseWriter, r *http.Request) {
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPresetBody))
 	if err != nil {
 		writeErr(w, 400, err)
 		return
@@ -212,8 +235,7 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
 		Appname  string `json:"appname"`
 		Format   string `json:"format"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, 400, err)
+	if !decodeJSON(w, r, maxPreviewBody, &req) {
 		return
 	}
 	var p *preset.Preset

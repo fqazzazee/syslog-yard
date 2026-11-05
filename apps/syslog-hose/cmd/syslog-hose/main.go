@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/syslog-yard/shared/yardauth"
 	"github.com/syslog-yard/syslog-hose/internal/engine"
@@ -76,7 +77,15 @@ func main() {
 		fmt.Printf("syslog-hose: auth enforced via %s\n", os.Getenv("YARD_AUTH_URL"))
 	}
 
-	srv := &http.Server{Addr: addr, Handler: server.New(mgr, store, ui, hints, guard)}
+	// No ReadTimeout/WriteTimeout: /api/stream is a long-lived SSE response.
+	// Bodies are size-capped per handler; headers and idle keep-alives are
+	// bounded here so slow or parked clients can't pin connections.
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           server.New(mgr, store, ui, hints, guard),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
 	go func() {
 		fmt.Printf("syslog-hose listening on %s (data dir %s, %d presets)\n",
 			addr, dataDir, len(store.List()))
