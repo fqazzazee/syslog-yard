@@ -6,6 +6,29 @@ All notable changes to syslog-yard are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- bucket: a negated condition (`not`) now matches entries that have no value
+  for the field (no facility or source, a missing structured key) in
+  searches, buckets and apply-to-history, as rules already did at ingest
+  ([#58]).
+- bucket: numeric conditions with a fractional or out-of-range value
+  (`severity < 2.5`, `facility ≠ 40000`) give the same result in searches and
+  apply-to-history as at ingest, instead of being rounded or failing ([#58]).
+- bucket: ingest allocates entry ids before inserting a batch instead of
+  relying on `RETURNING` order, which Postgres doesn't guarantee ([#58]).
+- valve: regenerating the self-signed certificate always leaves the private
+  key readable by its owner only, even after an interrupted earlier run
+  ([#59]).
+
+### Added
+
+- Tests: Postgres-backed bucket tests for entry pagination and sorting,
+  insert ids, ingest versus apply-to-history parity (including randomized
+  condition trees), migration replay and upgrades, and bucket share
+  permissions through the API ([#58]); tests for the bucket's generic parser,
+  config and rule engine and the valve's certificate package ([#59]).
+
 ## [0.1.1] - 2026-11-05
 
 ### Security
