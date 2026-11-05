@@ -58,7 +58,7 @@ Ports (host side, remap in `deploy/docker-compose.yml` as needed):
 
 ## Development
 
-Backend (needs Go 1.25+ and a Postgres):
+Backend (needs Go 1.26+ and a Postgres):
 
 ```sh
 go run ./cmd/syslog-bucket
@@ -67,7 +67,7 @@ go run ./cmd/syslog-bucket
 Frontend (needs Node 22+; proxies `/api` to `localhost:8080`):
 
 ```sh
-cd web && npm install && npm run dev
+cd web && npm ci && npm run dev
 ```
 
 ## Layout
