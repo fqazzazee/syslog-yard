@@ -47,6 +47,9 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Disp
 		hints = map[string]string{}
 	}
 	s := &server{store: st, engine: eng, hub: hub, notifier: notifier, web: web, hints: hints, authSvc: authSvc, cfg: cfg, netMgr: netMgr}
+	if hub != nil {
+		hub.SetOriginPatterns(cfg.WSOrigins)
+	}
 	// Apply stored (or env-fallback) OIDC + session settings to the auth service
 	// before the server starts handling requests.
 	s.applyStoredSettings(context.Background())

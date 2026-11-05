@@ -1,7 +1,10 @@
 // Package config reads runtime configuration from environment variables.
 package config
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 type Config struct {
 	// DatabaseURL is a pgx/libpq connection string.
@@ -27,6 +30,11 @@ type Config struct {
 	OIDCRedirectURL  string
 	OIDCName         string // login-button label
 	OIDCDefaultRole  string // role for auto-provisioned users
+
+	// WSOrigins lists extra Origin host patterns (path.Match syntax, e.g.
+	// "localhost:5173") allowed to open the live-tail WebSocket. Same-origin
+	// is always allowed; leave empty outside development.
+	WSOrigins []string
 }
 
 func FromEnv() Config {
@@ -44,7 +52,20 @@ func FromEnv() Config {
 		OIDCRedirectURL:  os.Getenv("BUCKET_OIDC_REDIRECT_URL"),
 		OIDCName:         getenv("BUCKET_OIDC_NAME", "SSO"),
 		OIDCDefaultRole:  getenv("BUCKET_OIDC_DEFAULT_ROLE", "analyst"),
+
+		WSOrigins: splitList(os.Getenv("BUCKET_WS_ORIGINS")),
 	}
+}
+
+// splitList parses a comma-separated env value, dropping blanks.
+func splitList(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func getenv(key, def string) string {

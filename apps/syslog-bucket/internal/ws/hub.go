@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,10 +33,34 @@ type client struct {
 type Hub struct {
 	mu      sync.RWMutex
 	clients map[*client]struct{}
+	origins []string // extra allowed Origin host patterns; same-origin always passes
 }
 
 func NewHub() *Hub {
 	return &Hub{clients: make(map[*client]struct{})}
+}
+
+// SetOriginPatterns admits cross-origin live-tail handshakes from hosts
+// matching these path.Match patterns (e.g. "localhost:5173"), on top of the
+// same-origin requests that are always allowed. Empty patterns are ignored.
+// Every allowed origin can read the live log stream with the user's cookie,
+// so keep this to development setups (BUCKET_WS_ORIGINS).
+func (h *Hub) SetOriginPatterns(patterns []string) {
+	var keep []string
+	for _, p := range patterns {
+		if p = strings.TrimSpace(p); p != "" {
+			keep = append(keep, p)
+		}
+	}
+	h.mu.Lock()
+	h.origins = keep
+	h.mu.Unlock()
+}
+
+func (h *Hub) originPatterns() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.origins
 }
 
 // Broadcast pushes entries that just landed in the database to every
@@ -74,9 +99,11 @@ func (h *Hub) Broadcast(entries []store.Entry) {
 // disconnects. cond has already been validated by the API layer.
 func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, cond rules.Cond, includeSuppressed bool) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		// The SPA is same-origin in production; the patterns admit the Vite
-		// dev server proxy.
-		OriginPatterns: []string{"localhost:*", "127.0.0.1:*"},
+		// Same-origin only by default: the SPA (and the Vite dev proxy, which
+		// keeps the Host header) always connects to its own host. Cookies are
+		// scoped by host, not port, so a wildcard like "localhost:*" would let
+		// any page served from another local port read the live stream.
+		OriginPatterns: h.originPatterns(),
 	})
 	if err != nil {
 		slog.Warn("ws: accept", "error", err)
