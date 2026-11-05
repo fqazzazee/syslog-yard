@@ -45,6 +45,11 @@ All notable changes to syslog-yard are recorded here. The format follows
   and subtype) logs get the same treatment, and any other headerless
   `key=value` line gets its first pair back instead of losing it to App.
   Already-stored entries keep their old values. [#26]
+- bucket: on a fresh database the header showed "~0 entries" while rows
+  arrived, because the estimate came from table statistics not yet
+  gathered. `/api/stats` now also uses the live-row counter, and counts
+  tables under 10,000 rows exactly (`total_exact: true` in the response).
+  [#64]
 
 ## [0.1.1] - 2026-11-05
 
@@ -256,3 +261,4 @@ Released under the MIT License; see the commit history for its contents.
 [#59]: https://github.com/fqazzazee/syslog-yard/issues/59
 [#61]: https://github.com/fqazzazee/syslog-yard/issues/61
 [#62]: https://github.com/fqazzazee/syslog-yard/issues/62
+[#64]: https://github.com/fqazzazee/syslog-yard/issues/64

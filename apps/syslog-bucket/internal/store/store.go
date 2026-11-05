@@ -788,14 +788,43 @@ func (s *Store) ListSources(ctx context.Context) ([]Source, error) {
 
 type Stats struct {
 	ApproxTotal int64 `json:"approx_total"`
-	LastMinute  int64 `json:"last_minute"`
+	// TotalExact is set when ApproxTotal is an exact count (small tables).
+	TotalExact bool  `json:"total_exact"`
+	LastMinute int64 `json:"last_minute"`
 }
+
+// exactCountBelow is the size under which GetStats counts entries exactly.
+// Counting up to this many rows is cheap, and it is where the planner
+// estimate is least reliable: on a fresh database reltuples stays 0 (or -1,
+// "never analyzed") until autovacuum first analyzes the table, so the
+// header showed "~0 entries" while rows were arriving.
+const exactCountBelow = 10_000
 
 func (s *Store) GetStats(ctx context.Context) (Stats, error) {
 	var st Stats
+	// The estimate takes the larger of the planner statistic (reltuples,
+	// refreshed by ANALYZE) and the cumulative statistics' live-row count
+	// (n_live_tup, updated as inserts commit), so it tracks a growing table
+	// between analyzes.
 	err := s.Pool.QueryRow(ctx, `
-		SELECT GREATEST((SELECT reltuples::bigint FROM pg_class WHERE relname = 'entries'), 0),
-		       (SELECT count(*) FROM entries WHERE received_at > now() - interval '60 seconds')`).
+		SELECT GREATEST(c.reltuples::bigint, COALESCE(t.n_live_tup, 0), 0),
+		       (SELECT count(*) FROM entries WHERE received_at > now() - interval '60 seconds')
+		FROM pg_class c LEFT JOIN pg_stat_user_tables t ON t.relid = c.oid
+		WHERE c.oid = 'entries'::regclass`).
 		Scan(&st.ApproxTotal, &st.LastMinute)
-	return st, err
+	if err != nil || st.ApproxTotal >= exactCountBelow {
+		return st, err
+	}
+	// Small (or not yet analyzed) table: count, but never past the bound.
+	var n int64
+	if err := s.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM (SELECT 1 FROM entries LIMIT $1) t`, exactCountBelow+1).Scan(&n); err != nil {
+		return st, err
+	}
+	if n <= exactCountBelow {
+		st.ApproxTotal, st.TotalExact = n, true
+	} else {
+		st.ApproxTotal = max(st.ApproxTotal, n)
+	}
+	return st, nil
 }
