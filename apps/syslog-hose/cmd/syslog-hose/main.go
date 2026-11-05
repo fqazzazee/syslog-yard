@@ -3,10 +3,12 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/syslog-yard/shared/yardauth"
 	"github.com/syslog-yard/syslog-hose/internal/engine"
@@ -22,9 +24,44 @@ func env(key, def string) string {
 	return def
 }
 
+// healthURL turns a listen address (":8080", "0.0.0.0:8080", "[::]:8080",
+// "10.0.0.5:8080") into the local URL of the liveness endpoint.
+func healthURL(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		host, port = "", addr
+	}
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port) + "/api/healthz"
+}
+
+// healthcheck probes a running instance's /api/healthz and returns the
+// process exit code. The image is distroless (no shell, no wget), so the
+// compose healthcheck runs the binary itself: ["CMD", "/syslog-hose", "healthcheck"].
+func healthcheck(addr string) int {
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(healthURL(addr))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "syslog-hose healthcheck: %v\n", err)
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "syslog-hose healthcheck: %s\n", resp.Status)
+		return 1
+	}
+	return 0
+}
+
 func main() {
 	addr := env("HOSE_ADDR", ":8080")
 	dataDir := env("HOSE_DATA", "/data")
+
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(healthcheck(addr))
+	}
 
 	// Fall back to ./data when /data isn't writable (bare local runs).
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
@@ -76,7 +113,15 @@ func main() {
 		fmt.Printf("syslog-hose: auth enforced via %s\n", os.Getenv("YARD_AUTH_URL"))
 	}
 
-	srv := &http.Server{Addr: addr, Handler: server.New(mgr, store, ui, hints, guard)}
+	// No ReadTimeout/WriteTimeout: /api/stream is a long-lived SSE response.
+	// Bodies are size-capped per handler; headers and idle keep-alives are
+	// bounded here so slow or parked clients can't pin connections.
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           server.New(mgr, store, ui, hints, guard),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
 	go func() {
 		fmt.Printf("syslog-hose listening on %s (data dir %s, %d presets)\n",
 			addr, dataDir, len(store.List()))

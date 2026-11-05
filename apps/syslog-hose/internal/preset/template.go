@@ -8,6 +8,28 @@ import (
 	"time"
 )
 
+// Bounds on what one user-supplied template can allocate.
+const (
+	maxRandHex  = 1024     // longest randHex string
+	maxSeqNames = 256      // distinct seq counters per renderer
+	maxRendered = 64 << 10 // rendered payload; larger than any UDP datagram
+)
+
+var errRenderTooLong = fmt.Errorf("rendered message exceeds %d bytes", maxRendered)
+
+// cappedBuffer collects template output and fails once it would grow past
+// maxRendered, which aborts the template execution.
+type cappedBuffer struct{ sb strings.Builder }
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if b.sb.Len()+len(p) > maxRendered {
+		return 0, errRenderTooLong
+	}
+	return b.sb.Write(p)
+}
+
+func (b *cappedBuffer) String() string { return b.sb.String() }
+
 // renderContext binds template helper functions to one event render: the
 // event timestamp, the job's hostname/appname, its RNG and sequence counters.
 type renderContext struct {
@@ -47,7 +69,9 @@ func (c *renderContext) funcs() template.FuncMap {
 		},
 		"randHex": func(n int) string {
 			const hex = "0123456789abcdef"
+			n = min(n, maxRandHex) // templates come from users (preview, presets)
 			var sb strings.Builder
+			sb.Grow(max(n, 0))
 			for i := 0; i < n; i++ {
 				sb.WriteByte(hex[c.rng.Intn(16)])
 			}
@@ -61,6 +85,11 @@ func (c *renderContext) funcs() template.FuncMap {
 		},
 		"seq": func(name string) int64 {
 			if _, ok := c.seqs[name]; !ok {
+				if len(c.seqs) >= maxSeqNames {
+					// a computed name (seq (randHex 8)) would otherwise
+					// grow the map for as long as the job runs
+					return int64(c.rng.Intn(900000) + 100000)
+				}
 				c.seqs[name] = int64(c.rng.Intn(900000) + 100000)
 			}
 			c.seqs[name]++
