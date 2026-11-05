@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Banner, IconButton } from "../../../../shared/web/src/ui";
 import { applyRule, createRule, deleteRule, updateRule } from "./../api";
 import type { Action, Channel, Cond, MitreCatalog, OTCatalog, Rule, Tag } from "./../types";
@@ -65,7 +65,14 @@ function CodeList({
   );
 }
 
+// What the rule editor says about notify, next to every notify action: it
+// only runs as entries arrive, and suppression wins over it.
+const NOTIFY_NOTE =
+  "Notifications are sent only as new entries arrive, never when a rule runs on history. " +
+  "An entry that any rule suppresses sends no notification.";
+
 export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, otCatalog, readOnly = false, onClose }: Props) {
+  const noteId = useId();
   const [name, setName] = useState(rule?.name ?? seed?.name ?? "");
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
   const [condition, setCondition] = useState<Cond>(rule?.condition ?? seed?.condition ?? {});
@@ -140,6 +147,8 @@ export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, ot
     }
   };
 
+  const hasNotify = actions.some((a) => a.type === "notify");
+
   return (
     <Modal title={readOnly ? "View rule" : rule ? "Edit rule" : "New rule"} onClose={() => onClose(!readOnly && rule !== null)}>
       {readOnly && <Banner kind="info">Read-only: your role can view rules but not change them.</Banner>}
@@ -162,6 +171,7 @@ export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, ot
           <div className="cond-row" key={i}>
             <select
               aria-label="Action"
+              aria-describedby={a.type === "notify" ? noteId : undefined}
               value={a.type}
               onChange={(e) =>
                 patchAction(i, {
@@ -211,7 +221,9 @@ export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, ot
               ) : (
                 <span className="hint">no channels — add one under Channels</span>
               ))}
-            {a.type === "suppress" && <span className="hint">hidden from views, kept in storage</span>}
+            {a.type === "suppress" && (
+              <span className="hint">hidden from views, kept in storage; sends no notifications</span>
+            )}
             {a.type === "set_mitre" && mitreCatalog && (
               <CodeList
                 codes={a.mitre ?? []}
@@ -233,6 +245,12 @@ export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, ot
             )}
           </div>
         ))}
+        {hasNotify && (
+          <p className="hint notify-note" id={noteId}>
+            <Icon name="info" size={14} />
+            {NOTIFY_NOTE}
+          </p>
+        )}
         {!readOnly && (
           <button type="button" className="linkish" onClick={() => setActions([...actions, { type: "tag", tag_id: tags[0]?.id }])}>
             + action
@@ -255,7 +273,11 @@ export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, ot
         )}
         {!readOnly && (
           <>
-            <button disabled={busy || !name.trim() || actions.length === 0} onClick={() => void saveAndApply()}>
+            <button
+              disabled={busy || !name.trim() || actions.length === 0}
+              title={hasNotify ? "Notify actions are skipped on history: only new entries send notifications." : undefined}
+              onClick={() => void saveAndApply()}
+            >
               Save + run on history
             </button>
             <button className="primary" disabled={busy || !name.trim() || actions.length === 0} onClick={() => void saveAndClose()}>

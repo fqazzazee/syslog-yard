@@ -555,6 +555,16 @@ button.mitre-chip:hover:not(:disabled) {
   opacity: 1;
   cursor: default;
 }
+.notify-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+}
+.notify-note .icon {
+  flex: none;
+  margin-top: 2px;
+}
 .cond-row {
   display: flex;
   align-items: center;
