@@ -256,26 +256,15 @@ func (j *job) run(ctx context.Context, cfg JobConfig, startedAt time.Time, sende
 	defer activeRuns.Add(-1)
 	defer sender.Close()
 
-	const tick = 50 * time.Millisecond
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	tokens := 1.0 // emit the first event immediately
+	rs := newRateShape(cfg, rand.New(rand.NewSource(time.Now().UnixNano())))
+	pace := newPacer(startedAt) // first event goes out on the first tick
 	deadline := time.Time{}
 	if cfg.DurationSec > 0 {
 		deadline = startedAt.Add(time.Duration(cfg.DurationSec) * time.Second)
 	}
-	jitter := cfg.JitterPct
-	if jitter <= 0 {
-		jitter = 30
-	}
-	burstFactor := cfg.BurstFactor
-	if burstFactor <= 1 {
-		burstFactor = 5
-	}
-	burstEvery := time.Duration(max(cfg.BurstEvery, 10)) * time.Second
-	burstLen := time.Duration(max(cfg.BurstLen, 1)) * time.Second
 
 	for {
 		select {
@@ -283,26 +272,11 @@ func (j *job) run(ctx context.Context, cfg JobConfig, startedAt time.Time, sende
 			return
 		case <-ticker.C:
 		}
-		if !deadline.IsZero() && time.Now().After(deadline) {
+		now := time.Now()
+		if !deadline.IsZero() && now.After(deadline) {
 			return
 		}
-
-		rate := cfg.Rate
-		switch cfg.RateMode {
-		case "jitter":
-			f := 1 + (rng.Float64()*2-1)*jitter/100
-			rate *= f
-		case "burst":
-			if time.Since(startedAt)%burstEvery < burstLen {
-				rate *= burstFactor
-			}
-		}
-		tokens += rate * tick.Seconds()
-		n := int(tokens)
-		if n > 2500 { // cap per-tick batch so a stop stays responsive
-			n = 2500
-		}
-		tokens -= float64(n)
+		n := pace.take(now, rs.rate(now.Sub(startedAt)))
 
 		for i := 0; i < n; i++ {
 			if ctx.Err() != nil {
@@ -331,6 +305,83 @@ func (j *job) run(ctx context.Context, cfg JobConfig, startedAt time.Time, sende
 		}
 		j.rollWindow()
 	}
+}
+
+// tick is the run loop's wake-up interval.
+const tick = 50 * time.Millisecond
+
+// pacer is a token bucket refilled from the time that actually elapsed
+// since the previous wake-up, so late or missed ticks don't lose events.
+// It holds at most two ticks' worth (and at least one event): a missed
+// tick is made up, but a stalled or slow sender never builds a backlog
+// that would later come out as an over-rate burst.
+type pacer struct {
+	last   time.Time
+	tokens float64
+}
+
+func newPacer(start time.Time) *pacer {
+	return &pacer{last: start, tokens: 1}
+}
+
+// take refills the bucket for the time elapsed up to now at rate events/s
+// and returns how many whole events to emit.
+func (p *pacer) take(now time.Time, rate float64) int {
+	if dt := now.Sub(p.last); dt > 0 {
+		p.tokens += rate * dt.Seconds()
+	}
+	p.last = now
+	// +1 keeps the fractional carry of low rates (0.5 EPS must not lose
+	// the overshoot past a whole event)
+	if capacity := 1 + rate*2*tick.Seconds(); p.tokens > capacity {
+		p.tokens = capacity
+	}
+	n := int(p.tokens)
+	p.tokens -= float64(n)
+	return n
+}
+
+// rateShape turns a config's base rate and mode into the target rate at a
+// given point of the run.
+type rateShape struct {
+	base, jitterPct, burstFactor float64
+	mode                         string
+	burstEvery, burstLen         time.Duration
+	rng                          *rand.Rand
+}
+
+func newRateShape(cfg JobConfig, rng *rand.Rand) rateShape {
+	rs := rateShape{
+		base:        cfg.Rate,
+		mode:        cfg.RateMode,
+		jitterPct:   cfg.JitterPct,
+		burstFactor: cfg.BurstFactor,
+		burstEvery:  time.Duration(max(cfg.BurstEvery, 10)) * time.Second,
+		burstLen:    time.Duration(max(cfg.BurstLen, 1)) * time.Second,
+		rng:         rng,
+	}
+	if rs.jitterPct <= 0 {
+		rs.jitterPct = 30
+	}
+	if rs.burstFactor <= 1 {
+		rs.burstFactor = 5
+	}
+	return rs
+}
+
+// rate returns the target events/s at elapsed time into the run, never
+// above maxRate (so a 20k EPS job with a 5x burst bursts at 50k, not 100k).
+func (rs rateShape) rate(elapsed time.Duration) float64 {
+	rate := rs.base
+	switch rs.mode {
+	case "jitter":
+		rate *= 1 + (rs.rng.Float64()*2-1)*rs.jitterPct/100
+	case "burst":
+		if elapsed%rs.burstEvery < rs.burstLen {
+			rate *= rs.burstFactor
+		}
+	}
+	return min(max(rate, 0), maxRate)
 }
 
 // rollWindow rolls the EPS window every ~5s, keeping the completed window's rate.
