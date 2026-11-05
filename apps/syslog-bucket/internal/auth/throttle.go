@@ -1,10 +1,8 @@
 package auth
 
 import (
-	"fmt"
 	"net/http"
 	"net/netip"
-	"strings"
 	"sync"
 	"time"
 
@@ -142,33 +140,6 @@ func (g *guard) fail(account, ip string) {
 func (g *guard) succeed(account, ip string) {
 	g.perSource.reset(sourceKey(account, ip))
 	g.perAccount.reset(account)
-}
-
-// ParseTrustedProxies parses a comma-separated list of IPs and CIDRs
-// (YARD_TRUSTED_PROXIES) whose X-Forwarded-For header the bucket believes.
-func ParseTrustedProxies(v string) ([]netip.Prefix, error) {
-	var out []netip.Prefix
-	for _, f := range strings.Split(v, ",") {
-		f = strings.TrimSpace(f)
-		if f == "" {
-			continue
-		}
-		if strings.Contains(f, "/") {
-			p, err := netip.ParsePrefix(f)
-			if err != nil {
-				return nil, fmt.Errorf("trusted proxy %q: %w", f, err)
-			}
-			out = append(out, p.Masked())
-			continue
-		}
-		a, err := netip.ParseAddr(f)
-		if err != nil {
-			return nil, fmt.Errorf("trusted proxy %q: %w", f, err)
-		}
-		a = a.Unmap()
-		out = append(out, netip.PrefixFrom(a, a.BitLen()))
-	}
-	return out, nil
 }
 
 // clientIP returns the address a request came from: the TCP peer, unless the

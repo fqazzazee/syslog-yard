@@ -25,6 +25,42 @@ All notable changes to syslog-yard are recorded here. The format follows
 - valve: regenerating the self-signed certificate always leaves the private
   key readable by its owner only, even after an interrupted earlier run
   ([#59]).
+- valve and bucket: syslog listeners detect RFC 5424 per message. Before,
+  an RFC 5424 line on a valve IN port or the bucket's port 514 was parsed as
+  RFC 3164: the app became `1` and the host the sender's address (Check
+  Point, Claroty, Juniper and generic-rfc5424 presets). Structured data is
+  now kept at the front of the message instead of being dropped by the
+  valve's forward. Re-apply the valve flow to pick this up. [#26]
+- bucket: FortiGate entries showed App `date=…` and the sender's address as
+  Host. A FortiGate parser now sets App `fortigate`, Host from `devname`, and
+  keeps `logid`, `devid`, `type`, `subtype` and the other pairs in structured
+  fields. SonicWall (`sonicwall`) and PAN-OS CSV (`panos`, with serial, type
+  and subtype) logs get the same treatment, and any other headerless
+  `key=value` line gets its first pair back instead of losing it to App.
+  Already-stored entries keep their old values. [#26]
+- bucket: on a fresh database the header showed "~0 entries" while rows
+  arrived, because the estimate came from table statistics not yet
+  gathered. `/api/stats` now also uses the live-row counter, and counts
+  tables under 10,000 rows exactly (`total_exact: true` in the response).
+  [#64]
+
+### Changed
+
+- bucket: a suppressed entry never notifies. When any matching rule
+  suppresses an entry, the notifications queued for it by `notify` actions
+  are dropped, whatever the rule and action order. Before, suppressed
+  entries still alerted. [#28]
+- All tools parse `YARD_TRUSTED_PROXIES` with one shared parser: entries may
+  be separated by commas or spaces, and an invalid entry is logged and
+  skipped. Before, the bucket accepted commas only and ignored the whole
+  list if one entry was invalid. [#62]
+- bucket and valve: one outbound guard (`apps/shared/netguard`) for all
+  notification delivery. The bucket now also refuses `0.0.0.0/8` and the
+  `fd00:ec2::254` and `100.100.100.200` metadata addresses, and applies the
+  guard to SMTP channels, which had no address filtering. A loopback or
+  link-local SMTP host now fails with "destination address not allowed".
+  `HTTP_PROXY`/`HTTPS_PROXY` are no longer used for notifications unless
+  `YARD_NOTIFY_PROXY=true`. [#61]
 
 ### Added
 
@@ -53,6 +89,9 @@ All notable changes to syslog-yard are recorded here. The format follows
   never includes secrets. Admins browse it under **Admin → Audit log**
   (`#/audit`) or `GET /api/audit`. Rows are kept for
   `BUCKET_AUDIT_RETENTION_DAYS` (default 180).
+- `YARD_NOTIFY_PROXY=true` (bucket, valve) sends notifications through
+  `HTTP_PROXY`/`HTTPS_PROXY`. Each target is resolved and checked against
+  the outbound guard before it goes to the proxy. [#61]
 
 ## [0.1.1] - 2026-11-05
 
@@ -231,7 +270,6 @@ Released under the MIT License; see the commit history for its contents.
 [#23]: https://github.com/fqazzazee/syslog-yard/issues/23
 [#24]: https://github.com/fqazzazee/syslog-yard/issues/24
 [#25]: https://github.com/fqazzazee/syslog-yard/issues/25
-[#27]: https://github.com/fqazzazee/syslog-yard/issues/27
 [#28]: https://github.com/fqazzazee/syslog-yard/issues/28
 [#29]: https://github.com/fqazzazee/syslog-yard/issues/29
 [#30]: https://github.com/fqazzazee/syslog-yard/issues/30
@@ -263,4 +301,3 @@ Released under the MIT License; see the commit history for its contents.
 [#57]: https://github.com/fqazzazee/syslog-yard/issues/57
 [#58]: https://github.com/fqazzazee/syslog-yard/issues/58
 [#59]: https://github.com/fqazzazee/syslog-yard/issues/59
-[#63]: https://github.com/fqazzazee/syslog-yard/issues/63

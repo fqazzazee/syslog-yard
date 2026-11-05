@@ -3,6 +3,7 @@ package notify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/syslog-yard/shared/netguard"
 	"github.com/syslog-yard/syslog-valve/internal/graph"
 )
 
@@ -156,25 +158,9 @@ func TestDialGuard(t *testing.T) {
 	if strings.Contains(err.Error(), srv.URL) {
 		t.Errorf("error repeats the URL: %v", err)
 	}
-	for addr, blocked := range map[string]bool{
-		"127.0.0.1:80":          true,
-		"[::1]:80":              true,
-		"[::ffff:127.0.0.1]:80": true,
-		"169.254.169.254:80":    true,
-		"[fe80::1]:80":          true,
-		"0.0.0.0:80":            true,
-		"[::]:80":               true,
-		"0.1.2.3:80":            true,
-		"224.0.0.1:80":          true,
-		"[fd00:ec2::254]:80":    true,
-		"10.0.0.5:80":           false,
-		"172.18.0.4:9000":       false,
-		"192.168.1.10:443":      false,
-		"203.0.113.7:443":       false,
-	} {
-		if err := checkDialAddr(addr, false); (err != nil) != blocked {
-			t.Errorf("%s: err = %v, want blocked=%v", addr, err, blocked)
-		}
+	// The address table itself is tested in apps/shared/netguard.
+	if !errors.Is(err, netguard.ErrBlocked) {
+		t.Errorf("err = %v, want netguard.ErrBlocked", err)
 	}
 }
 

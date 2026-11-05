@@ -216,3 +216,43 @@ func TestStructuredNumberParity(t *testing.T) {
 		}
 	}
 }
+
+// On a fresh database the planner estimate is 0 (or -1) until the table is
+// analyzed; small tables are counted exactly instead (#64).
+func TestGetStatsCountsSmallTablesExactly(t *testing.T) {
+	st := storetest.New(t)
+	ctx := context.Background()
+	got, err := st.GetStats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ApproxTotal != 0 || !got.TotalExact {
+		t.Fatalf("empty table: %+v", got)
+	}
+	batch := []store.Entry{
+		{ReceivedAt: time.Now(), Host: "h", Msg: "one", Status: "new"},
+		{ReceivedAt: time.Now(), Host: "h", Msg: "two", Status: "new"},
+		{ReceivedAt: time.Now(), Host: "h", Msg: "three", Status: "new"},
+	}
+	if err := st.InsertEntries(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = st.GetStats(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got.ApproxTotal != 3 || !got.TotalExact || got.LastMinute != 3 {
+		t.Fatalf("three rows: %+v", got)
+	}
+
+	// Past the bound the count stops and the result is an estimate again,
+	// never below what was counted.
+	if _, err := st.Pool.Exec(ctx, `INSERT INTO entries (host, msg) SELECT 'h', 'bulk' FROM generate_series(1, 10001)`); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = st.GetStats(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got.ApproxTotal < 10001 || got.TotalExact {
+		t.Fatalf("large table: %+v", got)
+	}
+}

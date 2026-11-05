@@ -3,9 +3,12 @@ package config
 
 import (
 	"log/slog"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/syslog-yard/shared/secure"
 )
 
 type Config struct {
@@ -38,11 +41,12 @@ type Config struct {
 	// is always allowed; leave empty outside development.
 	WSOrigins []string
 
-	// TrustedProxies is a comma-separated list of IPs/CIDRs of proxies (the
-	// hose/valve auth proxy, a reverse proxy) whose X-Forwarded-For the login
-	// throttle believes. Shared with the other yard tools as
-	// YARD_TRUSTED_PROXIES. Empty means the TCP peer is always the client.
-	TrustedProxies string
+	// TrustedProxies are the proxies (the hose/valve auth proxy, a reverse
+	// proxy) whose X-Forwarded-For the login throttle believes, from
+	// YARD_TRUSTED_PROXIES as the shared parser reads it for every yard
+	// tool (invalid entries logged and skipped). Empty means the TCP peer is
+	// always the client.
+	TrustedProxies []netip.Prefix
 
 	// AuditRetentionDays is how long audit-log rows are kept
 	// (BUCKET_AUDIT_RETENTION_DAYS, default 180). 0 keeps them forever.
@@ -70,7 +74,7 @@ func FromEnv() Config {
 		OIDCDefaultRole:  getenv("BUCKET_OIDC_DEFAULT_ROLE", "viewer"), // read-only until promoted
 
 		WSOrigins:      splitList(os.Getenv("BUCKET_WS_ORIGINS")),
-		TrustedProxies: os.Getenv("YARD_TRUSTED_PROXIES"),
+		TrustedProxies: secure.TrustedProxies(),
 
 		AuditRetentionDays: auditRetentionDays(os.Getenv("BUCKET_AUDIT_RETENTION_DAYS")),
 	}

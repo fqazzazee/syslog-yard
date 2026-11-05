@@ -99,6 +99,7 @@ error in its panel.
 | `YARD_COOKIE_SECURE`      | `false`     | Mark session cookies `Secure` (HTTPS) |
 | `YARD_SHARES`             | _(unset)_   | Comma-separated share names mounted at `/shares/<name>`, offered as cache locations ([docs/SHARES.md](../../docs/SHARES.md)) |
 | `YARD_TRUSTED_ORIGINS`    | _(unset)_   | Extra Origins accepted on state-changing requests, for a reverse proxy that rewrites `Host` |
+| `YARD_NOTIFY_PROXY`       | _(unset)_   | `true` sends notifications through `HTTP_PROXY`/`HTTPS_PROXY`, checking each target before it goes to the proxy; otherwise the proxy variables are ignored for notifications ([docs/SECURITY.md](../../docs/SECURITY.md)) |
 | `YARD_TRUSTED_PROXIES`    | _(unset)_   | IPs/CIDRs of a reverse proxy in front of the valve: its `X-Forwarded-Host` and `X-Forwarded-For` are believed ([docs/SECURITY.md](../../docs/SECURITY.md)) |
 | `YARD_LINK_HOSE` / `_VALVE` / `_BUCKET` | _(unset)_ | Cross-tool nav links: a full URL, or a bare port resolved against the host the browser used |
 

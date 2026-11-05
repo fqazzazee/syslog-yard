@@ -8,11 +8,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/syslog-yard/shared/netguard"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
 
@@ -23,7 +23,7 @@ func TestWebhookRefusesLoopback(t *testing.T) {
 	d := New(nil)
 	ch := store.Channel{Kind: "slack", Config: json.RawMessage(`{"url":"` + srv.URL + `"}`)}
 	err := d.deliver(context.Background(), ch, store.Entry{}, "x")
-	if !errors.Is(err, errBlockedAddr) {
+	if !errors.Is(err, netguard.ErrBlocked) {
 		t.Fatalf("err = %v, want blocked address", err)
 	}
 	if hit {
@@ -31,18 +31,6 @@ func TestWebhookRefusesLoopback(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), srv.URL) {
 		t.Errorf("error leaks the webhook URL: %v", err)
-	}
-}
-
-func TestBlockedAddr(t *testing.T) {
-	for addr, want := range map[string]bool{
-		"127.0.0.1": true, "::1": true, "0.0.0.0": true, "::": true,
-		"169.254.169.254": true, "fe80::1": true, "::ffff:127.0.0.1": true,
-		"10.0.0.5": false, "172.18.0.4": false, "192.168.1.10": false, "8.8.8.8": false,
-	} {
-		if got := blockedAddr(netip.MustParseAddr(addr)); got != want {
-			t.Errorf("blockedAddr(%s) = %v, want %v", addr, got, want)
-		}
 	}
 }
 
@@ -59,7 +47,7 @@ func TestWebhookDoesNotFollowRedirectsOrEchoBody(t *testing.T) {
 	}))
 	defer srv.Close()
 	d := New(nil)
-	d.allowLoopback = true
+	d.guard.AllowLoopback = true
 
 	ch := store.Channel{Kind: "slack", Config: json.RawMessage(`{"url":"` + srv.URL + `"}`)}
 	err := d.deliver(context.Background(), ch, store.Entry{}, "x")
@@ -167,6 +155,7 @@ func TestSendSMTP(t *testing.T) {
 	got := make(chan string, 1)
 	addr := fakeSMTP(t, false, got)
 	d := New(nil)
+	d.guard.AllowLoopback = true
 	e := store.Entry{Severity: 2, Host: "plc\r\nBcc: x@y.z", AppName: "modbus", Msg: "coil write"}
 	if err := d.deliver(context.Background(), smtpChannel(t, addr), e, summary(e)); err != nil {
 		t.Fatalf("smtp deliver: %v", err)
@@ -180,9 +169,26 @@ func TestSendSMTP(t *testing.T) {
 	}
 }
 
+// SMTP goes through the same outbound guard as webhooks (#61).
+func TestSendSMTPRefusesLoopback(t *testing.T) {
+	got := make(chan string, 1)
+	addr := fakeSMTP(t, false, got)
+	d := New(nil)
+	err := d.deliver(context.Background(), smtpChannel(t, addr), store.Entry{}, "x")
+	if !errors.Is(err, netguard.ErrBlocked) {
+		t.Fatalf("err = %v, want blocked address", err)
+	}
+	select {
+	case <-got:
+		t.Error("loopback SMTP server received the mail")
+	default:
+	}
+}
+
 func TestSendSMTPHonoursContext(t *testing.T) {
 	addr := fakeSMTP(t, true, nil)
 	d := New(nil)
+	d.guard.AllowLoopback = true
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	start := time.Now()

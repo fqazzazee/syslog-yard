@@ -139,7 +139,8 @@ func TestHeadersSetsHardeningAndGuards(t *testing.T) {
 }
 
 func TestClientIP(t *testing.T) {
-	pol := &Policy{TrustedProxies: parsePrefixes([]string{"10.0.0.0/8"})}
+	trusted, _ := ParseTrustedProxies("10.0.0.0/8")
+	pol := &Policy{TrustedProxies: trusted}
 	cases := []struct{ remote, xff, want string }{
 		{"192.0.2.1:4000", "", "192.0.2.1"},
 		{"192.0.2.1:4000", "203.0.113.9", "192.0.2.1"}, // untrusted peer: XFF ignored
@@ -161,12 +162,21 @@ func TestClientIP(t *testing.T) {
 	}
 }
 
-func TestParsePrefixes(t *testing.T) {
-	got := parsePrefixes(fields("10.0.0.0/8, 192.0.2.7 ::1,bogus"))
-	if len(got) != 3 {
+func TestParseTrustedProxies(t *testing.T) {
+	got, rejected := ParseTrustedProxies("10.0.0.0/8, 192.0.2.7 ::1,bogus\t10.0.0.0/33 ::ffff:192.0.2.9,,")
+	if len(got) != 4 {
 		t.Fatalf("got %v", got)
 	}
 	if !got[1].Contains(netip.MustParseAddr("192.0.2.7")) || got[1].Bits() != 32 {
 		t.Fatalf("single IP not a /32: %v", got[1])
+	}
+	if got[3] != netip.MustParsePrefix("192.0.2.9/32") {
+		t.Fatalf("mapped address not unmapped: %v", got[3])
+	}
+	if len(rejected) != 2 || rejected[0] != "bogus" || rejected[1] != "10.0.0.0/33" {
+		t.Fatalf("rejected = %q", rejected)
+	}
+	if got, rejected := ParseTrustedProxies(""); got != nil || rejected != nil {
+		t.Fatalf("empty: %v %v", got, rejected)
 	}
 }

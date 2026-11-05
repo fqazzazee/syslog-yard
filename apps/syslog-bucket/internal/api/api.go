@@ -55,12 +55,7 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Disp
 	if hub != nil {
 		hub.SetOriginPatterns(cfg.WSOrigins)
 	}
-	if proxies, err := auth.ParseTrustedProxies(cfg.TrustedProxies); err != nil {
-		// Fail closed: without a valid list, X-Forwarded-For is ignored.
-		slog.Error("YARD_TRUSTED_PROXIES ignored", "error", err)
-	} else {
-		authSvc.SetTrustedProxies(proxies)
-	}
+	authSvc.SetTrustedProxies(cfg.TrustedProxies)
 	// Apply stored (or env-fallback) OIDC + session settings to the auth service
 	// before the server starts handling requests.
 	s.applyStoredSettings(context.Background())

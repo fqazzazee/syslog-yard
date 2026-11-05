@@ -11,11 +11,9 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/smtp"
 	"net/url"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/syslog-yard/syslog-bucket/internal/store"
@@ -36,52 +34,6 @@ func (d *Dispatcher) deliver(ctx context.Context, ch store.Channel, e store.Entr
 	default:
 		return fmt.Errorf("unknown channel kind %q", ch.Kind)
 	}
-}
-
-// newHTTPClient builds the webhook client: no redirect following (a 3xx is
-// reported as a failure, never chased to another host) and a dialer that
-// refuses loopback / link-local / unspecified destinations. RFC 1918 ranges
-// stay reachable — webhook sinks commonly live on the compose network.
-func (d *Dispatcher) newHTTPClient() *http.Client {
-	dialer := &net.Dialer{Timeout: httpTimeout, Control: d.dialControl}
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.DialContext = dialer.DialContext
-	return &http.Client{
-		Timeout:   httpTimeout,
-		Transport: tr,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-}
-
-// errBlockedAddr is returned when a webhook resolves to a forbidden address.
-var errBlockedAddr = errors.New("destination address not allowed")
-
-// dialControl runs after DNS resolution for every connection attempt, so it
-// sees the actual IP being dialed (no TOCTOU between resolve and connect).
-func (d *Dispatcher) dialControl(_, address string, _ syscall.RawConn) error {
-	if d.allowLoopback {
-		return nil
-	}
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return err
-	}
-	ip, err := netip.ParseAddr(host)
-	if err != nil {
-		return fmt.Errorf("%w: %s", errBlockedAddr, host)
-	}
-	if blockedAddr(ip) {
-		return fmt.Errorf("%w: %s", errBlockedAddr, ip)
-	}
-	return nil
-}
-
-func blockedAddr(ip netip.Addr) bool {
-	ip = ip.Unmap()
-	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsInterfaceLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
 }
 
 type webhookConfig struct {
@@ -187,7 +139,8 @@ func (d *Dispatcher) sendSMTP(ctx context.Context, ch store.Channel, e store.Ent
 
 	ctx, cancel := context.WithTimeout(ctx, smtpTimeout)
 	defer cancel()
-	conn, err := (&net.Dialer{Timeout: httpTimeout}).DialContext(ctx, "tcp", addr)
+	// Same outbound guard as webhooks: the channel config picks the host.
+	conn, err := d.guard.Dialer(httpTimeout).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}
