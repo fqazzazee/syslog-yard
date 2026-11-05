@@ -151,7 +151,9 @@ export default function ChannelsModal({ channels, onClose }: Props) {
 
 // ChannelConfig renders the kind-specific fields.
 function ChannelConfig({ channel, onConfig }: { channel: Channel; onConfig: (k: string, v: unknown) => void }) {
-  const cfg = channel.config as Record<string, unknown>;
+  // config may be null from older servers, and for read-only roles the url
+  // can come back masked with only a has_url flag.
+  const cfg = (channel.config ?? {}) as Record<string, unknown>;
   const str = (k: string) => (cfg[k] === undefined || cfg[k] === null ? "" : String(cfg[k]));
 
   if (channel.kind === "smtp") {
@@ -211,6 +213,7 @@ function ChannelConfig({ channel, onConfig }: { channel: Channel; onConfig: (k: 
     <div className="channel-config">
       <label>
         {channel.kind === "slack" ? "Incoming webhook URL" : "Endpoint URL"}
+        {cfg.has_url && !str("url") ? " (stored)" : ""}
         <input
           value={str("url")}
           placeholder="https://hooks.example.com/…"
