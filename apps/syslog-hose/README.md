@@ -1,7 +1,7 @@
 # ⟫⟫ syslog-hose
 
 **A containerized syslog generator with a web UI.** Point the hose at any collector —
-a SIEM, [Sysbucket](https://github.com/), syslog-ng, rsyslog, Splunk, Graylog — and it
+a SIEM, [syslog-bucket](../syslog-bucket/README.md), syslog-ng, rsyslog, Splunk, Graylog — and it
 sprays *random-but-realistic* syslog events at whatever rate you ask for. Built for
 testing parsers, load-testing pipelines, demos, and lab work.
 
@@ -18,10 +18,12 @@ testing parsers, load-testing pipelines, demos, and lab work.
 - **Multiple simultaneous jobs** — run a FortiGate at 50 EPS to host A while a
   Cisco ASA does 10 EPS to host B. Per-job live counters and actual-EPS readout.
 - **Transports** — UDP, TCP (RFC 6587 octet-counted framing), TLS (RFC 5425),
-  with automatic reconnection.
+  with automatic reconnection (see [Delivery over TCP/TLS](#delivery-over-tcptls)).
 - **Rate control** — steady, jitter (±N%), or burst mode (quiet baseline with periodic
   spikes). Fractional rates work too (`0.2` = one event every 5 s). Stop after N seconds
-  or N events, or run forever.
+  or N events, or run forever. Pacing follows elapsed time, so the long-run rate
+  matches the setting; the configured rate, and the effective rate after jitter or
+  burst multipliers, are capped at 50,000 events/s.
 - **Live tail** — watch exactly what each job is emitting, in the browser.
 - **Boring ops** — one ~20 MB container, no database, runs as non-root, config
   persists as flat files in one volume, jobs marked *autostart* resume on boot.
@@ -83,6 +85,12 @@ WantedBy=default.target
 
 then `systemctl --user daemon-reload && systemctl --user start syslog-hose`.
 
+The image has no shell or `wget`, so health checks run the binary itself:
+`syslog-hose healthcheck` probes the local `GET /api/healthz` (unauthenticated)
+and exits non-zero on failure. Add `HealthCmd=["/syslog-hose", "healthcheck"]`
+to the unit above, or `test: ["CMD", "/syslog-hose", "healthcheck"]` under
+compose, as the suite's own files do.
+
 > **Bind mounts:** if you prefer `-v ./data:/data` over a named volume, the directory
 > must be writable by uid 65532 (`chown 65532 data`, or on rootless podman:
 > `podman unshare chown 65532 data`, or add `:U` to the volume flag).
@@ -91,13 +99,50 @@ then `systemctl --user daemon-reload && systemctl --user start syslog-hose`.
 
 | Env var        | Default | Meaning                          |
 |----------------|---------|----------------------------------|
-| `HOSE_ADDR` | `:8080` | Web UI / API listen address      |
+| `HOSE_ADDR` | `:8080` | Web UI / API listen address (the `healthcheck` subcommand probes it too) |
 | `HOSE_DATA` | `/data` | Jobs + custom presets directory  |
+| `HOSE_SUGGESTED_DEST` | _(unset)_ | Default destination (`host:port`) pre-filled for new jobs |
 | `YARD_AUTH_URL` | _(unset)_ | Guard the UI with syslog-bucket's accounts (unset = open) |
 | `YARD_COOKIE_SECURE` | `false` | Mark session cookies `Secure` (HTTPS) |
+| `YARD_TRUSTED_ORIGINS` | _(unset)_ | Extra Origins accepted on state-changing requests, for a reverse proxy that rewrites `Host` |
+| `YARD_TRUSTED_PROXIES` | _(unset)_ | IPs/CIDRs of a reverse proxy in front of the hose: its `X-Forwarded-Host` and `X-Forwarded-For` are believed ([docs/SECURITY.md](../../docs/SECURITY.md)) |
+| `YARD_LINK_HOSE` / `_VALVE` / `_BUCKET` | _(unset)_ | Cross-tool nav links: a full URL, or a bare port resolved against the host the browser used |
 
 Everything else is configured in the UI. State lives in `/data/jobs.json` and
-`/data/presets/*.yaml`.
+`/data/presets/*.yaml`. `jobs.json` is written atomically (temp file, fsync,
+rename), so a crash or power cut leaves either the old or the new version.
+
+## Delivery over TCP/TLS
+
+Plain syslog over TCP has no acknowledgements, so a sender can't know what a
+receiver actually read. The hose narrows the gap:
+
+- Before each write it checks whether the receiver has closed the connection
+  (FIN, RST, or a TLS close_notify) and reconnects instead of writing into a
+  dead socket.
+- If a write fails, the same frame is sent once more on a fresh connection
+  right away.
+- Only if that fails too does the job back off: 250 ms, doubling to 5 s, with
+  jitter. Messages generated during the backoff count as errors.
+
+What can still be lost: frames already written into a receiver's socket
+buffer when it closes without reading them (a restart of the collector,
+say). Use a protocol with acknowledgements downstream if every message
+matters.
+
+## Jobs and limits
+
+- **Stop is idempotent.** Stopping a job that is idle or already stopping is
+  a no-op; a stop waits up to 10 s for the job to wind down. Starting a job
+  that is still stopping returns an error ("job is still stopping, try
+  again").
+- **Request bodies** are capped: job create/update at 64 KiB, preset saves at
+  1 MiB, previews at about 1 MiB (a whole preset plus the job). Oversized job
+  and preview requests get **413**.
+- **Templates** are bounded: `randHex` returns at most 1024 characters, a
+  rendered message may be at most 64 KiB (the job reports an error past
+  that), and a job keeps at most 256 distinct `seq` counter names (a further
+  name gets a random number instead of a counter).
 
 ## Writing a custom preset
 
@@ -131,7 +176,7 @@ Template helpers:
 | `{{randPort}}` | ephemeral port 1024–65535 |
 | `{{randMAC}}` | locally-administered MAC |
 | `{{randInt 10 99}}` | integer in range (inclusive) |
-| `{{randHex 8}}` | hex string of length n |
+| `{{randHex 8}}` | hex string of length n (at most 1024) |
 | `{{oneOf "a" "b" "c"}}` | random pick |
 | `{{seq "name"}}` | named per-job incrementing counter (random start) |
 | `{{now "2006-01-02 15:04:05"}}` | event time in any [Go layout](https://pkg.go.dev/time#pkg-constants) |
