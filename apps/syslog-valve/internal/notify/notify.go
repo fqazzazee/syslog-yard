@@ -6,6 +6,10 @@
 // in the graph node, so there is no separate store; delivery is best-effort
 // and rate-limited per node so a chatty flow can't storm a chat channel.
 //
+// Each node gets its own worker and bounded queue, so the socket reader
+// never waits on HTTP: a slow or dead endpoint only drops that node's
+// messages (counted, not logged one by one).
+//
 // Email is intentionally not offered here: the valve graph is inspected,
 // exported, and version-archived, which is the wrong place for an SMTP
 // password. Use syslog-bucket's SMTP channel for email.
@@ -15,14 +19,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/syslog-yard/syslog-valve/internal/graph"
@@ -31,16 +39,45 @@ import (
 const (
 	maxPayload  = 16 * 1024
 	httpTimeout = 10 * time.Second
+	dialTimeout = 5 * time.Second
 	logRing     = 100
+	// queueSize is how many messages per node may wait for delivery; more
+	// are dropped (and counted) rather than blocking the socket reader.
+	queueSize = 32
+	// DefaultRatePerMin caps deliveries for a notify node that leaves
+	// ratePerMin unset (0). There is no unlimited setting.
+	DefaultRatePerMin = 60
 )
 
-// target is a notify node's delivery config, keyed by node ident.
-type target struct {
+// EffectiveRate is the per-minute cap applied for a configured ratePerMin.
+func EffectiveRate(configured int) int {
+	if configured <= 0 {
+		return DefaultRatePerMin
+	}
+	return configured
+}
+
+type targetConfig struct {
 	name string
 	kind string // webhook | slack
 	url  string
 	rate int
-	lim  *limiter
+}
+
+type job struct {
+	text  string
+	event map[string]string
+}
+
+// target is a notify node's delivery state, keyed by node ident. cfg,
+// stats and pendingDrops are guarded by Dispatcher.mu.
+type target struct {
+	cfg          targetConfig
+	lim          *limiter
+	queue        chan job
+	quit         chan struct{}
+	stats        Stats
+	pendingDrops int64
 }
 
 // Delivery is one recorded attempt, surfaced to the UI.
@@ -52,6 +89,15 @@ type Delivery struct {
 	Time   time.Time `json:"time"`
 }
 
+// Stats are cumulative per-node counters since the valve started.
+type Stats struct {
+	Node       string `json:"node"`
+	RatePerMin int    `json:"ratePerMin"`
+	Sent       int64  `json:"sent"`
+	Failed     int64  `json:"failed"`
+	Dropped    int64  `json:"dropped"` // rate limited or queue full
+}
+
 type Dispatcher struct {
 	client *http.Client
 
@@ -61,36 +107,118 @@ type Dispatcher struct {
 	log     []Delivery
 }
 
-func New() *Dispatcher {
+func New() *Dispatcher { return newDispatcher(false) }
+
+func newDispatcher(allowLoopback bool) *Dispatcher {
 	return &Dispatcher{
-		client:  &http.Client{Timeout: httpTimeout},
+		client:  newClient(allowLoopback),
 		targets: map[string]*target{},
 	}
 }
 
-// SetGraph refreshes the notify targets from an applied graph, preserving the
-// per-node rate limiter across reapplies.
+// newClient builds the delivery client with SSRF guards: redirects are not
+// followed, and connections to loopback, link-local (cloud metadata),
+// unspecified and multicast addresses are refused at dial time, after DNS
+// resolution. Private RFC 1918 ranges stay reachable — the usual webhook
+// sink is a container on the same network.
+func newClient(allowLoopback bool) *http.Client {
+	dialer := &net.Dialer{
+		Timeout: dialTimeout,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			return checkDialAddr(address, allowLoopback)
+		},
+	}
+	return &http.Client{
+		Timeout: httpTimeout,
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           dialer.DialContext,
+			TLSHandshakeTimeout:   dialTimeout,
+			ResponseHeaderTimeout: httpTimeout,
+			MaxIdleConns:          16,
+			IdleConnTimeout:       90 * time.Second,
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+}
+
+// Cloud metadata endpoints outside the link-local range.
+var metadataIPs = []net.IP{
+	net.ParseIP("fd00:ec2::254"),   // AWS IMDS over IPv6
+	net.ParseIP("100.100.100.200"), // Alibaba Cloud
+}
+
+func checkDialAddr(address string, allowLoopback bool) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return fmt.Errorf("refusing to connect to non-IP address %q", host)
+	}
+	if reason := blockedIP(ip, allowLoopback); reason != "" {
+		return fmt.Errorf("refusing to connect to %s address %s", reason, ip)
+	}
+	return nil
+}
+
+func blockedIP(ip net.IP, allowLoopback bool) string {
+	switch {
+	case ip.IsLoopback():
+		if allowLoopback {
+			return ""
+		}
+		return "loopback"
+	case ip.IsUnspecified(), ip.To4() != nil && ip.To4()[0] == 0:
+		return "unspecified"
+	case ip.IsLinkLocalUnicast(), ip.IsLinkLocalMulticast():
+		return "link-local"
+	case ip.IsMulticast():
+		return "multicast"
+	}
+	for _, m := range metadataIPs {
+		if ip.Equal(m) {
+			return "cloud metadata"
+		}
+	}
+	return ""
+}
+
+// SetGraph refreshes the notify targets from an applied graph. Existing
+// nodes keep their worker, queue, rate limiter and counters; removed nodes'
+// workers stop.
 func (d *Dispatcher) SetGraph(g *graph.Graph) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	next := map[string]*target{}
-	for _, n := range g.Nodes {
+	for _, n := range g.Enabled().Nodes {
 		if n.Type != graph.TypeNotify {
 			continue
 		}
 		id := graph.Ident(n.ID)
-		t := &target{name: nodeName(n), kind: n.Config.NotifyKind, url: n.Config.URL, rate: n.Config.RatePerMin}
-		d.mu.Lock()
-		if prev, ok := d.targets[id]; ok {
-			t.lim = prev.lim
+		cfg := targetConfig{name: nodeName(n), kind: n.Config.NotifyKind, url: n.Config.URL, rate: EffectiveRate(n.Config.RatePerMin)}
+		if t, ok := d.targets[id]; ok {
+			t.cfg = cfg
+			t.stats.Node, t.stats.RatePerMin = cfg.name, cfg.rate
+			next[id] = t
+			delete(d.targets, id)
+			continue
 		}
-		d.mu.Unlock()
-		if t.lim == nil {
-			t.lim = newLimiter()
+		t := &target{
+			cfg:   cfg,
+			lim:   newLimiter(),
+			queue: make(chan job, queueSize),
+			quit:  make(chan struct{}),
+			stats: Stats{Node: cfg.name, RatePerMin: cfg.rate},
 		}
 		next[id] = t
+		go d.worker(t)
 	}
-	d.mu.Lock()
+	for _, old := range d.targets {
+		close(old.quit)
+	}
 	d.targets = next
-	d.mu.Unlock()
 }
 
 // Listen binds the notify datagram socket and delivers until ctx is done. It
@@ -105,6 +233,7 @@ func (d *Dispatcher) Listen(ctx context.Context, path string) error {
 		<-ctx.Done()
 		conn.Close()
 		os.Remove(path)
+		d.SetGraph(&graph.Graph{}) // stop the workers
 	}()
 	go func() {
 		buf := make([]byte, maxPayload)
@@ -120,43 +249,95 @@ func (d *Dispatcher) Listen(ctx context.Context, path string) error {
 }
 
 // handle parses one datagram (ident\tisodate\thost\tprogram\tlevel\tmessage)
-// and delivers it to the matching node's channel.
+// and queues it for the matching node's worker. It never blocks: over the
+// rate limit or with a full queue the message is dropped and counted.
 func (d *Dispatcher) handle(line string) {
 	line = strings.TrimRight(line, "\n")
 	parts := strings.SplitN(line, "\t", 6)
 	if len(parts) < 6 {
 		return
 	}
-	ident := parts[0]
 	d.mu.Lock()
-	t := d.targets[ident]
+	t := d.targets[parts[0]]
+	var rate int
+	if t != nil {
+		rate = t.cfg.rate
+	}
 	d.mu.Unlock()
 	if t == nil {
 		return // node removed between apply and delivery
 	}
-	if !t.lim.allow(t.rate) {
-		d.record(t.name, "dropped", "rate limited")
+	if !t.lim.allow(rate) {
+		d.drop(t)
 		return
 	}
 	text := fmt.Sprintf("[%s] %s %s: %s", parts[4], parts[2], parts[3], parts[5])
 	ev := map[string]string{"time": parts[1], "host": parts[2], "program": parts[3], "level": parts[4], "message": parts[5]}
-	if err := d.send(context.Background(), t, text, ev); err != nil {
-		d.record(t.name, "error", err.Error())
-	} else {
-		d.record(t.name, "ok", "")
+	select {
+	case t.queue <- job{text: text, event: ev}:
+	default:
+		d.drop(t)
+	}
+}
+
+func (d *Dispatcher) drop(t *target) {
+	d.mu.Lock()
+	t.stats.Dropped++
+	t.pendingDrops++
+	d.mu.Unlock()
+}
+
+func (d *Dispatcher) worker(t *target) {
+	for {
+		select {
+		case <-t.quit:
+			return
+		case j := <-t.queue:
+			d.mu.Lock()
+			cfg := t.cfg
+			dropped := t.pendingDrops
+			t.pendingDrops = 0
+			d.mu.Unlock()
+			if dropped > 0 {
+				d.record(cfg.name, "dropped", fmt.Sprintf("%d message(s) dropped since the previous delivery (limit %d/min, queue %d)", dropped, cfg.rate, queueSize))
+			}
+			err := d.send(context.Background(), cfg, j.text, j.event)
+			d.mu.Lock()
+			if err != nil {
+				t.stats.Failed++
+			} else {
+				t.stats.Sent++
+			}
+			d.mu.Unlock()
+			if err != nil {
+				d.record(cfg.name, "error", err.Error())
+			} else {
+				d.record(cfg.name, "ok", "")
+			}
+		}
 	}
 }
 
 // TestSend delivers a synthetic message to a channel config, for the UI's
-// test button (before the graph is applied).
-func (d *Dispatcher) TestSend(ctx context.Context, kind, url string) error {
-	t := &target{kind: kind, url: url}
+// test button (before the graph is applied). It goes through the same
+// guarded client as real deliveries.
+func (d *Dispatcher) TestSend(ctx context.Context, kind, rawURL string) error {
+	if kind != "webhook" && kind != "slack" {
+		return fmt.Errorf("kind must be webhook or slack")
+	}
+	if err := graph.CheckNotifyURL(rawURL); err != nil {
+		return err
+	}
 	text := "Test notification from syslog-valve — this channel is wired up."
 	ev := map[string]string{"host": "syslog-valve", "program": "notify-test", "level": "notice", "message": text}
-	return d.send(ctx, t, text, ev)
+	return d.send(ctx, targetConfig{kind: kind, url: rawURL}, text, ev)
 }
 
-func (d *Dispatcher) send(ctx context.Context, t *target, text string, event map[string]string) error {
+// slackEscape applies Slack's message formatting escapes so log content
+// can't produce mentions or links such as <!channel>.
+var slackEscape = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
+func (d *Dispatcher) send(ctx context.Context, t targetConfig, text string, event map[string]string) error {
 	if strings.TrimSpace(t.url) == "" {
 		return fmt.Errorf("channel has no URL")
 	}
@@ -164,7 +345,7 @@ func (d *Dispatcher) send(ctx context.Context, t *target, text string, event map
 	var err error
 	switch t.kind {
 	case "slack":
-		body, err = compactJSON(map[string]string{"text": text})
+		body, err = compactJSON(map[string]string{"text": slackEscape.Replace(text)})
 	default: // webhook
 		body, err = compactJSON(map[string]any{"source": "syslog-valve", "text": text, "event": event})
 	}
@@ -173,17 +354,24 @@ func (d *Dispatcher) send(ctx context.Context, t *target, text string, event map
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return fmt.Errorf("invalid URL")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return err
+		// url.Error repeats the full URL, and webhook URLs embed secrets.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return fmt.Errorf("delivery failed: %v", err)
 	}
-	defer resp.Body.Close()
+	// Drain a little so the connection can be reused; never echo the
+	// body back to the API or logs.
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
-		return fmt.Errorf("endpoint returned %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+		return fmt.Errorf("endpoint returned HTTP %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -209,6 +397,30 @@ func (d *Dispatcher) Recent() []Delivery {
 	for i, dlv := range d.log {
 		out[len(d.log)-1-i] = dlv
 	}
+	return out
+}
+
+// Stats returns per-node counters for the current targets, keyed by node
+// ident.
+func (d *Dispatcher) Stats() map[string]Stats {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make(map[string]Stats, len(d.targets))
+	for id, t := range d.targets {
+		out[id] = t.stats
+	}
+	return out
+}
+
+// Targets returns the idents of the configured notify nodes, sorted.
+func (d *Dispatcher) Targets() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]string, 0, len(d.targets))
+	for id := range d.targets {
+		out = append(out, id)
+	}
+	sort.Strings(out)
 	return out
 }
 

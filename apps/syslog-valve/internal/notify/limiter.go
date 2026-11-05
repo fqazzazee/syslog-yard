@@ -6,7 +6,8 @@ import (
 )
 
 // limiter is a per-node sliding-window rate limiter: at most `rate`
-// deliveries per trailing minute. rate <= 0 means unlimited.
+// deliveries per trailing minute. The dispatcher always passes a positive
+// rate (see EffectiveRate); rate <= 0 here would mean unlimited.
 type limiter struct {
 	mu    sync.Mutex
 	times []time.Time

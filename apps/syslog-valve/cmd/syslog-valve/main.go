@@ -6,14 +6,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
-
-	"strings"
 
 	"github.com/syslog-yard/shared/yardauth"
 	"github.com/syslog-yard/syslog-valve/internal/codegen"
@@ -125,7 +126,21 @@ func main() {
 		fmt.Printf("syslog-valve: auth enforced via %s\n", os.Getenv("YARD_AUTH_URL"))
 	}
 
-	srv := &http.Server{Addr: addr, Handler: server.New(sup, dataDir, ui, hints, shares, rotator, tp, nd, guard)}
+	api := server.New(sup, dataDir, ui, hints, shares, rotator, tp, nd, guard)
+	if _, p, err := net.SplitHostPort(addr); err == nil {
+		if port, err := strconv.Atoi(p); err == nil {
+			api.SetHTTPPort(port)
+		}
+	}
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: api,
+		// Bound slow-header clients; no overall read/write timeout because
+		// /api/tail is a long-lived event stream.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
+	}
 	go func() {
 		fmt.Printf("syslog-valve listening on %s (data dir %s, syslog-ng %s)\n",
 			addr, dataDir, sup.Version())
