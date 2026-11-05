@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Banner, Loading } from "../../../../shared/web/src/ui";
 import { fetchCoverage, fetchMitre, fetchMitreSummary } from "./../api";
 import type { Coverage, Filters, MitreCatalog, Selection } from "./../types";
 import { CoverageBanner } from "./CoverageBanner";
@@ -63,11 +64,11 @@ export default function MitreView({ filters, selection, onSelectTechnique }: Pro
 
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
-  if (!catalog) return error ? <div className="error">{error}</div> : <div className="mitre-view empty">Loading ATT&CK matrix…</div>;
+  if (!catalog) return error ? <Banner kind="error">{error}</Banner> : <Loading label="Loading ATT&CK matrix…" />;
 
   return (
     <div className="mitre-view">
-      {error && <div className="error">{error}</div>}
+      {error && <Banner kind="error">{error}</Banner>}
       <div className="mitre-head">
         <p className="mitre-intro">
           Events mapped to MITRE ATT&CK at ingest — {total.toLocaleString()} technique hits in this window.

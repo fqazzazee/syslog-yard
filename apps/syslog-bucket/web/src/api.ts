@@ -1,3 +1,4 @@
+import { ApiError, jsonInit, request as sharedRequest } from "../../../shared/web/src/http";
 import type {
   AuthInfo,
   Bucket,
@@ -48,59 +49,22 @@ export function filterParams(f: Filters, sel: Selection): URLSearchParams {
   return params;
 }
 
-// ApiError carries the server's message and status. toString() is just the
-// message, so the UI's String(e) shows "tag is used by rule X" rather than
-// "Error: {\"error\":...}".
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-    this.name = "ApiError";
-  }
-  toString(): string {
-    return this.message;
-  }
-}
+// Errors, the 401 → sign-in signal and JSON bodies are handled by the
+// suite-wide helpers in apps/shared/web (one parser for all three tools).
+export { ApiError };
 
-// errorMessage extracts a readable message from an error response: a JSON
-// {"error": "..."} body (newer handlers), else the plain-text body
-// (http.Error), else the status line.
-async function errorMessage(res: Response): Promise<string> {
-  const text = (await res.text().catch(() => "")).trim();
-  if (text.startsWith("{")) {
-    try {
-      const body = JSON.parse(text) as { error?: unknown; message?: unknown };
-      const msg = body.error ?? body.message;
-      if (typeof msg === "string" && msg.trim()) return msg.trim();
-    } catch {
-      // not JSON after all; fall through to the raw text
-    }
-  }
-  return text || `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""}`;
-}
-
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
-  if (!res.ok) {
-    // A 401 outside the auth endpoints means the session died mid-use;
-    // tell the app shell to fall back to the login screen.
-    if (res.status === 401 && !url.startsWith("/api/auth/")) {
-      window.dispatchEvent(new Event("auth-expired"));
-    }
-    throw new ApiError(res.status, await errorMessage(res));
-  }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+function request<T>(url: string, init?: RequestInit): Promise<T> {
+  return sharedRequest<T>(url, init);
 }
 
 function send<T>(method: string, url: string, body: unknown): Promise<T> {
-  return request<T>(url, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  return sharedRequest<T>(url, jsonInit(method, body));
+}
+
+// call is a body-less state change (PUT/POST), still sent as JSON: the
+// server only accepts application/json on state-changing requests.
+function call<T>(method: string, url: string): Promise<T> {
+  return send<T>(method, url, {});
 }
 
 export async function fetchEntries(
@@ -169,11 +133,17 @@ export const fetchNetEntries = (q: { class?: string; ip?: string; minutes: numbe
 export const fetchNetConfig = () =>
   request<{ config: NetConfig; feeds: NetFeedStatus[] }>("/api/net/config");
 
-export const putNetConfig = (c: NetConfig) =>
-  send<{ ok: boolean; feeds: NetFeedStatus[] }>("PUT", "/api/net/config", c);
+// pending: the feed fetch outlived the request (202) and continues in the
+// background; poll fetchNetConfig for the result.
+export interface NetRefreshResult {
+  ok: boolean;
+  pending?: boolean;
+  feeds: NetFeedStatus[];
+}
 
-export const refreshNetFeeds = () =>
-  send<{ ok: boolean; feeds: NetFeedStatus[] }>("POST", "/api/net/refresh", {});
+export const putNetConfig = (c: NetConfig) => send<NetRefreshResult>("PUT", "/api/net/config", c);
+
+export const refreshNetFeeds = () => call<NetRefreshResult>("POST", "/api/net/refresh");
 
 // Classification coverage for the current window. For a whole-framework
 // selection we add the framework param so the server also returns `covered`.
@@ -186,19 +156,18 @@ export const fetchCoverage = (f: Filters, sel: Selection) => {
 export const patchEntry = (id: number, patch: { status?: string; priority?: number }) =>
   send<Entry>("PATCH", `/api/entries/${id}`, patch);
 
-export const tagEntry = (id: number, tagId: number) =>
-  request<Entry>(`/api/entries/${id}/tags/${tagId}`, { method: "PUT" });
+export const tagEntry = (id: number, tagId: number) => call<Entry>("PUT", `/api/entries/${id}/tags/${tagId}`);
 
 export const untagEntry = (id: number, tagId: number) =>
   request<Entry>(`/api/entries/${id}/tags/${tagId}`, { method: "DELETE" });
 
 // Hand-classification: add/remove a MITRE technique or OT code on one entry.
 export const addEntryMitre = (id: number, code: string) =>
-  request<Entry>(`/api/entries/${id}/mitre/${encodeURIComponent(code)}`, { method: "PUT" });
+  call<Entry>("PUT", `/api/entries/${id}/mitre/${encodeURIComponent(code)}`);
 export const delEntryMitre = (id: number, code: string) =>
   request<Entry>(`/api/entries/${id}/mitre/${encodeURIComponent(code)}`, { method: "DELETE" });
 export const addEntryOT = (id: number, code: string) =>
-  request<Entry>(`/api/entries/${id}/ot/${encodeURIComponent(code)}`, { method: "PUT" });
+  call<Entry>("PUT", `/api/entries/${id}/ot/${encodeURIComponent(code)}`);
 export const delEntryOT = (id: number, code: string) =>
   request<Entry>(`/api/entries/${id}/ot/${encodeURIComponent(code)}`, { method: "DELETE" });
 
@@ -218,11 +187,7 @@ export const deleteBucket = (id: number) =>
 
 export const fetchAuthInfo = () => request<AuthInfo>("/api/auth/info");
 export const fetchMe = () => request<User>("/api/auth/me");
-export const login = (username: string, password: string) =>
-  send<User>("POST", "/api/auth/login", { username, password });
-export const logout = () => request<void>("/api/auth/logout", { method: "POST" });
-export const changePassword = (oldPw: string, newPw: string) =>
-  send<void>("PUT", "/api/auth/password", { old: oldPw, new: newPw });
+export const logout = () => call<void>("POST", "/api/auth/logout");
 
 // --- admin settings (OIDC + session) ---
 
@@ -241,13 +206,8 @@ export const saveSessionSettings = (idle_minutes: number) =>
   send<{ ok: boolean }>("PUT", "/api/settings/session", { idle_minutes });
 
 export const fetchUsers = () => request<{ users: User[] }>("/api/users").then((b) => b.users);
-export const createUser = (u: { username: string; display_name: string; email: string; role: string; password: string }) =>
-  send<User>("POST", "/api/users", u);
-export const updateUser = (
-  id: number,
-  u: { display_name: string; email: string; role: string; disabled: boolean; password?: string },
-) => send<User>("PUT", `/api/users/${id}`, u);
-export const deleteUser = (id: number) => request<void>(`/api/users/${id}`, { method: "DELETE" });
+// Creating, editing and deleting users lives in the shared account menu
+// (apps/shared/web/src/AccountMenu.tsx); the bucket only lists them.
 
 export const fetchBucketShares = (bucketId: number) =>
   request<{ shares: BucketShare[] }>(`/api/buckets/${bucketId}/shares`).then((b) => b.shares);
@@ -262,8 +222,7 @@ export const createChannel = (c: Omit<Channel, "id">) => send<Channel>("POST", "
 export const updateChannel = (c: Channel) => send<Channel>("PUT", `/api/channels/${c.id}`, c);
 export const deleteChannel = (id: number) =>
   request<void>(`/api/channels/${id}`, { method: "DELETE" });
-export const testChannel = (id: number) =>
-  send<{ ok: boolean }>("POST", `/api/channels/${id}/test`, {});
+export const testChannel = (id: number) => call<{ ok: boolean }>("POST", `/api/channels/${id}/test`);
 export const fetchNotificationLog = (channelId?: number) =>
   request<{ deliveries: Delivery[] }>(
     `/api/notifications/log${channelId ? `?channel_id=${channelId}` : ""}`,
@@ -273,7 +232,9 @@ export const fetchRules = () => request<{ rules: Rule[] }>("/api/rules").then((b
 export const createRule = (r: Omit<Rule, "id">) => send<Rule>("POST", "/api/rules", r);
 export const updateRule = (r: Rule) => send<Rule>("PUT", `/api/rules/${r.id}`, r);
 export const deleteRule = (id: number) => request<void>(`/api/rules/${id}`, { method: "DELETE" });
-// skipped lists action types the server does not replay over history
-// (e.g. ["notify"]); older servers omit it.
+// affected counts distinct entries the run actually changed (so a re-run
+// reports 0), matched the entries the condition selected; skipped lists
+// action types the server does not replay over history (e.g. ["notify"]).
+// Older servers omit matched and skipped.
 export const applyRule = (id: number) =>
-  send<{ affected: number; skipped?: string[] }>("POST", `/api/rules/${id}/apply`, {});
+  call<{ affected: number; matched?: number; skipped?: string[] }>("POST", `/api/rules/${id}/apply`);

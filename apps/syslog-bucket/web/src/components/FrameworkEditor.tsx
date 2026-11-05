@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Banner, IconButton } from "../../../../shared/web/src/ui";
 import { createFramework, deleteFramework, updateFramework } from "./../api";
 import type { Framework, MitreCatalog, OTCatalog } from "./../types";
 import { DEVICE_CLASSES } from "./../types";
@@ -43,7 +44,7 @@ function CodeChips({
       {codes.map((c) => (
         <span key={c} className="mitre-chip editable">
           {c}
-          <button className="chip-x" type="button" title="Remove" onClick={() => onChange(codes.filter((x) => x !== c))}>
+          <button className="chip-x" type="button" title="Remove" aria-label={`Remove ${c}`} onClick={() => onChange(codes.filter((x) => x !== c))}>
             <Icon name="close" size={12} />
           </button>
         </span>
@@ -169,9 +170,7 @@ export default function FrameworkEditor({ framework, mitreCatalog, otCatalog, on
               onChange={(e) => patchItem(i, { group: e.target.value })}
               placeholder="group / column"
             />
-            <button type="button" className="linkish" title="Remove item" onClick={() => setItems(items.filter((_, j) => j !== i))}>
-              <Icon name="delete" size={14} />
-            </button>
+            <IconButton icon="delete" label="Remove item" variant="link" iconSize={14} onClick={() => setItems(items.filter((_, j) => j !== i))} />
           </div>
           <div className="fw-codes">
             <CodeChips codes={it.mitre} options={mitreOpts} label="+ ATT&CK" onChange={(mitre) => patchItem(i, { mitre })} />
@@ -188,7 +187,7 @@ export default function FrameworkEditor({ framework, mitreCatalog, otCatalog, on
         <Icon name="add" size={14} /> item
       </button>
 
-      {error && <div className="error">{error}</div>}
+      {error && <Banner kind="error">{error}</Banner>}
       <div className="modal-foot">
         {framework && (
           <button className="danger" disabled={busy} onClick={() => void remove()}>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Banner, IconButton } from "../../../../shared/web/src/ui";
 import { applyRule, createRule, deleteRule, updateRule } from "./../api";
 import type { Action, Channel, Cond, MitreCatalog, OTCatalog, Rule, Tag } from "./../types";
 import { PRIORITY_NAMES } from "./../types";
@@ -43,7 +44,7 @@ function CodeList({
       {codes.map((c) => (
         <span key={c} className="mitre-chip editable">
           {c}
-          <button className="chip-x" type="button" title="Remove" onClick={() => onChange(codes.filter((x) => x !== c))}>
+          <button className="chip-x" type="button" title="Remove" aria-label={`Remove ${c}`} onClick={() => onChange(codes.filter((x) => x !== c))}>
             <Icon name="close" size={12} />
           </button>
         </span>
@@ -104,10 +105,18 @@ export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, ot
     const saved = await save();
     if (!saved) return;
     try {
-      const { affected, skipped } = await applyRule(saved.id);
-      let msg = `Applied to history: ${affected} change${affected === 1 ? "" : "s"}.`;
+      const { affected, matched, skipped } = await applyRule(saved.id);
+      const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+      let msg =
+        matched === undefined
+          ? `Applied to history: ${plural(affected, "change", "changes")}.`
+          : `Ran on history: ${plural(matched, "entry matched", "entries matched")}, ${plural(affected, "entry", "entries")} changed` +
+            (matched > 0 && affected === 0 ? " (all already up to date)." : ".");
       for (const kind of skipped ?? []) {
-        msg += kind === "notify" ? " Notify actions are not applied to history." : ` ${kind} actions are not applied to history.`;
+        msg +=
+          kind === "notify"
+            ? " Notify actions only fire for new entries, so no notifications were sent for history."
+            : ` ${kind} actions are not applied to history.`;
       }
       setNotice(msg);
       setBusy(false);
@@ -213,20 +222,18 @@ export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, ot
               onChange={(ot) => patchAction(i, { ot })}
             />
           )}
-          <button type="button" className="linkish" onClick={() => setActions(actions.filter((_, j) => j !== i))}>
-            <Icon name="close" size={14} />
-          </button>
+          <IconButton icon="close" label="Remove action" variant="link" iconSize={14} onClick={() => setActions(actions.filter((_, j) => j !== i))} />
         </div>
       ))}
       <button type="button" className="linkish" onClick={() => setActions([...actions, { type: "tag", tag_id: tags[0]?.id }])}>
         + action
       </button>
 
-      {error && <div className="error">{error}</div>}
-      {notice && <div className="notice">{notice}</div>}
+      {error && <Banner kind="error">{error}</Banner>}
+      {notice && <Banner kind="success">{notice}</Banner>}
       <div className="modal-foot">
         {rule && (
-          <button className="danger" disabled={busy} onClick={() => void remove()}>
+          <button className="danger danger-left" disabled={busy} onClick={() => void remove()}>
             Delete
           </button>
         )}

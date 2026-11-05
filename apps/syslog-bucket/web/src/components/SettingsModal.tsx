@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Banner } from "../../../../shared/web/src/ui";
 import { fetchSettings, saveOIDCSettings, saveSessionSettings } from "./../api";
 import type { Settings } from "./../types";
 import Modal from "./Modal";
@@ -23,11 +24,18 @@ export default function SettingsModal({ onClose }: Props) {
 
   useEffect(() => {
     fetchSettings()
-      .then(setS)
+      // A new SSO user defaults to the least privilege.
+      .then((v) => setS(v.oidc.default_role ? v : { ...v, oidc: { ...v.oidc, default_role: "viewer" } }))
       .catch((e) => setError(String(e)));
   }, []);
 
   const patchOIDC = (p: Partial<Settings["oidc"]>) => s && setS({ ...s, oidc: { ...s.oidc, ...p } });
+  // The server refuses an issuer change without the secret re-entered.
+  const [savedIssuer, setSavedIssuer] = useState<string | null>(null);
+  useEffect(() => {
+    if (s && savedIssuer === null) setSavedIssuer(s.oidc.issuer);
+  }, [s, savedIssuer]);
+  const issuerChanged = !!s && savedIssuer !== null && s.oidc.issuer.trim() !== savedIssuer.trim();
 
   const save = async () => {
     if (!s) return;
@@ -92,7 +100,15 @@ export default function SettingsModal({ onClose }: Props) {
               onChange={(e) => setSecret(e.target.value)}
               placeholder={s.oidc.has_secret ? "•••••••• (leave blank to keep current)" : "(none set)"}
               autoComplete="new-password"
+              aria-describedby="oidc-secret-help"
             />
+            <span className="field-help" id="oidc-secret-help">
+              {issuerChanged && s.oidc.has_secret && !secret ? (
+                <b className="field-warn">The issuer changed — enter the client secret again before saving.</b>
+              ) : (
+                "Write-only. Changing the issuer requires entering the secret again."
+              )}
+            </span>
           </label>
           <label>
             Redirect URL
@@ -133,8 +149,8 @@ export default function SettingsModal({ onClose }: Props) {
             />
           </label>
 
-          {error && <div className="error">{error}</div>}
-          {notice && <div className="notice">{notice}</div>}
+          {error && <Banner kind="error">{error}</Banner>}
+          {notice && <Banner kind="success">{notice}</Banner>}
           <div className="modal-foot">
             <button
               className="primary"

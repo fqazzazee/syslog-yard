@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Banner, Loading } from "../../../../shared/web/src/ui";
 import { fetchCoverage, fetchOt, fetchOtSummary } from "./../api";
 import type { Coverage, Filters, OTCatalog, Selection } from "./../types";
 import { CoverageBanner } from "./CoverageBanner";
@@ -64,11 +65,11 @@ export default function OTView({ filters, selection, onSelectAlert }: Props) {
 
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
-  if (!catalog) return error ? <div className="error">{error}</div> : <div className="mitre-view empty">Loading OT alerts…</div>;
+  if (!catalog) return error ? <Banner kind="error">{error}</Banner> : <Loading label="Loading OT alerts…" />;
 
   return (
     <div className="mitre-view">
-      {error && <div className="error">{error}</div>}
+      {error && <Banner kind="error">{error}</Banner>}
       <div className="mitre-head">
         <p className="mitre-intro">
           OT/ICS events mapped to Claroty-style alert types at ingest — {total.toLocaleString()} alerts in this window

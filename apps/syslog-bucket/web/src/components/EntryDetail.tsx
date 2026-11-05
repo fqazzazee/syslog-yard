@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Badge, Banner, IconButton } from "../../../../shared/web/src/ui";
 import {
   addEntryMitre,
   addEntryOT,
@@ -98,15 +99,13 @@ export default function EntryDetail({
   const ot = entry.ot ?? [];
 
   return (
-    <aside className="detail">
+    <aside className="detail" aria-labelledby="entry-detail-title">
       <div className="detail-head">
-        <h2>
+        <h2 id="entry-detail-title">
           Entry #{entry.id}
-          {entry.suppressed && <span className="badge muted">suppressed</span>}
+          {entry.suppressed && <Badge>suppressed</Badge>}
         </h2>
-        <button onClick={onClose}>
-          <Icon name="close" size={18} />
-        </button>
+        <IconButton icon="close" label="Close entry details" onClick={onClose} />
       </div>
 
       <div className="triage">
@@ -139,7 +138,7 @@ export default function EntryDetail({
           </select>
         </label>
       </div>
-      {error && <div className="error">{error}</div>}
+      {error && <Banner kind="error">{error}</Banner>}
 
       <div className="detail-tags">
         {(entry.tag_ids ?? []).map((id) => {
@@ -212,6 +211,7 @@ export default function EntryDetail({
                   <button
                     className="chip-x"
                     title="Remove classification"
+                    aria-label={`Remove technique ${id}`}
                     disabled={busy}
                     onClick={() => update(() => delEntryMitre(entry.id, id))}
                   >
@@ -244,6 +244,7 @@ export default function EntryDetail({
                   <button
                     className="chip-x"
                     title="Remove classification"
+                    aria-label={`Remove OT code ${id}`}
                     disabled={busy}
                     onClick={() => update(() => delEntryOT(entry.id, id))}
                   >

@@ -7,7 +7,9 @@ export function TagChip({ tag, disabled, onRemove }: { tag: Tag; disabled?: bool
       {tag.name}
       {onRemove && (
         <button
+          type="button"
           title="Remove tag"
+          aria-label={`Remove tag ${tag.name}`}
           disabled={disabled}
           onClick={(e) => {
             e.stopPropagation();
@@ -38,7 +40,14 @@ export function TagPicker({
   if (available.length === 0) return null;
   return (
     <span className="tagpicker">
-      <button className="linkish" disabled={disabled} onClick={() => setOpen(!open)}>
+      <button
+        type="button"
+        className="linkish"
+        disabled={disabled}
+        aria-expanded={open && !disabled}
+        onClick={() => setOpen(!open)}
+        onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
+      >
         + tag
       </button>
       {open && !disabled && (
@@ -46,6 +55,9 @@ export function TagPicker({
           {available.map((t) => (
             <button
               key={t.id}
+              type="button"
+              aria-label={`Add tag ${t.name}`}
+              onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
               onClick={() => {
                 setOpen(false);
                 onPick(t.id);

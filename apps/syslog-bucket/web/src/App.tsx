@@ -24,6 +24,7 @@ import type {
   Entry,
   Filters,
   Framework,
+  IngestStats,
   MitreCatalog,
   OTCatalog,
   Rule,
@@ -33,17 +34,20 @@ import type {
   Tag,
   User,
 } from "./types";
-import { About } from "./components/About";
-import AccountModal from "./components/AccountModal";
+import { AppShell } from "../../../shared/web/src/AppShell";
+import { useHashRoute } from "../../../shared/web/src/hooks";
+import { ApiError } from "../../../shared/web/src/http";
+import { Login } from "../../../shared/web/src/Login";
+import { Badge, Banner, Button, Loading, PageHeader } from "../../../shared/web/src/ui";
+import type { IconName } from "../../../shared/web/src/Icon";
 import BucketModal from "./components/BucketModal";
 import ChannelsModal from "./components/ChannelsModal";
 import EntryDetail from "./components/EntryDetail";
-import { Icon } from "./components/Icon";
 import FilterBar from "./components/FilterBar";
 import FrameworkEditor from "./components/FrameworkEditor";
-import Login from "./components/Login";
-import LogTable from "./components/LogTable";
 import FrameworkView from "./components/FrameworkView";
+import { BucketsPage, FrameworksPage, RulesPage } from "./components/ListPages";
+import LogTable from "./components/LogTable";
 import MitreView from "./components/MitreView";
 import NetView from "./components/NetView";
 import OTView from "./components/OTView";
@@ -51,10 +55,8 @@ import RuleModal from "./components/RuleModal";
 import SettingsModal from "./components/SettingsModal";
 import Sidebar from "./components/Sidebar";
 import TagsModal from "./components/TagsModal";
-import UsersModal from "./components/UsersModal";
-import { YardNav } from "./components/YardNav";
-import { getTheme, toggleTheme } from "./theme";
 import { useLiveTail, useVisibleInterval } from "./hooks";
+import { parseRoute, pathFor } from "./routes";
 
 // Seed for a rule pre-filled from an entry ("promote to detection").
 export interface RuleSeed {
@@ -115,32 +117,96 @@ type ModalState =
   | { kind: "frameworkEditor"; framework: Framework | null }
   | { kind: "tags" }
   | { kind: "channels" }
-  | { kind: "users" }
-  | { kind: "settings" }
-  | { kind: "account" };
+  | { kind: "settings" };
 
 // App gates the workspace behind a session: no user → login screen. The
 // api layer fires "auth-expired" whenever a request comes back 401.
 export default function App() {
   const [me, setMe] = useState<User | null | undefined>(undefined); // undefined = checking
   const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
+  // The session ended under us (expired, disabled, signed out elsewhere).
+  const [expired, setExpired] = useState(false);
 
   useEffect(() => {
     fetchAuthInfo().then(setAuthInfo).catch(() => {});
     fetchMe().then(setMe).catch(() => setMe(null));
-    const expired = () => setMe(null);
-    window.addEventListener("auth-expired", expired);
-    return () => window.removeEventListener("auth-expired", expired);
+    const onExpired = () =>
+      setMe((cur) => {
+        if (cur) setExpired(true);
+        return null;
+      });
+    window.addEventListener("auth-expired", onExpired);
+    return () => window.removeEventListener("auth-expired", onExpired);
   }, []);
 
   if (me === undefined) return null;
-  if (me === null) return <Login info={authInfo} onLogin={setMe} />;
-  return <Workspace me={me} onSignOut={() => logout().finally(() => setMe(null))} />;
+  if (me === null) {
+    return (
+      <Login<User>
+        tool="bucket"
+        oidc={authInfo?.oidc.enabled ? { name: authInfo.oidc.name ?? "" } : null}
+        notice={expired ? "Your session ended — sign in again." : undefined}
+        onLogin={(u) => {
+          setExpired(false);
+          setMe(u);
+        }}
+      />
+    );
+  }
+  return <Workspace me={me} onUserChanged={setMe} onSignOut={() => logout().finally(() => setMe(null))} />;
 }
 
-function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
+// IngestHealth is the small ingest-pipeline indicator in the page header.
+function IngestHealth({ ingest }: { ingest: IngestStats }) {
+  const fill = ingest.queue_capacity > 0 ? ingest.queue_depth / ingest.queue_capacity : 0;
+  const detail =
+    `Ingest queue ${ingest.queue_depth}/${ingest.queue_capacity} · inserted ${ingest.inserted.toLocaleString()}` +
+    ` · failed attempts ${ingest.failed} · dropped ${ingest.dropped} · bad records ${ingest.bad_records}` +
+    (ingest.retrying ? " · retrying a database error" : "");
+  if (ingest.retrying) return <Badge tone="danger" title={detail}>ingest retrying</Badge>;
+  if (ingest.dropped > 0) return <Badge tone="warning" title={detail}>{ingest.dropped.toLocaleString()} dropped</Badge>;
+  if (fill >= 0.8) return <Badge tone="warning" title={detail}>ingest backlog {Math.round(fill * 100)}%</Badge>;
+  return <Badge tone="success" title={detail}>ingest ok</Badge>;
+}
+
+const VIEW_ICON: Record<string, IconName> = {
+  all: "description",
+  bucket: "folder",
+  tag: "sell",
+  mitre: "crisis_alert",
+  technique: "crisis_alert",
+  ot: "factory",
+  otalert: "factory",
+  framework: "shield",
+  frameworkitem: "shield",
+  net: "lan",
+};
+
+function Workspace({
+  me,
+  onUserChanged,
+  onSignOut,
+}: {
+  me: User;
+  onUserChanged: (u: User) => void;
+  onSignOut: () => void;
+}) {
   const [filters, setFilters] = useState<Filters>(initialFilters);
-  const [selection, setSelection] = useState<Selection>({ kind: "all" });
+  // The view comes from the URL hash (routes.ts), so it is deep-linkable
+  // and back/forward work; selection/page are derived, stable per hash.
+  const [path, navigate] = useHashRoute();
+  const routeKey = path.join("/");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const route = useMemo(() => parseRoute(path), [routeKey]);
+  useEffect(() => {
+    if (!route) navigate(["logs"], { replace: true });
+  }, [route, navigate]);
+  const page = route && "page" in route ? route.page : null;
+  const selection: Selection = useMemo(
+    () => (route && "selection" in route ? route.selection : { kind: "all" }),
+    [route],
+  );
+  const select = useCallback((sel: Selection) => navigate(pathFor(sel)), [navigate]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [selected, setSelected] = useState<Entry | null>(null);
   const [live, setLive] = useState(true);
@@ -155,10 +221,6 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [hints, setHints] = useState<Record<string, string>>({});
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [aboutOpen, setAboutOpen] = useState(false);
-  const [theme, setTheme] = useState(getTheme());
-  const menuRef = useRef<HTMLDivElement>(null);
   const entriesRef = useRef<Entry[]>([]);
   entriesRef.current = entries;
   // Every full reload (filters/selection change) starts a new generation;
@@ -180,22 +242,8 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
 
   const readOnly = me.role === "viewer";
 
-  // The account menu closes like a menu should: outside click or Escape.
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen]);
+  // A new view closes the entry detail.
+  useEffect(() => setSelected(null), [routeKey]);
 
   useEffect(() => {
     fetchHints().then(setHints).catch(() => {});
@@ -235,6 +283,8 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
   // live tail pause while one is open.
   const isMatrix =
     selection.kind === "mitre" || selection.kind === "ot" || selection.kind === "framework" || selection.kind === "net";
+  // List pages (buckets, rules, frameworks) show no entries either.
+  const listPaused = isMatrix || page !== null;
   // A column sort returns one ranked page; time sort streams + paginates.
   const pageLimit = filters.sort === "time" ? 200 : 1000;
 
@@ -267,7 +317,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
 
   // Full reload when filters or the selected bucket/tag/technique change.
   useEffect(() => {
-    if (isMatrix) return;
+    if (listPaused) return;
     const gen = ++genRef.current;
     loadedRef.current = false;
     pendingLive.current = [];
@@ -298,7 +348,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
         }
       })
       .catch((e) => gen === genRef.current && setError(String(e)));
-  }, [filters, selection, isMatrix, pageLimit, reloadTick]);
+  }, [filters, selection, listPaused, pageLimit, reloadTick]);
 
   // Display order is computed client-side so live arrivals slot into the
   // chosen sort without a refetch (the server still decides which rows the
@@ -332,27 +382,16 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
   const onSort = (key: SortKey) =>
     setFilters((f) => (f.sort === key ? { ...f, desc: !f.desc } : { ...f, sort: key, desc: true }));
 
-  const onSelectTechnique = (id: string) => {
-    setSelection({ kind: "technique", id });
-    setSelected(null);
-  };
-
-  const onSelectAlert = (id: string) => {
-    setSelection({ kind: "otalert", id });
-    setSelected(null);
-  };
-
-  const onSelectFrameworkItem = (fw: string, id: string) => {
-    setSelection({ kind: "frameworkitem", fw, id });
-    setSelected(null);
-  };
+  const onSelectTechnique = (id: string) => select({ kind: "technique", id });
+  const onSelectAlert = (id: string) => select({ kind: "otalert", id });
+  const onSelectFrameworkItem = (fw: string, id: string) => select({ kind: "frameworkitem", fw, id });
 
   // Live tail: the server pushes entries matching the same condition the
   // list query uses. Arrivals are batched per animation frame (one merge and
   // one re-sort per frame, not per message) and deduped by id.
   const wsURL = useMemo(
-    () => (live && !isMatrix ? liveTailURL(filters, selection) : null),
-    [live, filters, selection, isMatrix],
+    () => (live && !listPaused ? liveTailURL(filters, selection) : null),
+    [live, filters, selection, listPaused],
   );
   const flushLive = useCallback(() => {
     frameRef.current = null;
@@ -379,6 +418,22 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
       if (loadedRef.current) void backfillRef.current();
       else backfillAfterLoad.current = true;
     }, []),
+    // The socket dropped: before reconnecting, check the session is still
+    // good. A disabled/expired account goes back to sign-in instead of
+    // reconnect-looping; a role change (demotion) is picked up in place.
+    useCallback(async () => {
+      try {
+        const u = await fetchMe();
+        if (u.role !== me.role || u.disabled) onUserChanged(u);
+        return true;
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) {
+          window.dispatchEvent(new Event("auth-expired"));
+          return false;
+        }
+        return true; // network blip: keep retrying with backoff
+      }
+    }, [me.role, onUserChanged]),
   );
 
   useVisibleInterval(() => {
@@ -447,7 +502,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
     });
   };
 
-  const title =
+  const viewTitle =
     selection.kind === "all"
       ? "All Logs"
       : selection.kind === "bucket"
@@ -467,99 +522,88 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
                     : selection.kind === "net"
                       ? "Network security"
                       : `Tag: ${tagsById.get(selection.id)?.name ?? selection.id}`;
+  const title =
+    page === "buckets" ? "Buckets" : page === "rules" ? "Rules" : page === "frameworks" ? "Frameworks" : viewTitle;
+
+  const statsMeta = stats && (
+    <>
+      <span>
+        ~{stats.approx_total.toLocaleString()} entries · {stats.last_minute}/min
+      </span>
+      {stats.ingest && <IngestHealth ingest={stats.ingest} />}
+    </>
+  );
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <h1 className="brand">
-          <span className="logo">
-            <Icon name="inbox" size={22} />
-          </span>{" "}
-          syslog-bucket <span className="bucket-label">{title}</span>
-        </h1>
-        <span className="sub">syslog server &amp; triage</span>
-        <YardNav links={hints} current="bucket" />
-        {stats && (
-          <span className="stats">
-            ~{stats.approx_total.toLocaleString()} entries · {stats.last_minute}/min
-          </span>
-        )}
-        <div className="spacer" />
-        {!isMatrix && (
-          <button className={live && wsOpen ? "live on" : "live"} onClick={() => setLive(!live)}>
-            <Icon name={live ? "sensors" : "pause"} size={15} />{" "}
-            {live ? (wsOpen ? "Live" : "Connecting…") : "Paused"}
-          </button>
-        )}
-        <button
-          className="help-btn"
-          title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-          onClick={() => setTheme(toggleTheme())}
-        >
-          <Icon name={theme === "dark" ? "light_mode" : "dark_mode"} size={18} />
-        </button>
-        <button className="help-btn" title="About & help" onClick={() => setAboutOpen(true)}>
-          <Icon name="help" size={18} />
-        </button>
-        <div className="user-menu" ref={menuRef}>
-          <button
-            className={`user-btn${menuOpen ? " open" : ""}`}
-            title="Account menu"
-            onClick={() => setMenuOpen(!menuOpen)}
-          >
-            <Icon name="account_circle" size={16} /> {me.display_name || me.username}{" "}
-            <span className={`role-badge role-${me.role}`}>{me.role}</span>
-            <Icon name="keyboard_arrow_down" size={16} className="caret" />
-          </button>
-          {menuOpen && (
-            <div className="user-dropdown" onClick={() => setMenuOpen(false)}>
-              {me.role === "admin" && (
-                <>
-                  <button onClick={() => setModal({ kind: "users" })}>
-                    <Icon name="manage_accounts" size={16} /> Users…
-                  </button>
-                  <button onClick={() => setModal({ kind: "settings" })}>
-                    <Icon name="tune" size={16} /> Settings…
-                  </button>
-                </>
-              )}
-              <button onClick={() => setModal({ kind: "account" })}>
-                <Icon name="account_circle" size={16} /> Account…
-              </button>
-              <button onClick={onSignOut}>
-                <Icon name="logout" size={16} /> Sign out
-              </button>
-            </div>
-          )}
-        </div>
-      </header>
-      {aboutOpen && <About tool="bucket" onClose={() => setAboutOpen(false)} />}
-
-      <div className="body">
+    <AppShell
+      tool="bucket"
+      links={hints}
+      section={route?.section ?? "logs"}
+      title={title}
+      user={me}
+      onSignOut={onSignOut}
+      usersDeleteNote="Their buckets become ownerless yard buckets."
+      accountItems={
+        me.role === "admin"
+          ? [{ id: "settings", label: "Settings…", icon: "tune", onSelect: () => setModal({ kind: "settings" }) }]
+          : []
+      }
+      navContent={
         <Sidebar
           buckets={buckets}
           tags={tags}
           rules={rules}
           channels={channels}
           frameworks={frameworks}
-          selection={selection}
+          selection={page ? null : selection}
+          page={page}
           me={me}
           readOnly={readOnly}
-          onSelect={(sel) => {
-            setSelection(sel);
-            setSelected(null);
-          }}
           onEditBucket={(bucket) => setModal({ kind: "bucket", bucket })}
           onEditRule={(rule) => setModal({ kind: "rule", rule })}
           onEditFramework={(framework) => setModal({ kind: "frameworkEditor", framework })}
           onManageTags={() => setModal({ kind: "tags" })}
           onManageChannels={() => setModal({ kind: "channels" })}
         />
-
-        <div className="main-pane">
+      }
+    >
+      {page === "buckets" ? (
+        <BucketsPage buckets={buckets} me={me} readOnly={readOnly} onEdit={(bucket) => setModal({ kind: "bucket", bucket })} />
+      ) : page === "rules" ? (
+        <RulesPage rules={rules} tagsById={tagsById} readOnly={readOnly} onEdit={(rule) => setModal({ kind: "rule", rule })} />
+      ) : page === "frameworks" ? (
+        <FrameworksPage
+          frameworks={frameworks}
+          isAdmin={me.role === "admin"}
+          onEdit={(framework) => setModal({ kind: "frameworkEditor", framework })}
+        />
+      ) : (
+        <>
+          <PageHeader
+            title={viewTitle}
+            icon={VIEW_ICON[selection.kind]}
+            meta={statsMeta}
+            actions={
+              !isMatrix && (
+                <Button
+                  className={live && wsOpen ? "live on" : "live"}
+                  icon={live ? "sensors" : "pause"}
+                  aria-pressed={live}
+                  title={live ? "Pause the live tail" : "Resume the live tail"}
+                  onClick={() => setLive(!live)}
+                >
+                  {live ? (wsOpen ? "Live" : "Connecting…") : "Paused"}
+                </Button>
+              )
+            }
+          />
           <FilterBar filters={filters} onChange={setFilters} />
-          {error && <div className="error">{error}</div>}
-          <main className="content">
+          {error && (
+            <Banner className="page-banner" onDismiss={() => setError(null)}>
+              {error}
+            </Banner>
+          )}
+          <div className="content">
             {selection.kind === "net" ? (
               <NetView filters={filters} me={me} />
             ) : selection.kind === "ot" ? (
@@ -575,7 +619,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
                     onSelectItem={onSelectFrameworkItem}
                   />
                 ) : (
-                  <div className="mitre-view empty">Loading framework…</div>
+                  <Loading label="Loading framework…" />
                 );
               })()
             ) : isMatrix ? (
@@ -590,6 +634,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
                   desc={filters.desc}
                   onSort={onSort}
                   onSelect={setSelected}
+                  onDeselect={() => setSelected(null)}
                   onSelectTechnique={onSelectTechnique}
                   olderState={olderState}
                   onLoadOlder={() => void loadOlder()}
@@ -603,16 +648,21 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
                     mitreCatalog={mitreCatalog}
                     otCatalog={otCatalog}
                     readOnly={readOnly}
-                    onClose={() => setSelected(null)}
+                    onClose={() => {
+                      const id = selected.id;
+                      setSelected(null);
+                      // Back to the row the detail came from.
+                      document.querySelector<HTMLElement>(`.logtable tr[data-id="${id}"]`)?.focus();
+                    }}
                     onUpdated={onEntryUpdated}
                     onCreateRule={createRuleFromEntry}
                   />
                 )}
               </>
             )}
-          </main>
-        </div>
-      </div>
+          </div>
+        </>
+      )}
 
       {modal.kind === "bucket" && <BucketModal bucket={modal.bucket} tags={tags} me={me} onClose={closeModal} />}
       {modal.kind === "rule" && (
@@ -636,9 +686,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
       )}
       {modal.kind === "tags" && <TagsModal tags={tags} onClose={closeModal} />}
       {modal.kind === "channels" && <ChannelsModal channels={channels} onClose={closeModal} />}
-      {modal.kind === "users" && <UsersModal me={me} onClose={() => closeModal(false)} />}
       {modal.kind === "settings" && <SettingsModal onClose={() => closeModal(false)} />}
-      {modal.kind === "account" && <AccountModal me={me} onClose={() => closeModal(false)} />}
-    </div>
+    </AppShell>
   );
 }

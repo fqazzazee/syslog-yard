@@ -5,15 +5,21 @@ import type { Entry } from "./types";
 // and feeds matching entries to onEntry. Pass url=null to pause. onOpen runs
 // on every (re)connect so the caller can backfill whatever it missed while
 // the socket was down — the server only pushes entries from then on.
+// canReconnect runs after the socket drops: resolve false to stop (the
+// session is gone — the server closes tails of disabled/demoted users), true
+// to reconnect with backoff.
 export function useLiveTail(
   url: string | null,
   onEntry: (e: Entry) => void,
   onOpen?: () => void,
+  canReconnect?: () => Promise<boolean>,
 ): boolean {
   const cb = useRef(onEntry);
   cb.current = onEntry;
   const openCb = useRef(onOpen);
   openCb.current = onOpen;
+  const reconnectCb = useRef(canReconnect);
+  reconnectCb.current = canReconnect;
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -45,8 +51,12 @@ export function useLiveTail(
       ws.onclose = () => {
         setOpen(false);
         if (stopped) return;
-        timer = window.setTimeout(connect, delay);
-        delay = Math.min(delay * 2, 15_000);
+        const check = reconnectCb.current?.() ?? Promise.resolve(true);
+        void check.then((ok) => {
+          if (stopped || !ok) return;
+          timer = window.setTimeout(connect, delay);
+          delay = Math.min(delay * 2, 15_000);
+        });
       };
     };
     connect();
@@ -61,29 +71,6 @@ export function useLiveTail(
   return open;
 }
 
-// useVisibleInterval calls fn now and every ms while the tab is visible. A
-// hidden tab stops polling; becoming visible again refreshes immediately and
-// restarts the interval. fn may change between renders without restarting;
-// a change in deps restarts (and immediately re-runs) it.
-export function useVisibleInterval(fn: () => void, ms: number, deps: unknown[] = []): void {
-  const cb = useRef(fn);
-  cb.current = fn;
-  useEffect(() => {
-    let timer: number | undefined;
-    const start = () => {
-      window.clearInterval(timer);
-      cb.current();
-      timer = window.setInterval(() => cb.current(), ms);
-    };
-    const onVisibility = () => {
-      if (document.visibilityState === "hidden") window.clearInterval(timer);
-      else start();
-    };
-    if (document.visibilityState !== "hidden") start();
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [ms, ...deps]);
-}
+// useVisibleInterval is shared suite-wide (polls only while the tab is
+// visible).
+export { useVisibleInterval } from "../../../shared/web/src/hooks";

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Banner } from "../../../../shared/web/src/ui";
 import { createBucket, deleteBucket, fetchBucketShares, fetchUsers, putBucketShares, updateBucket } from "./../api";
 import type { Bucket, BucketShare, Cond, Tag, User } from "./../types";
 import ConditionBuilder from "./ConditionBuilder";
@@ -129,7 +130,7 @@ export default function BucketModal({ bucket, tags, me, onClose }: Props) {
       )}
       {!bucket && <p className="hint">You can share the bucket with other users after creating it.</p>}
 
-      {error && <div className="error">{error}</div>}
+      {error && <Banner kind="error">{error}</Banner>}
       <div className="modal-foot">
         {bucket && canManage && (
           <button className="danger" disabled={busy} onClick={() => void remove()}>

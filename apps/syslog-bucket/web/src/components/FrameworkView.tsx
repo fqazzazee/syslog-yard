@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Banner } from "../../../../shared/web/src/ui";
 import { fetchClassSummary, fetchCoverage, fetchMitreSummary, fetchOtSummary } from "./../api";
 import type { Coverage, Filters, Framework, Selection } from "./../types";
 import { CoverageBanner } from "./CoverageBanner";
@@ -74,7 +75,7 @@ export default function FrameworkView({ framework, filters, selection, onSelectI
 
   return (
     <div className="mitre-view">
-      {error && <div className="error">{error}</div>}
+      {error && <Banner kind="error">{error}</Banner>}
       <div className="mitre-head">
         <p className="mitre-intro">
           {framework.name} — {framework.desc}. {total.toLocaleString()} mapped hits in this window (crosswalked from
