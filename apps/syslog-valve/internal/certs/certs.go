@@ -99,10 +99,21 @@ func GenerateSelfSigned(certFile, keyFile string, hosts []string) error {
 	return writePEM(certFile, "CERTIFICATE", der, 0o644)
 }
 
-func writePEM(path, blockType string, der []byte, mode os.FileMode) error {
+func writePEM(path, blockType string, der []byte, mode os.FileMode) (err error) {
 	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			os.Remove(tmp)
+		}
+	}()
+	// OpenFile's mode only applies when it creates the file; a temp file
+	// left by an interrupted run keeps its old (maybe world-readable) mode.
+	if err := f.Chmod(mode); err != nil {
+		f.Close()
 		return err
 	}
 	if err := pem.Encode(f, &pem.Block{Type: blockType, Bytes: der}); err != nil {
@@ -112,10 +123,7 @@ func writePEM(path, blockType string, der []byte, mode os.FileMode) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	return nil
+	return os.Rename(tmp, path)
 }
 
 // Require returns a friendly error when the identity files are missing.

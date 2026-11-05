@@ -83,6 +83,25 @@ func TestGenerateSelfSigned(t *testing.T) {
 	}
 }
 
+// A stale world-readable temp file from an interrupted run must not leak
+// its permissions onto the new private key.
+func TestGenerateKeyModeIgnoresStaleTemp(t *testing.T) {
+	dir := t.TempDir()
+	cert, key := filepath.Join(dir, "c.pem"), filepath.Join(dir, "k.pem")
+	if err := os.WriteFile(key+".tmp", []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(key+".tmp", 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := GenerateSelfSigned(cert, key, nil); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(key); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("key mode = %v, %v; want 0600", fi.Mode().Perm(), err)
+	}
+}
+
 func TestInspectBadFiles(t *testing.T) {
 	dir := t.TempDir()
 	garbage := filepath.Join(dir, "garbage.pem")
