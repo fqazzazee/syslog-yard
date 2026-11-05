@@ -25,8 +25,8 @@ account:
   `scripts/yardctl logs syslog-bucket | grep -i password` (or
   `docker compose logs syslog-bucket | grep -i password`).
 - `BUCKET_ADMIN_PASSWORD` set → that password is used instead. Useful for
-  an automated/known bootstrap; change it after first login via
-  **👤 → Account…**.
+  an automated/known bootstrap; change it after first login from the
+  account menu (your name at the right of the top bar) → **Account…**.
 
 Forgot it, or want to rotate the generated one? `scripts/yardctl
 reset-admin` sets a fresh random password (and prints it), re-enables the
@@ -42,13 +42,15 @@ reset-admin` (append a password to set a known one).
 | analyst | full triage: entries, tags, rules; create and share own buckets | full control |
 | viewer | read-only: browse entries and visible buckets, live tail | read-only: watch jobs, graph, live tail |
 
-Every yard UI carries the same **👤 account menu**: password change under
-**Account…**, and for admins **Users…** — add local users, change roles,
+Every yard UI carries the same **account menu** at the right of the top bar,
+showing your name and a role badge: password change under **Account…**,
+**Sign out**, and for admins **Users…** — add local users, change roles,
 reset passwords, disable, or delete. Disabling an account, lowering its
 role, and resetting its password all revoke its sessions immediately;
 promotions keep them. On the hose and valve these actions are proxied to the bucket, which
 enforces the roles. You cannot demote, disable, or delete your own
-account.
+account. In the bucket, admins also get **Settings…** in this menu (single
+sign-on and the session timeout, below).
 
 ## Bucket sharing
 
@@ -61,8 +63,10 @@ Buckets (saved searches) are personal by default:
 - Buckets created before ownership existed, or whose owner was deleted, are
   **yard buckets** (no owner): everyone sees them, analysts and admins may
   edit them.
-- Shared-by/shared-with markers show in the sidebar (`· owner` suffix,
-  `⇄` on buckets you've shared).
+- Shared-by/shared-with markers show in the bucket's side nav (a `· owner`
+  suffix on someone else's bucket, a share icon on buckets you've shared) and
+  on the **Buckets** page (`#/buckets`: an Owner column and a `shared`
+  badge).
 
 Tags and rules remain yard-wide: every analyst can manage them, viewers
 see their effects.
@@ -75,8 +79,8 @@ Any standard OIDC provider works (Keycloak, Authentik, Entra ID, Google,
 
 You can configure it two ways:
 
-- **In the UI (recommended):** sign in as an admin and open the account menu →
-  **Settings → Single sign-on (OIDC)**. Fill in the issuer, client id/secret,
+- **In the UI (recommended):** sign in to the bucket as an admin and open the
+  account menu → **Settings… → Single sign-on (OIDC)**. Fill in the issuer, client id/secret,
   redirect URL, button label, and default role, then Save. It takes effect
   immediately, no restart: the login page's "Sign in with …" button appears (or
   disappears) right away. The client secret is stored but never sent back to the
@@ -149,8 +153,8 @@ https://authentik.example.com/application/o/syslog-bucket/
 (the trailing slash matters; the provider page lists it, and discovery lives at
 `<issuer>.well-known/openid-configuration`).
 
-**4. Configure the bucket.** Sign in as an admin →
-**Settings → Single sign-on (OIDC)**:
+**4. Configure the bucket.** Sign in to the bucket as an admin, then account
+menu → **Settings… → Single sign-on (OIDC)**:
 
 | Field | Value |
 |-------|-------|
@@ -167,7 +171,7 @@ clean save means it resolved.
 
 **5. Sign in.** Sign out, then click **Sign in with authentik** on the login
 page. First sign-in creates the local account (role = the default above);
-an existing admin can change its role under Users.
+an existing admin can change its role under **Users…** in the account menu.
 
 **Gotchas.**
 
@@ -188,8 +192,8 @@ an existing admin can change its role under Users.
   the bucket re-checks its session every 30 seconds and closes once it's
   gone.
 - **Idle timeout (login timeout).** A session expires after a configurable
-  period of inactivity (default 30 days). Admins set it under **Settings →
-  Session**. Any authenticated request slides the expiry forward, so the timeout
+  period of inactivity (default 30 days). Admins set it in the bucket under account
+  menu → **Settings… → Session**. Any authenticated request slides the expiry forward, so the timeout
   effectively starts once a browser tab is closed or left idle. Note that an open
   tab polling the UI counts as activity. The expiry is throttled to at most one
   write per minute per session, so it adds no meaningful load. Lowering the
