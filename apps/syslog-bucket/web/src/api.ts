@@ -48,6 +48,39 @@ export function filterParams(f: Filters, sel: Selection): URLSearchParams {
   return params;
 }
 
+// ApiError carries the server's message and status. toString() is just the
+// message, so the UI's String(e) shows "tag is used by rule X" rather than
+// "Error: {\"error\":...}".
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+  toString(): string {
+    return this.message;
+  }
+}
+
+// errorMessage extracts a readable message from an error response: a JSON
+// {"error": "..."} body (newer handlers), else the plain-text body
+// (http.Error), else the status line.
+async function errorMessage(res: Response): Promise<string> {
+  const text = (await res.text().catch(() => "")).trim();
+  if (text.startsWith("{")) {
+    try {
+      const body = JSON.parse(text) as { error?: unknown; message?: unknown };
+      const msg = body.error ?? body.message;
+      if (typeof msg === "string" && msg.trim()) return msg.trim();
+    } catch {
+      // not JSON after all; fall through to the raw text
+    }
+  }
+  return text || `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""}`;
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) {
@@ -56,8 +89,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     if (res.status === 401 && !url.startsWith("/api/auth/")) {
       window.dispatchEvent(new Event("auth-expired"));
     }
-    const body = await res.text();
-    throw new Error(body.trim() || `HTTP ${res.status}`);
+    throw new ApiError(res.status, await errorMessage(res));
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -241,5 +273,7 @@ export const fetchRules = () => request<{ rules: Rule[] }>("/api/rules").then((b
 export const createRule = (r: Omit<Rule, "id">) => send<Rule>("POST", "/api/rules", r);
 export const updateRule = (r: Rule) => send<Rule>("PUT", `/api/rules/${r.id}`, r);
 export const deleteRule = (id: number) => request<void>(`/api/rules/${id}`, { method: "DELETE" });
+// skipped lists action types the server does not replay over history
+// (e.g. ["notify"]); older servers omit it.
 export const applyRule = (id: number) =>
-  send<{ affected: number }>("POST", `/api/rules/${id}/apply`, {});
+  send<{ affected: number; skipped?: string[] }>("POST", `/api/rules/${id}/apply`, {});

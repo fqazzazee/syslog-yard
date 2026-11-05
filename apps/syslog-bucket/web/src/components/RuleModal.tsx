@@ -104,8 +104,12 @@ export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, ot
     const saved = await save();
     if (!saved) return;
     try {
-      const { affected } = await applyRule(saved.id);
-      setNotice(`Applied to history: ${affected} change${affected === 1 ? "" : "s"}.`);
+      const { affected, skipped } = await applyRule(saved.id);
+      let msg = `Applied to history: ${affected} change${affected === 1 ? "" : "s"}.`;
+      for (const kind of skipped ?? []) {
+        msg += kind === "notify" ? " Notify actions are not applied to history." : ` ${kind} actions are not applied to history.`;
+      }
+      setNotice(msg);
       setBusy(false);
     } catch (e) {
       setError(String(e));
