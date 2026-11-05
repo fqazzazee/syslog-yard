@@ -132,6 +132,14 @@ password that it prints once in its log. Grab it with
 time with `scripts/yardctl reset-admin`. For users, roles, OIDC single sign-on,
 and bucket sharing, see [docs/AUTH.md](docs/AUTH.md).
 
+The UIs publish on every interface by default so other machines can reach
+them. On a single-host lab (or behind a reverse proxy on the same box), bind
+them to loopback instead: `echo YARD_BIND=127.0.0.1 >> deploy/.env` and
+`scripts/yardctl up`. The syslog entry port 6514 is unaffected. For anything
+beyond a lab, work through the hardening checklist in
+[docs/SECURITY.md](docs/SECURITY.md) (TLS, a non-default Postgres password,
+trusted origins behind a proxy).
+
 To send external syslog in, add an **External IN** block in the valve (toolbar
 button — a source on container port 6514, udp+tcp, published as host port
 **6514**), wire it, and Apply. Then from another machine:
@@ -227,15 +235,16 @@ There's one GitHub Actions workflow,
 [`.github/workflows/test.yaml`](.github/workflows/test.yaml), and it's purely a
 correctness gate. It builds and ships nothing.
 
-What it runs: `go test ./...` for each of the three modules (`syslog-hose`,
-`syslog-valve`, `syslog-bucket`) as a parallel matrix on a clean Ubuntu runner.
-Each leg checks out the repo, installs the Go version pinned in that module's
-`go.mod`, and runs its tests. Since `go test` compiles every package first and
+What it runs: `go test ./...` for each of the four Go modules (`shared`,
+`syslog-hose`, `syslog-valve`, `syslog-bucket`) as a parallel matrix on a clean
+Ubuntu runner. Each leg checks out the repo, installs the latest Go 1.26 patch
+(every `go.mod` pins 1.26.4 as its minimum, and the images build on
+`golang:1.26-alpine`), and runs that module's tests. Since `go test` compiles every package first and
 runs a subset of `go vet`, a build break or a broken embed will fail the run too,
 not just a failing assertion.
 
 When it runs: on every push to `main`, on every pull request, and on demand (the
-Run workflow button in the Actions tab). `fail-fast` is off, so you see all three
+Run workflow button in the Actions tab). `fail-fast` is off, so you see all four
 results even if one of them fails.
 
 What it deliberately doesn't do: it builds no container images, pushes nothing to

@@ -17,10 +17,17 @@ systemctl --user start syslog-hose syslog-valve bucket-syslog
 `bucket-syslog` pulls in `syslog-bucket` and `bucket-db` via dependencies;
 the db unit only reports started once Postgres answers `pg_isready`.
 
-Check: `systemctl --user status 'syslog-*' 'bucket-*'` and the UIs on
-8080/8081/8082. The bucket's initial admin password comes from
-`BUCKET_ADMIN_PASSWORD` in `syslog-bucket.container` (see
-[docs/AUTH.md](../../docs/AUTH.md)). To start the yard at boot without
+Check: `systemctl --user status 'syslog-*' 'bucket-*'` (or
+`scripts/yardctl status`) and the UIs on 8080/8081/8082. On first start the
+bucket generates a random `admin` password and logs it once — find it with
+`journalctl --user -u syslog-bucket | grep -i password`, or set a fresh one
+any time with `scripts/yardctl reset-admin` (it detects the quadlet
+containers and uses `podman exec`; `yardctl smoke` works the same way).
+`BUCKET_ADMIN_PASSWORD` in `syslog-bucket.container` is commented out on
+purpose; uncomment it only to pin a known password for an automated
+bootstrap (see [docs/AUTH.md](../../docs/AUTH.md)). The other `yardctl`
+commands (`up`, `down`, `logs`, …) drive compose — use `systemctl --user`
+and `journalctl --user` for the units. To start the yard at boot without
 logging in:
 
 ```sh
@@ -33,10 +40,11 @@ The units reference locally built images (`localhost/syslog-<tool>:latest`) —
 no registry. Build them once from the repo root before starting the units:
 
 ```sh
-# context is apps/ so each image can also copy apps/shared
-podman build -t localhost/syslog-hose:latest -f apps/syslog-hose/Dockerfile apps
-podman build -t localhost/syslog-valve:latest -f apps/syslog-valve/Dockerfile apps
-podman build -t localhost/syslog-bucket:latest -f apps/syslog-bucket/Dockerfile apps
+# context is apps/ so each image can also copy apps/shared; --pull picks up
+# patched base images on every rebuild
+podman build --pull -t localhost/syslog-hose:latest -f apps/syslog-hose/Dockerfile apps
+podman build --pull -t localhost/syslog-valve:latest -f apps/syslog-valve/Dockerfile apps
+podman build --pull -t localhost/syslog-bucket:latest -f apps/syslog-bucket/Dockerfile apps
 ```
 
 (`scripts/yardctl up` builds the same images under compose; the quadlet units
@@ -56,12 +64,32 @@ reuse them.)
   `deploy/compose.host-net.yaml` for the same pattern under compose).
 - SELinux hosts: bind mounts in these units carry `:z`; keep it if you edit.
 
+## Hardening defaults
+
+- `bucket-db` sits on its own internal network (`bucket-db.network`) shared
+  only with `syslog-bucket`.
+- hose and bucket run as non-root with every capability dropped; the valve
+  stays root inside its container (existing `valve-data` volumes are
+  root-owned, and syslog-ng binds the ports you draw) but keeps only
+  `NET_BIND_SERVICE`, `CHOWN`, `DAC_OVERRIDE` and `FOWNER`. All three set
+  `NoNewPrivileges=true` and carry a `HealthCmd`; the bucket unit uses
+  `Notify=healthy`, so `bucket-syslog` starts once the bucket answers.
+- To publish the UIs on loopback only (single-host lab), prefix each
+  `PublishPort=` with `127.0.0.1:` — the quadlet equivalent of compose's
+  `YARD_BIND`.
+- Postgres password: the units keep the historical default
+  (`syslog_bucket`) so existing volumes keep working. To change it, edit
+  `POSTGRES_PASSWORD` in `bucket-db.container` (new volume) or run the
+  `ALTER ROLE` from [docs/SECURITY.md](../../docs/SECURITY.md) (existing
+  volume), and put the same value in `BUCKET_DB_URL` in
+  `syslog-bucket.container`.
+
 ## Updating
 
 Rebuild the image(s) from updated source, then restart:
 
 ```sh
-podman build -t localhost/syslog-hose:latest -f apps/syslog-hose/Dockerfile apps   # etc.
+podman build --pull -t localhost/syslog-hose:latest -f apps/syslog-hose/Dockerfile apps   # etc.
 systemctl --user restart syslog-hose syslog-valve syslog-bucket bucket-syslog
 ```
 
