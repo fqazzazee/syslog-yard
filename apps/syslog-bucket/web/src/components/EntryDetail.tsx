@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   addEntryMitre,
   addEntryOT,
@@ -30,11 +30,13 @@ function CodePicker({
   options,
   exclude,
   label,
+  disabled,
   onPick,
 }: {
   options: { id: string; name: string }[];
   exclude: string[];
   label: string;
+  disabled?: boolean;
   onPick: (id: string) => void;
 }) {
   const left = options.filter((o) => !exclude.includes(o.id));
@@ -43,6 +45,7 @@ function CodePicker({
     <select
       className="code-picker"
       value=""
+      disabled={disabled}
       onChange={(e) => e.target.value && onPick(e.target.value)}
       aria-label={label}
     >
@@ -70,13 +73,26 @@ export default function EntryDetail({
   const structured = entry.structured ?? {};
   const structuredKeys = Object.keys(structured);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // One change at a time: overlapping PATCHes could resolve out of order and
+  // leave the pane showing a stale state. The ref guards against a second
+  // event slipping in before the disabled controls re-render.
+  const busyRef = useRef(false);
 
-  const update = (op: Promise<Entry>) => {
+  const update = (op: () => Promise<Entry>) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
-    op.then(onUpdated)
-      .catch(() => {})
-      .finally(() => setBusy(false));
+    setError(null);
+    op()
+      .then(onUpdated)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => {
+        busyRef.current = false;
+        setBusy(false);
+      });
   };
+  const locked = readOnly || busy;
 
   const mitre = entry.mitre ?? [];
   const ot = entry.ot ?? [];
@@ -98,8 +114,8 @@ export default function EntryDetail({
           Status
           <select
             value={entry.status}
-            disabled={readOnly}
-            onChange={(e) => update(patchEntry(entry.id, { status: e.target.value }))}
+            disabled={locked}
+            onChange={(e) => update(() => patchEntry(entry.id, { status: e.target.value }))}
           >
             {STATUS_NAMES.map((s) => (
               <option key={s} value={s}>
@@ -112,8 +128,8 @@ export default function EntryDetail({
           Priority
           <select
             value={entry.priority}
-            disabled={readOnly}
-            onChange={(e) => update(patchEntry(entry.id, { priority: Number(e.target.value) }))}
+            disabled={locked}
+            onChange={(e) => update(() => patchEntry(entry.id, { priority: Number(e.target.value) }))}
           >
             {PRIORITY_NAMES.map((p, n) => (
               <option key={n} value={n}>
@@ -123,16 +139,22 @@ export default function EntryDetail({
           </select>
         </label>
       </div>
+      {error && <div className="error">{error}</div>}
 
       <div className="detail-tags">
         {(entry.tag_ids ?? []).map((id) => {
           const tag = tagsById.get(id);
           return tag ? (
-            <TagChip key={id} tag={tag} onRemove={readOnly ? undefined : () => update(untagEntry(entry.id, id))} />
+            <TagChip
+              key={id}
+              tag={tag}
+              disabled={busy}
+              onRemove={readOnly ? undefined : () => update(() => untagEntry(entry.id, id))}
+            />
           ) : null;
         })}
         {!readOnly && (
-          <TagPicker tags={tags} exclude={entry.tag_ids ?? []} onPick={(id) => update(tagEntry(entry.id, id))} />
+          <TagPicker tags={tags} exclude={entry.tag_ids ?? []} disabled={busy} onPick={(id) => update(() => tagEntry(entry.id, id))} />
         )}
       </div>
 
@@ -179,7 +201,7 @@ export default function EntryDetail({
             {mitre.map((id) => (
               <span key={id} className="mitre-chip editable">
                 <a
-                  href={`https://attack.mitre.org/techniques/${id.replace(".", "/")}/`}
+                  href={`https://attack.mitre.org/techniques/${id.split(".").map(encodeURIComponent).join("/")}/`}
                   target="_blank"
                   rel="noreferrer"
                   title="Open on attack.mitre.org"
@@ -191,7 +213,7 @@ export default function EntryDetail({
                     className="chip-x"
                     title="Remove classification"
                     disabled={busy}
-                    onClick={() => update(delEntryMitre(entry.id, id))}
+                    onClick={() => update(() => delEntryMitre(entry.id, id))}
                   >
                     <Icon name="close" size={12} />
                   </button>
@@ -203,7 +225,8 @@ export default function EntryDetail({
                 options={mitreCatalog.techniques}
                 exclude={mitre}
                 label="+ technique"
-                onPick={(id) => update(addEntryMitre(entry.id, id))}
+                disabled={busy}
+                onPick={(id) => update(() => addEntryMitre(entry.id, id))}
               />
             )}
           </div>
@@ -222,7 +245,7 @@ export default function EntryDetail({
                     className="chip-x"
                     title="Remove classification"
                     disabled={busy}
-                    onClick={() => update(delEntryOT(entry.id, id))}
+                    onClick={() => update(() => delEntryOT(entry.id, id))}
                   >
                     <Icon name="close" size={12} />
                   </button>
@@ -234,7 +257,8 @@ export default function EntryDetail({
                 options={otCatalog.alert_types}
                 exclude={ot}
                 label="+ OT code"
-                onPick={(id) => update(addEntryOT(entry.id, id))}
+                disabled={busy}
+                onPick={(id) => update(() => addEntryOT(entry.id, id))}
               />
             )}
           </div>

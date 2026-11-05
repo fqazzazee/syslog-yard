@@ -1,13 +1,14 @@
 import { useState } from "react";
 import type { Tag } from "./../types";
 
-export function TagChip({ tag, onRemove }: { tag: Tag; onRemove?: () => void }) {
+export function TagChip({ tag, disabled, onRemove }: { tag: Tag; disabled?: boolean; onRemove?: () => void }) {
   return (
     <span className="tagchip" style={{ borderColor: tag.color, color: tag.color }}>
       {tag.name}
       {onRemove && (
         <button
           title="Remove tag"
+          disabled={disabled}
           onClick={(e) => {
             e.stopPropagation();
             onRemove();
@@ -21,16 +22,26 @@ export function TagChip({ tag, onRemove }: { tag: Tag; onRemove?: () => void }) 
 }
 
 // TagPicker is the "add label" dropdown in the detail pane.
-export function TagPicker({ tags, exclude, onPick }: { tags: Tag[]; exclude: number[]; onPick: (id: number) => void }) {
+export function TagPicker({
+  tags,
+  exclude,
+  disabled,
+  onPick,
+}: {
+  tags: Tag[];
+  exclude: number[];
+  disabled?: boolean;
+  onPick: (id: number) => void;
+}) {
   const [open, setOpen] = useState(false);
   const available = tags.filter((t) => !exclude.includes(t.id));
   if (available.length === 0) return null;
   return (
     <span className="tagpicker">
-      <button className="linkish" onClick={() => setOpen(!open)}>
+      <button className="linkish" disabled={disabled} onClick={() => setOpen(!open)}>
         + tag
       </button>
-      {open && (
+      {open && !disabled && (
         <div className="tagpicker-menu">
           {available.map((t) => (
             <button

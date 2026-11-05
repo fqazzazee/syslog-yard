@@ -596,6 +596,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
                 />
                 {selected && (
                   <EntryDetail
+                    key={selected.id}
                     entry={selected}
                     tags={tags}
                     tagsById={tagsById}
