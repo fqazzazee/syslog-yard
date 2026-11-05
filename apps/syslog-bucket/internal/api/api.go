@@ -20,6 +20,7 @@ import (
 	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/config"
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
+	"github.com/syslog-yard/syslog-bucket/internal/ingest"
 	"github.com/syslog-yard/syslog-bucket/internal/mitre"
 	"github.com/syslog-yard/syslog-bucket/internal/netfeeds"
 	"github.com/syslog-yard/syslog-bucket/internal/notify"
@@ -40,13 +41,14 @@ type server struct {
 	cfg      config.Config // env fallback for settings not yet stored in the DB
 	netMgr   *netfeeds.Manager
 	netSum   netSummaryCache
+	ingest   *ingest.Server // optional: pipeline counters for /api/stats
 }
 
-func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Dispatcher, web fs.FS, hints map[string]string, authSvc *auth.Service, cfg config.Config, netMgr *netfeeds.Manager) http.Handler {
+func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Dispatcher, web fs.FS, hints map[string]string, authSvc *auth.Service, cfg config.Config, netMgr *netfeeds.Manager, ing *ingest.Server) http.Handler {
 	if hints == nil {
 		hints = map[string]string{}
 	}
-	s := &server{store: st, engine: eng, hub: hub, notifier: notifier, web: web, hints: hints, authSvc: authSvc, cfg: cfg, netMgr: netMgr}
+	s := &server{store: st, engine: eng, hub: hub, notifier: notifier, web: web, hints: hints, authSvc: authSvc, cfg: cfg, netMgr: netMgr, ingest: ing}
 	// Apply stored (or env-fallback) OIDC + session settings to the auth service
 	// before the server starts handling requests.
 	s.applyStoredSettings(context.Background())
@@ -557,7 +559,14 @@ func (s *server) stats(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "stats", err)
 		return
 	}
-	writeJSON(w, stats)
+	if s.ingest == nil {
+		writeJSON(w, stats)
+		return
+	}
+	writeJSON(w, struct {
+		store.Stats
+		Ingest ingest.Stats `json:"ingest"`
+	}{stats, s.ingest.Stats()})
 }
 
 func (s *server) liveTail(w http.ResponseWriter, r *http.Request) {
