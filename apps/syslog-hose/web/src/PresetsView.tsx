@@ -1,5 +1,8 @@
-import { useState } from "react";
-import { api, PresetSummary } from "./api";
+import { useEffect, useState } from "react";
+import { errorText } from "../../../shared/web/src/http";
+import { toast } from "../../../shared/web/src/Toast";
+import { Badge, Banner, Button, EmptyState, PageHeader } from "../../../shared/web/src/ui";
+import { api, type PresetSummary } from "./api";
 
 const SKELETON = `name: my-appliance
 vendor: MyVendor
@@ -20,17 +23,21 @@ events:
       action=deny src={{randIP "public"}} dst={{randIP "rfc1918"}} port={{randInt 1 1024}}
 `;
 
-export function PresetsView(props: { presets: PresetSummary[]; onChanged: () => void }) {
+export function PresetsView(props: {
+  presets: PresetSummary[];
+  readOnly: boolean;
+  routeName?: string; // #/presets/<name> deep link
+  onOpen: (name: string | null) => void;
+  onChanged: () => void;
+}) {
   const [selected, setSelected] = useState<string | null>(null);
   const [yaml, setYaml] = useState("");
   const [builtin, setBuiltin] = useState(false);
   const [samples, setSamples] = useState<string[]>([]);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
 
-  const open = (name: string) => {
+  const load = (name: string) => {
     setError("");
-    setNotice("");
     setSamples([]);
     api
       .preset(name)
@@ -39,16 +46,26 @@ export function PresetsView(props: { presets: PresetSummary[]; onChanged: () => 
         setYaml(p.yaml);
         setBuiltin(p.builtin);
       })
-      .catch((e: Error) => setError(e.message));
+      .catch((e: unknown) => setError(errorText(e)));
   };
+
+  // The URL names the open preset, so back/forward and shared links work.
+  useEffect(() => {
+    if (props.routeName && props.routeName !== selected) load(props.routeName);
+    if (!props.routeName && selected !== "(new)") {
+      setSelected(null);
+      setYaml("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.routeName]);
 
   const startNew = (base?: string) => {
     setSelected("(new)");
     setBuiltin(false);
     setSamples([]);
     setError("");
-    setNotice("");
     setYaml(base ? base.replace(/^name: .*$/m, "name: my-copy") : SKELETON);
+    if (props.routeName) props.onOpen(null);
   };
 
   const preview = () => {
@@ -56,7 +73,7 @@ export function PresetsView(props: { presets: PresetSummary[]; onChanged: () => 
     api
       .preview({ yaml, count: 8 })
       .then((r) => setSamples(r.samples))
-      .catch((e: Error) => setError(e.message));
+      .catch((e: unknown) => setError(errorText(e)));
   };
 
   const save = () => {
@@ -64,12 +81,13 @@ export function PresetsView(props: { presets: PresetSummary[]; onChanged: () => 
     api
       .savePreset(yaml)
       .then((r) => {
-        setNotice(`Saved custom preset "${r.name}"`);
+        toast(`Saved custom preset "${r.name}"`);
         props.onChanged();
         setSelected(r.name);
         setBuiltin(false);
+        props.onOpen(r.name);
       })
-      .catch((e: Error) => setError(e.message));
+      .catch((e: unknown) => setError(errorText(e)));
   };
 
   const remove = () => {
@@ -78,89 +96,108 @@ export function PresetsView(props: { presets: PresetSummary[]; onChanged: () => 
     api
       .deletePreset(selected)
       .then(() => {
+        toast(`Deleted preset "${selected}"`);
         setSelected(null);
         setYaml("");
         props.onChanged();
+        props.onOpen(null);
       })
-      .catch((e: Error) => setError(e.message));
+      .catch((e: unknown) => setError(errorText(e)));
   };
 
   const vendors = [...new Set(props.presets.map((p) => p.vendor))];
 
   return (
-    <div className="presets">
-      <aside>
-        <button className="primary wide" onClick={() => startNew()}>
-          + New custom preset
-        </button>
-        {vendors.map((v) => (
-          <div key={v}>
-            <div className="vendor">{v}</div>
-            {props.presets
-              .filter((p) => p.vendor === v)
-              .map((p) => (
-                <button
-                  key={p.name}
-                  className={selected === p.name ? "preset-item active" : "preset-item"}
-                  onClick={() => open(p.name)}
-                  title={p.description}
-                >
-                  {p.name}
-                  <span className="chip dim">{p.builtin ? `${p.eventCount} ev` : "custom"}</span>
-                </button>
-              ))}
-          </div>
-        ))}
-      </aside>
-
-      <section className="preset-editor">
-        {selected === null ? (
-          <div className="empty">
-            Select a preset to inspect it, or create a custom one. Built-ins are read-only —
-            use <strong>Clone</strong> to adapt one. Custom presets can also be dropped into{" "}
-            <code>/data/presets/*.yaml</code>.
-          </div>
-        ) : (
-          <>
-            <div className="toolbar">
-              <strong>{selected}</strong>
-              {builtin && <span className="chip">built-in (read-only)</span>}
-              <div className="spacer" />
-              <button onClick={preview}>Render 8 samples</button>
-              {builtin ? (
-                <button onClick={() => startNew(yaml)}>Clone to custom</button>
-              ) : (
-                <>
-                  <button className="primary" onClick={save}>
-                    Save
-                  </button>
-                  {selected !== "(new)" && (
-                    <button className="quiet" onClick={remove}>
-                      Delete
-                    </button>
-                  )}
-                </>
-              )}
+    <>
+      <PageHeader
+        title="Presets"
+        icon="category"
+        meta={`${props.presets.length} presets`}
+        actions={
+          !props.readOnly && (
+            <Button variant="primary" icon="add" onClick={() => startNew()}>
+              New custom preset
+            </Button>
+          )
+        }
+      />
+      <div className="page presets">
+        <nav className="preset-list" aria-label="Presets">
+          {vendors.map((v) => (
+            <div key={v} className="preset-group">
+              <h2 className="vendor">{v}</h2>
+              <ul>
+                {props.presets
+                  .filter((p) => p.vendor === v)
+                  .map((p) => (
+                    <li key={p.name}>
+                      <a
+                        href={`#/presets/${encodeURIComponent(p.name)}`}
+                        className={selected === p.name ? "preset-item active" : "preset-item"}
+                        aria-current={selected === p.name ? "page" : undefined}
+                        title={p.description}
+                      >
+                        <span className="preset-name">{p.name}</span>
+                        <Badge>{p.builtin ? `${p.eventCount} ev` : "custom"}</Badge>
+                      </a>
+                    </li>
+                  ))}
+              </ul>
             </div>
-            <textarea
-              className="yaml"
-              value={yaml}
-              readOnly={builtin}
-              spellCheck={false}
-              onChange={(e) => setYaml(e.target.value)}
-            />
-            {error && <div className="form-error">{error}</div>}
-            {notice && <div className="form-notice">{notice}</div>}
-            {samples.length > 0 && (
-              <pre className="samples">
-                {samples.map((s, i) => (
-                  <div key={i}>{s}</div>
-                ))}
-              </pre>
-            )}
-          </>
-        )}
-      </section>
-    </div>
+          ))}
+        </nav>
+
+        <section className="preset-editor" aria-label="Preset editor">
+          {selected === null ? (
+            <EmptyState icon="category" title="Select a preset">
+              Inspect a preset, or create a custom one. Built-ins are read-only — use <strong>Clone to custom</strong>{" "}
+              to adapt one. Custom presets can also be dropped into <code>/data/presets/*.yaml</code>.
+            </EmptyState>
+          ) : (
+            <>
+              <div className="preset-toolbar">
+                <h2>{selected}</h2>
+                {builtin && <Badge>built-in · read-only</Badge>}
+                <div className="spacer" />
+                <Button onClick={preview}>Render 8 samples</Button>
+                {builtin ? (
+                  !props.readOnly && <Button onClick={() => startNew(yaml)}>Clone to custom</Button>
+                ) : (
+                  !props.readOnly && (
+                    <>
+                      <Button variant="primary" onClick={save}>
+                        Save
+                      </Button>
+                      {selected !== "(new)" && (
+                        <Button variant="quiet" icon="delete" onClick={remove}>
+                          Delete
+                        </Button>
+                      )}
+                    </>
+                  )
+                )}
+              </div>
+              <textarea
+                className="yaml"
+                aria-label={`YAML of ${selected}`}
+                value={yaml}
+                readOnly={builtin || props.readOnly}
+                spellCheck={false}
+                onChange={(e) => setYaml(e.target.value)}
+              />
+              {error && <Banner kind="error">{error}</Banner>}
+              {samples.length > 0 && (
+                <pre className="samples" tabIndex={0} aria-label="Rendered samples">
+                  {samples.map((s, i) => (
+                    <div key={i}>{s}</div>
+                  ))}
+                </pre>
+              )}
+            </>
+          )}
+          {selected === null && error && <Banner kind="error">{error}</Banner>}
+        </section>
+      </div>
+    </>
   );
 }
