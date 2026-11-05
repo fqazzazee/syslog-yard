@@ -12,7 +12,7 @@ COPY syslog-bucket/web/ ./
 RUN npm run build
 
 # Stage 2: build the Go binary with the SPA embedded
-FROM docker.io/library/golang:1.25-alpine AS gobuild
+FROM docker.io/library/golang:1.26-alpine AS gobuild
 WORKDIR /src/syslog-bucket
 COPY shared/go.mod /src/shared/go.mod
 COPY syslog-bucket/go.mod syslog-bucket/go.sum ./
