@@ -119,7 +119,7 @@ func TestCompileSQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "(e.host ILIKE $1 AND (e.severity <= $2 OR EXISTS (SELECT 1 FROM entry_tags ct WHERE ct.entry_id = e.id AND ct.tag_id = $3)) AND NOT (e.msg_tsv @@ websearch_to_tsquery('simple', $4)) AND lower((e.structured->>$5)) = lower($6) AND e.received_at > now() - make_interval(secs => $7))"
+	want := "(e.host ILIKE $1 AND (e.severity <= $2 OR EXISTS (SELECT 1 FROM entry_tags ct WHERE ct.entry_id = e.id AND ct.tag_id = $3)) AND NOT COALESCE(e.msg_tsv @@ websearch_to_tsquery('simple', $4), FALSE) AND lower((e.structured->>$5)) = lower($6) AND e.received_at > now() - make_interval(secs => $7))"
 	if sql != want {
 		t.Errorf("sql:\n got %s\nwant %s", sql, want)
 	}

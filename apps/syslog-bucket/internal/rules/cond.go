@@ -169,7 +169,11 @@ func (c Cond) compile(arg func(any) string) string {
 	case len(c.Any) > 0:
 		return c.compileJoin(c.Any, " OR ", arg)
 	case c.Not != nil:
-		return "NOT (" + c.Not.compile(arg) + ")"
+		// A leaf over a NULL column (facility, source_id, a missing
+		// structured key) is NULL in SQL, and NOT NULL is still NULL, which
+		// WHERE drops. Match treats such a leaf as false, so its negation
+		// matches; COALESCE gives SQL the same two-valued answer.
+		return "NOT COALESCE(" + c.Not.compile(arg) + ", FALSE)"
 	case c.Field != "":
 		return c.compileLeaf(arg)
 	case c.Text != "":
