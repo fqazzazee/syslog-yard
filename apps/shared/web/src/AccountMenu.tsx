@@ -1,66 +1,62 @@
-import { useEffect, useRef, useState } from "react";
-import { authApi as api, type AuthUser, type YardUser } from "./yardAuthApi";
+import { useEffect, useState } from "react";
+import { Dialog } from "./Dialog";
 import { Icon } from "./Icon";
+import { Menu, type MenuItem } from "./Menu";
+import { Badge, Banner, Button, Field } from "./ui";
+import { authApi as api, type AuthUser, type YardUser } from "./yardAuthApi";
+import { errorText } from "./http";
 
-// AccountMenu is the yard-wide account dropdown: password change for
-// everyone, user management for admins, sign out. Management calls are
-// proxied to syslog-bucket (the identity provider), which enforces roles.
-// One copy shared by syslog-hose and syslog-valve (their web/src copies are
-// one-line shims). syslog-bucket renders the same button/dropdown markup
-// inline in its App with its own richer UsersModal.
+// AccountMenu is the yard-wide account menu in every top bar: password
+// change for everyone, user management for admins, sign out, plus any
+// tool-specific items (syslog-bucket adds its admin Settings). Management
+// calls go to syslog-bucket (the identity provider; hose/valve proxy them),
+// which enforces roles.
 
 const ROLES = ["admin", "analyst", "viewer"] as const;
 
-export function AccountMenu({ user, onSignOut }: { user: AuthUser; onSignOut: () => void }) {
-  const [open, setOpen] = useState(false);
+export function AccountMenu({
+  user,
+  onSignOut,
+  extraItems = [],
+  usersDeleteNote,
+}: {
+  user: AuthUser;
+  onSignOut: () => void;
+  extraItems?: MenuItem[];
+  usersDeleteNote?: string; // appended to the delete-user confirmation
+}) {
   const [modal, setModal] = useState<"none" | "users" | "account">("none");
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  const isAdmin = user.role === "admin";
+  const items: MenuItem[] = [
+    ...(isAdmin ? [{ id: "users", label: "Users…", icon: "manage_accounts" as const, onSelect: () => setModal("users") }] : []),
+    ...extraItems,
+    { id: "account", label: "Account…", icon: "account_circle", onSelect: () => setModal("account") },
+    { id: "signout", label: "Sign out", icon: "logout", onSelect: onSignOut },
+  ];
 
   return (
-    <div className="user-menu" ref={ref}>
-      <button className={`user-btn${open ? " open" : ""}`} title="Account menu" onClick={() => setOpen(!open)}>
-        <Icon name="account_circle" size={16} /> {user.display_name || user.username}{" "}
-        <span className={`role-badge role-${user.role}`}>{user.role}</span>
-        <Icon name="keyboard_arrow_down" size={16} className="caret" />
-      </button>
-      {open && (
-        <div className="user-dropdown" onClick={() => setOpen(false)}>
-          {user.role === "admin" && (
-            <button onClick={() => setModal("users")}>
-              <Icon name="manage_accounts" size={16} /> Users…
-            </button>
-          )}
-          <button onClick={() => setModal("account")}>
-            <Icon name="account_circle" size={16} /> Account…
-          </button>
-          <button onClick={onSignOut}>
-            <Icon name="logout" size={16} /> Sign out
-          </button>
-        </div>
-      )}
-      {modal === "account" && <AccountModal user={user} onClose={() => setModal("none")} />}
-      {modal === "users" && <UsersModal me={user} onClose={() => setModal("none")} />}
-    </div>
+    <>
+      <Menu
+        className="user-menu"
+        triggerClassName="user-btn"
+        label={`Account: ${user.display_name || user.username} (${user.role})`}
+        trigger={
+          <>
+            <Icon name="account_circle" size={18} />
+            <span className="user-btn-name">{user.display_name || user.username}</span>
+            <span className={`role-badge role-${user.role}`}>{user.role}</span>
+            <Icon name="keyboard_arrow_down" size={16} className="caret" />
+          </>
+        }
+        items={items}
+      />
+      {modal === "account" && <AccountDialog user={user} onClose={() => setModal("none")} />}
+      {modal === "users" && <UsersDialog me={user} deleteNote={usersDeleteNote} onClose={() => setModal("none")} />}
+    </>
   );
 }
 
-function AccountModal({ user, onClose }: { user: AuthUser; onClose: () => void }) {
+function AccountDialog({ user, onClose }: { user: AuthUser; onClose: () => void }) {
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
@@ -78,57 +74,58 @@ function AccountModal({ user, onClose }: { user: AuthUser; onClose: () => void }
       setDone(true);
       setTimeout(onClose, 1200);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   };
 
+  const canSave = !!oldPw && newPw.length >= 8 && !done;
   return (
-    // mousedown (not click) on the backdrop itself: a text selection that
-    // starts in a field and ends outside the dialog must not close it.
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal acct-modal">
-        <div className="acct-head">
-          <h2>Account — {user.username}</h2>
-          <button className="acct-close" onClick={onClose}>
-            <Icon name="close" size={18} />
-          </button>
-        </div>
-        {user.has_password ? (
-          <>
-            <label>
-              Current password
-              <input type="password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} autoFocus />
-            </label>
-            <label>
-              New password (min 8 characters)
-              <input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
-            </label>
-            <label>
-              Repeat new password
-              <input type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} />
-            </label>
-            {error && <div className="form-error">{error}</div>}
-            {done && <div className="form-notice">Password changed — other sessions were signed out.</div>}
-            <div className="modal-actions">
-              <button className="primary" disabled={!oldPw || newPw.length < 8 || done} onClick={() => void save()}>
-                Change password
-              </button>
-            </div>
-          </>
-        ) : (
-          <p className="acct-hint">This account signs in via OIDC; manage its password at your identity provider.</p>
-        )}
-      </div>
-    </div>
+    <Dialog
+      title={`Account — ${user.username}`}
+      size="sm"
+      onClose={onClose}
+      footer={
+        user.has_password ? (
+          <Button variant="primary" type="submit" form="yard-account-form" disabled={!canSave}>
+            Change password
+          </Button>
+        ) : undefined
+      }
+    >
+      {user.has_password ? (
+        <form
+          id="yard-account-form"
+          className="form-stack"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canSave) void save();
+          }}
+        >
+          <Field label="Current password">
+            <input type="password" autoComplete="current-password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} autoFocus />
+          </Field>
+          <Field label="New password" help="At least 8 characters.">
+            <input type="password" autoComplete="new-password" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
+          </Field>
+          <Field label="Repeat new password">
+            <input type="password" autoComplete="new-password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} />
+          </Field>
+          {error && <Banner kind="error">{error}</Banner>}
+          {done && <Banner kind="success">Password changed — other sessions were signed out.</Banner>}
+        </form>
+      ) : (
+        <p className="hint">This account signs in via OIDC; manage its password at your identity provider.</p>
+      )}
+    </Dialog>
   );
 }
 
-function UsersModal({ me, onClose }: { me: AuthUser; onClose: () => void }) {
+function UsersDialog({ me, deleteNote, onClose }: { me: AuthUser; deleteNote?: string; onClose: () => void }) {
   const [users, setUsers] = useState<YardUser[]>([]);
   const [error, setError] = useState("");
   const [newUser, setNewUser] = useState({ username: "", password: "", role: "analyst" as string });
 
-  const reload = () => api.users().then(setUsers).catch((e: Error) => setError(e.message));
+  const reload = () => api.users().then(setUsers).catch((e: unknown) => setError(errorText(e)));
   useEffect(() => {
     void reload();
   }, []);
@@ -140,7 +137,7 @@ function UsersModal({ me, onClose }: { me: AuthUser; onClose: () => void }) {
       await reload();
       return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
       return false;
     }
   };
@@ -175,97 +172,115 @@ function UsersModal({ me, onClose }: { me: AuthUser; onClose: () => void }) {
   };
 
   return (
-    // mousedown (not click) on the backdrop itself: a text selection that
-    // starts in a field and ends outside the dialog must not close it.
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal acct-modal">
-        <div className="acct-head">
-          <h2>Users</h2>
-          <button className="acct-close" onClick={onClose}>
-            <Icon name="close" size={18} />
-          </button>
-        </div>
-        {users.map((u) => (
-          <div className="acct-row" key={u.id}>
-            <span className="acct-name">
-              {u.username}
-              {u.oidc && <span className="role-badge">OIDC</span>}
-              {u.disabled && <span className="role-badge">disabled</span>}
-            </span>
-            <select
-              value={u.role}
-              disabled={u.id === me.id}
-              onChange={(e) => void patch(u, { role: e.target.value })}
-            >
-              {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-            {u.has_password && (
-              <button type="button" className="linkish" onClick={() => resetPassword(u)}>
-                reset pw
-              </button>
-            )}
-            <button
-              type="button"
-              className="linkish"
-              disabled={u.id === me.id}
-              title={u.disabled ? "Enable account" : "Disable account (revokes sessions)"}
-              onClick={() => void patch(u, { disabled: !u.disabled })}
-            >
-              {u.disabled ? "enable" : "disable"}
-            </button>
-            <button
-              type="button"
-              className="linkish"
-              disabled={u.id === me.id}
-              title="Delete user"
-              onClick={() => {
-                if (confirm(`Delete user "${u.username}"?`)) void run(() => api.deleteUser(u.id));
-              }}
-            >
-              <Icon name="delete" size={15} />
-            </button>
-          </div>
-        ))}
-
-        <div className="acct-row">
-          <input
-            placeholder="new username"
-            value={newUser.username}
-            onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
-          />
-          <input
-            type="password"
-            placeholder="password (min 8)"
-            value={newUser.password}
-            onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-          />
-          <select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}>
-            {ROLES.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
+    <Dialog title="Users" onClose={onClose}>
+      <div className="table-scroll">
+        <table className="data-table users-table">
+          <thead>
+            <tr>
+              <th scope="col">User</th>
+              <th scope="col">Role</th>
+              <th scope="col">
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.id}>
+                <td>
+                  <span className="users-name">
+                    {u.username}
+                    {u.oidc && <Badge>OIDC</Badge>}
+                    {u.disabled && <Badge tone="warning">disabled</Badge>}
+                  </span>
+                </td>
+                <td>
+                  <select
+                    aria-label={`Role of ${u.username}`}
+                    value={u.role}
+                    disabled={u.id === me.id}
+                    onChange={(e) => void patch(u, { role: e.target.value })}
+                  >
+                    {ROLES.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className="row-actions">
+                  {u.has_password && (
+                    <Button variant="link" size="sm" onClick={() => resetPassword(u)} aria-label={`Reset password of ${u.username}`}>
+                      reset pw
+                    </Button>
+                  )}
+                  <Button
+                    variant="link"
+                    size="sm"
+                    disabled={u.id === me.id}
+                    title={u.disabled ? "Enable account" : "Disable account (revokes sessions)"}
+                    aria-label={`${u.disabled ? "Enable" : "Disable"} ${u.username}`}
+                    onClick={() => void patch(u, { disabled: !u.disabled })}
+                  >
+                    {u.disabled ? "enable" : "disable"}
+                  </Button>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    icon="delete"
+                    disabled={u.id === me.id}
+                    title="Delete user"
+                    aria-label={`Delete ${u.username}`}
+                    onClick={() => {
+                      if (confirm(`Delete user "${u.username}"?${deleteNote ? ` ${deleteNote}` : ""}`)) void run(() => api.deleteUser(u.id));
+                    }}
+                  />
+                </td>
+              </tr>
             ))}
-          </select>
-          <button
-            type="button"
-            className="primary"
-            disabled={!newUser.username.trim() || newUser.password.length < 8}
-            onClick={() => void add()}
-          >
-            Add
-          </button>
-        </div>
-
-        <p className="acct-hint">
-          Accounts are stored in syslog-bucket and shared by every yard tool. Roles: <b>admin</b> manages
-          users · <b>analyst</b> full control · <b>viewer</b> read-only.
-        </p>
-        {error && <div className="form-error">{error}</div>}
+          </tbody>
+        </table>
       </div>
-    </div>
+
+      <form
+        className="users-add"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (newUser.username.trim() && newUser.password.length >= 8) void add();
+        }}
+      >
+        <input
+          aria-label="New username"
+          placeholder="new username"
+          autoComplete="off"
+          value={newUser.username}
+          onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+        />
+        <input
+          aria-label="Password (min 8 characters)"
+          type="password"
+          placeholder="password (min 8)"
+          autoComplete="new-password"
+          value={newUser.password}
+          onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+        />
+        <select aria-label="Role" value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}>
+          {ROLES.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+        <Button type="submit" variant="primary" icon="add" disabled={!newUser.username.trim() || newUser.password.length < 8}>
+          Add
+        </Button>
+      </form>
+
+      <p className="hint">
+        Accounts are stored in syslog-bucket and shared by every yard tool. Roles: <b>admin</b> manages users and all
+        buckets · <b>analyst</b> full control · <b>viewer</b> read-only.
+      </p>
+      {error && <Banner kind="error">{error}</Banner>}
+    </Dialog>
   );
 }
