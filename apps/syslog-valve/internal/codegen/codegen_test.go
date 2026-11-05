@@ -211,7 +211,7 @@ func TestGenerateLogrotate(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"/data/cache/fw-noise/messages.log {",
+		`"/data/cache/fw-noise/messages.log" {`,
 		"copytruncate",
 		"rotate 5",
 		"size 50M",
