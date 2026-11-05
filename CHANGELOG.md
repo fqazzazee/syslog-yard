@@ -44,6 +44,15 @@ All notable changes to syslog-yard are recorded here. The format follows
   condition trees), migration replay and upgrades, and bucket share
   permissions through the API ([#58]); tests for the bucket's generic parser,
   config and rule engine and the valve's certificate package ([#59]).
+- bucket: an audit log ([#27]). Sign-ins (including failures, with the
+  username tried), sign-outs and password changes; account, role and
+  password-reset changes; OIDC, session and network-feed settings; rule,
+  bucket, share, tag, channel and custom-framework edits and rule
+  apply-to-history; and entry status, priority, tag and classification
+  changes are recorded with the actor, client address and a summary that
+  never includes secrets. Admins browse it under **Admin → Audit log**
+  (`#/audit`) or `GET /api/audit`. Rows are kept for
+  `BUCKET_AUDIT_RETENTION_DAYS` (default 180).
 
 ## [0.1.1] - 2026-11-05
 
@@ -222,6 +231,7 @@ Released under the MIT License; see the commit history for its contents.
 [#23]: https://github.com/fqazzazee/syslog-yard/issues/23
 [#24]: https://github.com/fqazzazee/syslog-yard/issues/24
 [#25]: https://github.com/fqazzazee/syslog-yard/issues/25
+[#27]: https://github.com/fqazzazee/syslog-yard/issues/27
 [#28]: https://github.com/fqazzazee/syslog-yard/issues/28
 [#29]: https://github.com/fqazzazee/syslog-yard/issues/29
 [#30]: https://github.com/fqazzazee/syslog-yard/issues/30

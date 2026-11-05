@@ -2,7 +2,9 @@
 package config
 
 import (
+	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -41,7 +43,15 @@ type Config struct {
 	// throttle believes. Shared with the other yard tools as
 	// YARD_TRUSTED_PROXIES. Empty means the TCP peer is always the client.
 	TrustedProxies string
+
+	// AuditRetentionDays is how long audit-log rows are kept
+	// (BUCKET_AUDIT_RETENTION_DAYS, default 180). 0 keeps them forever.
+	AuditRetentionDays int
 }
+
+// DefaultAuditRetentionDays applies when BUCKET_AUDIT_RETENTION_DAYS is unset
+// or invalid.
+const DefaultAuditRetentionDays = 180
 
 func FromEnv() Config {
 	return Config{
@@ -61,7 +71,26 @@ func FromEnv() Config {
 
 		WSOrigins:      splitList(os.Getenv("BUCKET_WS_ORIGINS")),
 		TrustedProxies: os.Getenv("YARD_TRUSTED_PROXIES"),
+
+		AuditRetentionDays: auditRetentionDays(os.Getenv("BUCKET_AUDIT_RETENTION_DAYS")),
 	}
+}
+
+// auditRetentionDays parses BUCKET_AUDIT_RETENTION_DAYS: a whole number of
+// days, 0 for "never prune". Anything else falls back to the default rather
+// than pruning on a typo.
+func auditRetentionDays(v string) int {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return DefaultAuditRetentionDays
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		slog.Warn("BUCKET_AUDIT_RETENTION_DAYS must be a whole number of days (0 = keep forever); using the default",
+			"value", v, "default", DefaultAuditRetentionDays)
+		return DefaultAuditRetentionDays
+	}
+	return n
 }
 
 // splitList parses a comma-separated env value, dropping blanks.

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/syslog-yard/syslog-bucket/internal/audit"
 	"github.com/syslog-yard/syslog-bucket/internal/netclass"
 	"github.com/syslog-yard/syslog-bucket/internal/netfeeds"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
@@ -279,10 +280,28 @@ func (s *server) putNetConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	s.record(r, audit.NetConfig, "net", "config", netConfigSummary(in))
 	s.dropNetSummary() // sets just changed
 	// Newly enabled feeds have stale (or no) snapshots — fetch them now so
 	// the save gives immediate feedback.
 	s.answerNetRefresh(w, s.netMgr.RefreshInBackground(false, s.dropNetSummary))
+}
+
+// netConfigSummary lists the enabled feeds and the custom categories with
+// their range counts (the CIDRs themselves stay in the config).
+func netConfigSummary(c netfeeds.Config) map[string]any {
+	feeds := []string{}
+	for id, on := range c.Feeds {
+		if on {
+			feeds = append(feeds, id)
+		}
+	}
+	sort.Strings(feeds)
+	custom := make([]map[string]any, 0, len(c.Custom))
+	for _, cc := range c.Custom {
+		custom = append(custom, map[string]any{"name": cc.Name, "cidrs": len(cc.CIDRs)})
+	}
+	return map[string]any{"feeds_enabled": feeds, "custom": custom}
 }
 
 func (s *server) refreshNetFeeds(w http.ResponseWriter, r *http.Request) {

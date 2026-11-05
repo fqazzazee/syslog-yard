@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/syslog-yard/syslog-bucket/internal/audit"
 	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/rules"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
@@ -33,6 +34,7 @@ func (s *server) createTag(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, "create tag", err)
 		return
 	}
+	s.record(r, audit.TagCreate, "tag", created.ID, map[string]any{"name": created.Name})
 	writeJSON(w, created)
 }
 
@@ -55,6 +57,7 @@ func (s *server) updateTag(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	s.record(r, audit.TagUpdate, "tag", id, map[string]any{"name": t.Name})
 	writeJSON(w, t)
 }
 
@@ -63,6 +66,7 @@ func (s *server) deleteTag(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	name := s.tagName(r, id)
 	if err := s.store.DeleteTag(r.Context(), id); err != nil {
 		if errors.Is(err, store.ErrInUse) {
 			http.Error(w, err.Error(), http.StatusConflict)
@@ -71,7 +75,22 @@ func (s *server) deleteTag(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "delete tag", err)
 		return
 	}
+	s.record(r, audit.TagDelete, "tag", id, map[string]any{"name": name})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// tagName looks a tag's name up for an audit row (best effort: "" if gone).
+func (s *server) tagName(r *http.Request, id int64) string {
+	tags, err := s.store.ListTags(r.Context())
+	if err != nil {
+		return ""
+	}
+	for _, t := range tags {
+		if t.ID == id {
+			return t.Name
+		}
+	}
+	return ""
 }
 
 func validTag(w http.ResponseWriter, t store.Tag) bool {
@@ -109,6 +128,7 @@ func (s *server) createBucket(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, "create bucket", err)
 		return
 	}
+	s.record(r, audit.BucketCreate, "bucket", created.ID, map[string]any{"name": created.Name})
 	writeJSON(w, created)
 }
 
@@ -149,6 +169,11 @@ func (s *server) updateBucket(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, "update bucket", err)
 		return
 	}
+	sum := map[string]any{"name": b.Name}
+	if b.Name != existing.Name {
+		sum["renamed_from"] = existing.Name
+	}
+	s.record(r, audit.BucketUpdate, "bucket", b.ID, sum)
 	b.OwnerID, b.OwnerName, b.CanEdit, b.Shared = existing.OwnerID, existing.OwnerName, true, existing.Shared
 	writeJSON(w, b)
 }
@@ -166,6 +191,7 @@ func (s *server) deleteBucket(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "delete bucket", err)
 		return
 	}
+	s.record(r, audit.BucketDelete, "bucket", b.ID, map[string]any{"name": b.Name})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -215,6 +241,7 @@ func (s *server) createRule(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, "create rule", err)
 		return
 	}
+	s.record(r, audit.RuleCreate, "rule", created.ID, ruleSummary(created))
 	s.reloadEngine(r)
 	writeJSON(w, created)
 }
@@ -238,6 +265,7 @@ func (s *server) updateRule(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	s.record(r, audit.RuleUpdate, "rule", id, ruleSummary(rule))
 	s.reloadEngine(r)
 	writeJSON(w, rule)
 }
@@ -247,9 +275,17 @@ func (s *server) deleteRule(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	gone, err := s.store.GetRule(r.Context(), id)
+	if err != nil {
+		s.internalError(w, "get rule", err)
+		return
+	}
 	if err := s.store.DeleteRule(r.Context(), id); err != nil {
 		s.internalError(w, "delete rule", err)
 		return
+	}
+	if gone != nil {
+		s.record(r, audit.RuleDelete, "rule", id, map[string]any{"name": gone.Name})
 	}
 	s.reloadEngine(r)
 	w.WriteHeader(http.StatusNoContent)
@@ -276,6 +312,8 @@ func (s *server) applyRule(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "apply rule", err)
 		return
 	}
+	s.record(r, audit.RuleApply, "rule", id,
+		map[string]any{"name": rule.Name, "matched": res.Matched, "affected": res.Affected})
 	writeJSON(w, res)
 }
 
@@ -306,6 +344,16 @@ func (s *server) ruleRefsExist(w http.ResponseWriter, r *http.Request, rule stor
 		return false
 	}
 	return true
+}
+
+// ruleSummary names a rule and its action types for the audit log; the full
+// condition stays in the rule itself.
+func ruleSummary(rule store.Rule) map[string]any {
+	actions := make([]string, 0, len(rule.Actions))
+	for _, a := range rule.Actions {
+		actions = append(actions, a.Type)
+	}
+	return map[string]any{"name": rule.Name, "enabled": rule.Enabled, "actions": actions}
 }
 
 func validRule(w http.ResponseWriter, rule store.Rule) bool {

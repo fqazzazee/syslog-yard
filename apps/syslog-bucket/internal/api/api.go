@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/syslog-yard/shared/secure"
+	"github.com/syslog-yard/syslog-bucket/internal/audit"
 	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/config"
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
@@ -41,14 +42,16 @@ type server struct {
 	cfg      config.Config // env fallback for settings not yet stored in the DB
 	netMgr   *netfeeds.Manager
 	netSum   netSummaryCache
-	ingest   *ingest.Server // optional: pipeline counters for /api/stats
+	ingest   *ingest.Server  // optional: pipeline counters for /api/stats
+	auditor  *audit.Recorder // optional: nil records nothing
 }
 
-func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Dispatcher, web fs.FS, hints map[string]string, authSvc *auth.Service, cfg config.Config, netMgr *netfeeds.Manager, ing *ingest.Server) http.Handler {
+func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Dispatcher, web fs.FS, hints map[string]string, authSvc *auth.Service, cfg config.Config, netMgr *netfeeds.Manager, ing *ingest.Server, rec *audit.Recorder) http.Handler {
 	if hints == nil {
 		hints = map[string]string{}
 	}
-	s := &server{store: st, engine: eng, hub: hub, notifier: notifier, web: web, hints: hints, authSvc: authSvc, cfg: cfg, netMgr: netMgr, ingest: ing}
+	s := &server{store: st, engine: eng, hub: hub, notifier: notifier, web: web, hints: hints, authSvc: authSvc, cfg: cfg, netMgr: netMgr, ingest: ing, auditor: rec}
+	authSvc.SetAuditor(rec)
 	if hub != nil {
 		hub.SetOriginPatterns(cfg.WSOrigins)
 	}
@@ -133,6 +136,7 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("DELETE /api/channels/{id}", s.deleteChannel)
 	mux.HandleFunc("POST /api/channels/{id}/test", s.testChannel)
 	mux.HandleFunc("GET /api/notifications/log", s.notificationLog)
+	mux.HandleFunc("GET /api/audit", s.getAudit)
 	mux.HandleFunc("GET /api/ws", s.liveTail)
 	mux.HandleFunc("GET /", s.spa)
 	return mux
@@ -470,6 +474,16 @@ func (s *server) patchEntry(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	if patch.Status != nil || patch.Priority != nil {
+		sum := map[string]any{}
+		if patch.Status != nil {
+			sum["status"] = *patch.Status
+		}
+		if patch.Priority != nil {
+			sum["priority"] = *patch.Priority
+		}
+		s.record(r, audit.EntryUpdate, "entry", id, sum)
+	}
 	writeJSON(w, entry)
 }
 
@@ -518,6 +532,11 @@ func (s *server) classifyEntry(w http.ResponseWriter, r *http.Request, field str
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	op := "remove"
+	if add {
+		op = "add"
+	}
+	s.record(r, audit.EntryClassify, "entry", entryID, map[string]any{"op": op, field: code})
 	writeJSON(w, entry)
 }
 
@@ -553,6 +572,11 @@ func (s *server) setEntryTag(w http.ResponseWriter, r *http.Request, add bool) {
 		s.internalError(w, "tag entry", err)
 		return
 	}
+	action := audit.EntryUntag
+	if add {
+		action = audit.EntryTag
+	}
+	s.record(r, action, "entry", entryID, map[string]any{"tag_id": tagID})
 	entry, err := s.store.GetEntry(r.Context(), entryID)
 	if err != nil || entry == nil {
 		s.internalError(w, "get entry after tag", err)

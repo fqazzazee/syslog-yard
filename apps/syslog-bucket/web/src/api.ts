@@ -1,5 +1,7 @@
 import { ApiError, jsonInit, request as sharedRequest } from "../../../shared/web/src/http";
 import type {
+  AuditEvent,
+  AuditFilters,
   AuthInfo,
   Bucket,
   BucketShare,
@@ -238,3 +240,21 @@ export const deleteRule = (id: number) => request<void>(`/api/rules/${id}`, { me
 // Older servers omit matched and skipped.
 export const applyRule = (id: number) =>
   call<{ affected: number; matched?: number; skipped?: string[] }>("POST", `/api/rules/${id}/apply`);
+
+// --- audit log (admin only) ---
+
+// One page of the audit log, newest first. Pass the previous page's
+// next_cursor as cursor; a null next_cursor means there is no older page.
+export const fetchAudit = (f: AuditFilters, opts: { cursor?: string; limit?: number } = {}) => {
+  const params = new URLSearchParams();
+  if (f.actor.trim()) params.set("actor", f.actor.trim());
+  if (f.action) params.set("action", f.action);
+  if (f.targetType) params.set("target_type", f.targetType);
+  if (f.result) params.set("success", f.result === "success" ? "true" : "false");
+  // datetime-local values are local wall-clock times; the API wants RFC3339.
+  if (f.since) params.set("since", new Date(f.since).toISOString());
+  if (f.until) params.set("until", new Date(f.until).toISOString());
+  if (opts.cursor) params.set("cursor", opts.cursor);
+  params.set("limit", String(opts.limit ?? 50));
+  return request<{ events: AuditEvent[]; next_cursor: string | null }>(`/api/audit?${params}`);
+};
