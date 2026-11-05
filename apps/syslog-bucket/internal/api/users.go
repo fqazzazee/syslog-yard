@@ -94,6 +94,29 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "you cannot demote or disable your own account", http.StatusBadRequest)
 		return
 	}
+	// Validate everything before writing anything, so a bad password can't
+	// leave a half-applied update behind.
+	var hash string
+	if req.Password != nil {
+		if len(*req.Password) < 8 {
+			http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
+			return
+		}
+		var err error
+		if hash, err = auth.HashPassword(*req.Password); err != nil {
+			s.internalError(w, "hash password", err)
+			return
+		}
+	}
+	before, err := s.store.GetUser(r.Context(), id)
+	if err != nil {
+		s.internalError(w, "get user", err)
+		return
+	}
+	if before == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
 	found, err := s.store.UpdateUser(r.Context(), id, req.DisplayName, req.Email, req.Role, req.Disabled)
 	if err != nil {
 		s.internalError(w, "update user", err)
@@ -104,23 +127,21 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Password != nil {
-		if len(*req.Password) < 8 {
-			http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
-			return
-		}
-		hash, err := auth.HashPassword(*req.Password)
-		if err != nil {
-			s.internalError(w, "hash password", err)
-			return
-		}
 		if _, err := s.store.SetPassword(r.Context(), id, hash); err != nil {
 			s.internalError(w, "set password", err)
 			return
 		}
 	}
-	// Role changes, disables, and password resets all invalidate sessions.
-	if req.Disabled || req.Password != nil {
-		s.store.DeleteUserSessions(r.Context(), id)
+	// Disables, demotions, and password resets revoke the user's sessions.
+	// The middleware re-reads the role on every request, so this matters less
+	// for the bucket itself than for the hose and valve, which cache a
+	// session's user briefly — and it makes a demotion end any live tail or
+	// open page the user still had. Promotions keep the sessions.
+	if sessionsRevokedBy(before, req.Role, req.Disabled, req.Password != nil) {
+		if err := s.store.DeleteUserSessions(r.Context(), id); err != nil {
+			s.internalError(w, "revoke sessions", err)
+			return
+		}
 	}
 	user, err := s.store.GetUser(r.Context(), id)
 	if err != nil || user == nil {
@@ -128,6 +149,26 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, user)
+}
+
+// roleRank orders roles by privilege so demotions can be detected.
+func roleRank(role string) int {
+	switch role {
+	case store.RoleAdmin:
+		return 3
+	case store.RoleAnalyst:
+		return 2
+	case store.RoleViewer:
+		return 1
+	}
+	return 0
+}
+
+// sessionsRevokedBy reports whether an admin edit of user before must log
+// them out everywhere: disabling, lowering the role, or resetting the
+// password.
+func sessionsRevokedBy(before *store.User, newRole string, disabled, passwordReset bool) bool {
+	return disabled || passwordReset || roleRank(newRole) < roleRank(before.Role)
 }
 
 func (s *server) deleteUser(w http.ResponseWriter, r *http.Request) {
