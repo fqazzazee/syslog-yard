@@ -52,7 +52,7 @@ func New(st *store.Store, eng *engine.Engine, hub *ws.Hub, notifier *notify.Disp
 	}
 	if proxies, err := auth.ParseTrustedProxies(cfg.TrustedProxies); err != nil {
 		// Fail closed: without a valid list, X-Forwarded-For is ignored.
-		slog.Error("BUCKET_TRUSTED_PROXIES ignored", "error", err)
+		slog.Error("YARD_TRUSTED_PROXIES ignored", "error", err)
 	} else {
 		authSvc.SetTrustedProxies(proxies)
 	}

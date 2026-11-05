@@ -144,7 +144,7 @@ func (g *guard) succeed(account, ip string) {
 }
 
 // ParseTrustedProxies parses a comma-separated list of IPs and CIDRs
-// (BUCKET_TRUSTED_PROXIES) whose X-Forwarded-For header the bucket believes.
+// (YARD_TRUSTED_PROXIES) whose X-Forwarded-For header the bucket believes.
 func ParseTrustedProxies(v string) ([]netip.Prefix, error) {
 	var out []netip.Prefix
 	for _, f := range strings.Split(v, ",") {
@@ -171,9 +171,14 @@ func ParseTrustedProxies(v string) ([]netip.Prefix, error) {
 }
 
 // clientIP returns the address a request came from: the TCP peer, unless the
-// peer is a trusted proxy, in which case X-Forwarded-For is walked from the
-// right past further trusted hops. With no trusted proxies configured the
-// header is ignored entirely, so clients can't pick their own throttle key.
+// peer is a trusted proxy (YARD_TRUSTED_PROXIES), in which case the
+// left-most X-Forwarded-For address is used — the hose/valve auth proxy
+// (apps/shared/yardauth) sets that header to the browser's address. With no
+// trusted proxies configured the header is ignored entirely, so clients
+// can't pick their own throttle key.
+//
+// This mirrors secure.ClientIP in apps/shared (same env var, same rules);
+// once that is available here, this can be replaced by it.
 func clientIP(r *http.Request, trusted []netip.Prefix) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -187,21 +192,11 @@ func clientIP(r *http.Request, trusted []netip.Prefix) string {
 	if !isTrusted(peer, trusted) {
 		return peer.String()
 	}
-	var hops []string
-	for _, h := range r.Header.Values("X-Forwarded-For") {
-		hops = append(hops, strings.Split(h, ",")...)
+	first, _, _ := strings.Cut(r.Header.Get("X-Forwarded-For"), ",")
+	if a, err := netip.ParseAddr(strings.TrimSpace(first)); err == nil {
+		return a.Unmap().String()
 	}
-	for i := len(hops) - 1; i >= 0; i-- {
-		a, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
-		if err != nil {
-			break // malformed hop: stop at the last address we could verify
-		}
-		peer = a.Unmap()
-		if !isTrusted(peer, trusted) {
-			break
-		}
-	}
-	return peer.String()
+	return peer.String() // header absent or malformed: the proxy itself
 }
 
 func isTrusted(a netip.Addr, trusted []netip.Prefix) bool {

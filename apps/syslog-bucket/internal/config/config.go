@@ -36,9 +36,10 @@ type Config struct {
 	// is always allowed; leave empty outside development.
 	WSOrigins []string
 
-	// TrustedProxies is a comma-separated list of IPs/CIDRs of reverse
-	// proxies whose X-Forwarded-For the login throttle believes. Empty means
-	// the TCP peer address is always the client.
+	// TrustedProxies is a comma-separated list of IPs/CIDRs of proxies (the
+	// hose/valve auth proxy, a reverse proxy) whose X-Forwarded-For the login
+	// throttle believes. Shared with the other yard tools as
+	// YARD_TRUSTED_PROXIES. Empty means the TCP peer is always the client.
 	TrustedProxies string
 }
 
@@ -59,7 +60,7 @@ func FromEnv() Config {
 		OIDCDefaultRole:  getenv("BUCKET_OIDC_DEFAULT_ROLE", "viewer"), // read-only until promoted
 
 		WSOrigins:      splitList(os.Getenv("BUCKET_WS_ORIGINS")),
-		TrustedProxies: os.Getenv("BUCKET_TRUSTED_PROXIES"),
+		TrustedProxies: os.Getenv("YARD_TRUSTED_PROXIES"),
 	}
 }
 
