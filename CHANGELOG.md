@@ -6,6 +6,15 @@ All notable changes to syslog-yard are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- valve and bucket: syslog listeners detect RFC 5424 per message. Before,
+  an RFC 5424 line on a valve IN port or the bucket's port 514 was parsed as
+  RFC 3164: the app became `1` and the host the sender's address (Check
+  Point, Claroty, Juniper and generic-rfc5424 presets). Structured data is
+  now kept at the front of the message instead of being dropped by the
+  valve's forward. Re-apply the valve flow to pick this up. [#26]
+
 ## [0.1.1] - 2026-11-05
 
 ### Security
@@ -183,6 +192,7 @@ Released under the MIT License; see the commit history for its contents.
 [#23]: https://github.com/fqazzazee/syslog-yard/issues/23
 [#24]: https://github.com/fqazzazee/syslog-yard/issues/24
 [#25]: https://github.com/fqazzazee/syslog-yard/issues/25
+[#26]: https://github.com/fqazzazee/syslog-yard/issues/26
 [#28]: https://github.com/fqazzazee/syslog-yard/issues/28
 [#29]: https://github.com/fqazzazee/syslog-yard/issues/29
 [#30]: https://github.com/fqazzazee/syslog-yard/issues/30

@@ -33,6 +33,19 @@ const TapSocket = "/data/syslog-ng/tap.sock"
 // notification dispatcher to deliver.
 const NotifySocket = "/data/syslog-ng/notify.sock"
 
+// autoParse is the per-message parser step inside every source channel:
+// "<PRI>1 " opens an RFC 5424 line; anything else (RFC 3164, or a bare
+// "<PRI>payload" as FortiGate and SonicWall send) takes the classic parser.
+// The 5424 branch folds structured data into MESSAGE so it survives the
+// legacy-format outputs; deploy/syslog-ng/bucket.conf does the same.
+const autoParse = `        if (message("^<[0-9]{1,3}>1 ")) {
+            parser { syslog-parser(flags(syslog-protocol)); };
+            rewrite { set("${SDATA} ${MESSAGE}" value("MESSAGE") condition("${SDATA}" ne "")); };
+        } else {
+            parser { syslog-parser(); };
+        };
+`
+
 // Generate renders the full syslog-ng.conf for g. version is the
 // "@version" directive value and should match the running syslog-ng
 // (it tolerates older config versions with a warning, not the reverse).
@@ -63,11 +76,17 @@ func Generate(g *graph.Graph, version string, shares Shares) (string, error) {
 			if n.Config.Transport == "udp+tcp" {
 				transports = []string{"udp", "tcp"}
 			}
-			fmt.Fprintf(&b, "\n# source %s\nsource s_%s {\n", comment(name(n)), graph.Ident(n.ID))
+			// network() parses everything as RFC 3164 by default, which
+			// turns an RFC 5424 line into PROGRAM="1" and HOST=<sender
+			// IP>. So the drivers take the line unparsed and the channel
+			// picks the parser per message. Structured data is folded into
+			// MESSAGE because every valve output (forward, cache, tap,
+			// notify) is a legacy-format template that would drop SDATA.
+			fmt.Fprintf(&b, "\n# source %s\nsource s_%s {\n    channel {\n        source {\n", comment(name(n)), graph.Ident(n.ID))
 			for _, tr := range transports {
-				fmt.Fprintf(&b, "    network(ip(%s) transport(%s) port(%d)%s);\n", q(bind), q(tr), n.Config.Port, tls)
+				fmt.Fprintf(&b, "            network(ip(%s) transport(%s) port(%d)%s flags(no-parse));\n", q(bind), q(tr), n.Config.Port, tls)
 			}
-			b.WriteString("};\n")
+			b.WriteString("        };\n" + autoParse + "    };\n};\n")
 		case graph.TypeForward:
 			tls := ""
 			if n.Config.Transport == "tls" {

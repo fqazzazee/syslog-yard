@@ -36,7 +36,7 @@ Ports (host side, remap in `deploy/docker-compose.yml` as needed):
 | Port | Purpose                          |
 |------|----------------------------------|
 | 8080 | Web UI + internal REST API       |
-| 5514 | syslog RFC3164 (UDP + TCP → 514) |
+| 5514 | syslog RFC3164 or RFC5424, detected per message (UDP + TCP → 514) |
 | 5601 | syslog RFC5424 (TCP → 601)       |
 
 > **VM-based Docker (Rancher Desktop, Docker Desktop, Lima):** the VM's port
