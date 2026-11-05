@@ -15,6 +15,13 @@ All notable changes to syslog-yard are recorded here. The format follows
   missing one, so a concurrent edit can no longer slip between the check
   and the write. Disabled rules still never block a delete ([#29]).
 
+### Added
+
+- bucket: a Compact/Wrap toggle above the log table. Compact (the new
+  default) keeps each entry to one line, with the full message on hover and
+  in the detail pane, so about three times as many rows fit on screen; Wrap
+  shows long messages in full. The choice is remembered per browser.
+
 ## [0.2.0] - 2026-11-05
 
 Upgrade, then re-apply the valve flow once so syslog-ng picks up per-message

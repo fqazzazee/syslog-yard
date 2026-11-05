@@ -259,6 +259,13 @@ button.live.on {
   white-space: normal;
   word-break: break-word;
 }
+/* compact: one line per entry; the full message is in the title and the
+   detail pane */
+.logtable.compact td.col-msg {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .logtable td.col-host,
 .logtable td.col-app {
   overflow: hidden;

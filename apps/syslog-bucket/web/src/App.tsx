@@ -35,7 +35,7 @@ import type {
   User,
 } from "./types";
 import { AppShell } from "../../../shared/web/src/AppShell";
-import { useHashRoute } from "../../../shared/web/src/hooks";
+import { useHashRoute, useStoredState } from "../../../shared/web/src/hooks";
 import { ApiError } from "../../../shared/web/src/http";
 import { Login } from "../../../shared/web/src/Login";
 import { Badge, Banner, Button, EmptyState, Loading, PageHeader } from "../../../shared/web/src/ui";
@@ -211,6 +211,8 @@ function Workspace({
   const [entries, setEntries] = useState<Entry[]>([]);
   const [selected, setSelected] = useState<Entry | null>(null);
   const [live, setLive] = useState(true);
+  // One line per log row (default) or wrapped messages; per browser.
+  const [density, setDensity] = useStoredState<"compact" | "wrap">("bucket-log-density", "compact");
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [buckets, setBuckets] = useState<Bucket[]>([]);
@@ -614,15 +616,26 @@ function Workspace({
             meta={statsMeta}
             actions={
               !isMatrix && (
-                <Button
-                  className={live && wsOpen ? "live on" : "live"}
-                  icon={live ? "sensors" : "pause"}
-                  aria-pressed={live}
-                  title={live ? "Pause the live tail" : "Resume the live tail"}
-                  onClick={() => setLive(!live)}
-                >
-                  {live ? (wsOpen ? "Live" : "Connecting…") : "Paused"}
-                </Button>
+                <>
+                  <Button
+                    variant="quiet"
+                    icon={density === "compact" ? "wrap_text" : "density_small"}
+                    aria-pressed={density === "wrap"}
+                    title={density === "compact" ? "Wrap long messages" : "One line per entry"}
+                    onClick={() => setDensity(density === "compact" ? "wrap" : "compact")}
+                  >
+                    {density === "compact" ? "Wrap" : "Compact"}
+                  </Button>
+                  <Button
+                    className={live && wsOpen ? "live on" : "live"}
+                    icon={live ? "sensors" : "pause"}
+                    aria-pressed={live}
+                    title={live ? "Pause the live tail" : "Resume the live tail"}
+                    onClick={() => setLive(!live)}
+                  >
+                    {live ? (wsOpen ? "Live" : "Connecting…") : "Paused"}
+                  </Button>
+                </>
               )
             }
           />
@@ -667,6 +680,7 @@ function Workspace({
                   onSelectTechnique={onSelectTechnique}
                   olderState={olderState}
                   onLoadOlder={() => void loadOlder()}
+                  compact={density === "compact"}
                 />
                 {selected && (
                   <EntryDetail
