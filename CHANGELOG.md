@@ -6,6 +6,15 @@ All notable changes to syslog-yard are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- bucket: the tags and channels that enabled rules use are tracked in a
+  `rule_refs` table with foreign keys (migration 0010), written in the same
+  transaction as the rule. Postgres itself now refuses to delete a tag or
+  channel an enabled rule uses, or to save or enable a rule that points at a
+  missing one, so a concurrent edit can no longer slip between the check
+  and the write. Disabled rules still never block a delete ([#29]).
+
 ## [0.2.0] - 2026-11-05
 
 Upgrade, then re-apply the valve flow once so syslog-ng picks up per-message
