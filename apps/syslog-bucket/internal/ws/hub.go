@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,10 +33,46 @@ type client struct {
 type Hub struct {
 	mu      sync.RWMutex
 	clients map[*client]struct{}
+	origins []string // extra allowed Origin host patterns; same-origin always passes
+
+	recheckEvery time.Duration // session re-validation interval; 0 = default
+}
+
+// defaultRecheck bounds how long a revoked session keeps receiving entries.
+const defaultRecheck = 30 * time.Second
+
+func (h *Hub) recheck() time.Duration {
+	if h.recheckEvery > 0 {
+		return h.recheckEvery
+	}
+	return defaultRecheck
 }
 
 func NewHub() *Hub {
 	return &Hub{clients: make(map[*client]struct{})}
+}
+
+// SetOriginPatterns admits cross-origin live-tail handshakes from hosts
+// matching these path.Match patterns (e.g. "localhost:5173"), on top of the
+// same-origin requests that are always allowed. Empty patterns are ignored.
+// Every allowed origin can read the live log stream with the user's cookie,
+// so keep this to development setups (BUCKET_WS_ORIGINS).
+func (h *Hub) SetOriginPatterns(patterns []string) {
+	var keep []string
+	for _, p := range patterns {
+		if p = strings.TrimSpace(p); p != "" {
+			keep = append(keep, p)
+		}
+	}
+	h.mu.Lock()
+	h.origins = keep
+	h.mu.Unlock()
+}
+
+func (h *Hub) originPatterns() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.origins
 }
 
 // Broadcast pushes entries that just landed in the database to every
@@ -72,11 +109,17 @@ func (h *Hub) Broadcast(entries []store.Entry) {
 
 // Serve upgrades the request and streams matching entries until the client
 // disconnects. cond has already been validated by the API layer.
-func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, cond rules.Cond, includeSuppressed bool) {
+//
+// alive, when non-nil, is polled every recheckEvery: a stream outlives the
+// HTTP request that authorised it, so this is what ends it once the session
+// is revoked (logout, password change, the account disabled or demoted).
+func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, cond rules.Cond, includeSuppressed bool, alive func(context.Context) bool) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		// The SPA is same-origin in production; the patterns admit the Vite
-		// dev server proxy.
-		OriginPatterns: []string{"localhost:*", "127.0.0.1:*"},
+		// Same-origin only by default: the SPA (and the Vite dev proxy, which
+		// keeps the Host header) always connects to its own host. Cookies are
+		// scoped by host, not port, so a wildcard like "localhost:*" would let
+		// any page served from another local port read the live stream.
+		OriginPatterns: h.originPatterns(),
 	})
 	if err != nil {
 		slog.Warn("ws: accept", "error", err)
@@ -97,8 +140,19 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, cond rules.Cond, inc
 	// We never expect client messages; CloseRead surfaces disconnects (and
 	// handles pings) through ctx.
 	ctx := conn.CloseRead(r.Context())
+	var recheck <-chan time.Time
+	if alive != nil {
+		t := time.NewTicker(h.recheck())
+		defer t.Stop()
+		recheck = t.C
+	}
 	for {
 		select {
+		case <-recheck:
+			if !alive(ctx) {
+				conn.Close(websocket.StatusPolicyViolation, "session ended")
+				return
+			}
 		case frame := <-c.ch:
 			wctx, cancel := context.WithTimeout(ctx, writeTimeout)
 			err := conn.Write(wctx, websocket.MessageText, frame)

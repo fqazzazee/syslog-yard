@@ -63,9 +63,9 @@ func Generate(g *graph.Graph, version string, shares Shares) (string, error) {
 			if n.Config.Transport == "udp+tcp" {
 				transports = []string{"udp", "tcp"}
 			}
-			fmt.Fprintf(&b, "\n# source %s\nsource s_%s {\n", name(n), graph.Ident(n.ID))
+			fmt.Fprintf(&b, "\n# source %s\nsource s_%s {\n", comment(name(n)), graph.Ident(n.ID))
 			for _, tr := range transports {
-				fmt.Fprintf(&b, "    network(ip(%q) transport(%q) port(%d)%s);\n", bind, tr, n.Config.Port, tls)
+				fmt.Fprintf(&b, "    network(ip(%s) transport(%s) port(%d)%s);\n", q(bind), q(tr), n.Config.Port, tls)
 			}
 			b.WriteString("};\n")
 		case graph.TypeForward:
@@ -77,28 +77,32 @@ func Generate(g *graph.Graph, version string, shares Shares) (string, error) {
 					tls = " tls(peer-verify(optional-untrusted))"
 				}
 			}
-			fmt.Fprintf(&b, "\n# forward %s\ndestination d_%s {\n    network(%q port(%d) transport(%q)%s);\n};\n",
-				name(n), graph.Ident(n.ID), n.Config.Host, n.Config.Port, n.Config.Transport, tls)
+			// Explicit persist-name: two forwards to the same host/port/
+			// transport (e.g. a filter's match and else both feeding the
+			// bucket) would otherwise get the same automatic persist name,
+			// and syslog-ng refuses the whole config.
+			fmt.Fprintf(&b, "\n# forward %s\ndestination d_%s {\n    network(%s port(%d) transport(%s)%s persist-name(\"forward_%s\"));\n};\n",
+				comment(name(n)), graph.Ident(n.ID), q(n.Config.Host), n.Config.Port, q(n.Config.Transport), tls, graph.Ident(n.ID))
 		case graph.TypeCache:
 			p, err := CachePath(n, shares)
 			if err != nil {
 				return "", err
 			}
-			fmt.Fprintf(&b, "\n# cache %s\ndestination d_%s {\n    file(%q create-dirs(yes));\n};\n",
-				name(n), graph.Ident(n.ID), p)
+			fmt.Fprintf(&b, "\n# cache %s\ndestination d_%s {\n    file(%s create-dirs(yes));\n};\n",
+				comment(name(n)), graph.Ident(n.ID), q(p))
 		case graph.TypeNotify:
 			// Matched messages are duplicated to the notify socket, tagged
 			// with the node ident; the Go dispatcher delivers them. The
 			// template mirrors the tap's, plus ${LEVEL} for the alert text.
 			id := graph.Ident(n.ID)
 			fmt.Fprintf(&b, "\n# notify %s\ndestination d_%s {\n    unix-dgram(%q persist-name(\"notify_%s\") template(\"%s\\t${ISODATE}\\t${HOST}\\t${PROGRAM}\\t${LEVEL}\\t${MSG}\\n\"));\n};\n",
-				name(n), id, NotifySocket, id, id)
+				comment(name(n)), id, NotifySocket, id, id)
 		case graph.TypeFilter:
 			expr, err := filterExpr(n)
 			if err != nil {
 				return "", err
 			}
-			fmt.Fprintf(&b, "\n# filter %s\nfilter f_%s {\n    %s;\n};\n", name(n), graph.Ident(n.ID), expr)
+			fmt.Fprintf(&b, "\n# filter %s\nfilter f_%s {\n    %s;\n};\n", comment(name(n)), graph.Ident(n.ID), expr)
 			if elseFilters[n.ID] {
 				fmt.Fprintf(&b, "filter f_%s_else {\n    not filter(f_%s);\n};\n",
 					graph.Ident(n.ID), graph.Ident(n.ID))
@@ -134,7 +138,7 @@ func Generate(g *graph.Graph, version string, shares Shares) (string, error) {
 		// otherwise collide at startup (a runtime error --syntax-only
 		// doesn't catch).
 		fmt.Fprintf(&b, "\n# live tail tap for %s\ndestination d_tap_%s {\n    unix-dgram(%q persist-name(\"tap_%s\") template(\"%s\\t${ISODATE}\\t${HOST}\\t${PROGRAM}\\t${MSG}\\n\"));\n};\n",
-			name(n), id, TapSocket, id, id)
+			comment(name(n)), id, TapSocket, id, id)
 		fmt.Fprintf(&b, "log {\n    source(s_%s);\n    destination(d_tap_%s);\n};\n", id, id)
 	}
 	return b.String(), nil
@@ -157,7 +161,11 @@ func GenerateLogrotate(g *graph.Graph, shares Shares) (string, error) {
 		if rotate == 0 {
 			rotate = 7
 		}
-		fmt.Fprintf(&b, "# cache %s\n%s {\n", name(n), p)
+		qp, err := logrotatePath(p)
+		if err != nil {
+			return "", fmt.Errorf("cache %q: %w", comment(name(n)), err)
+		}
+		fmt.Fprintf(&b, "# cache %s\n%s {\n", comment(name(n)), qp)
 		b.WriteString("    missingok\n    notifempty\n")
 		// copytruncate so syslog-ng's open fd keeps working (and survives
 		// SMB shares where rename-under-writer misbehaves)
@@ -207,10 +215,10 @@ func filterExpr(n graph.Node) (string, error) {
 		conds = append(conds, fmt.Sprintf("level(emerg..%s)", graph.SeverityNames[*sm]))
 	}
 	if p := strings.TrimSpace(n.Config.Program); p != "" {
-		conds = append(conds, fmt.Sprintf("program(%q)", p))
+		conds = append(conds, fmt.Sprintf("program(%s)", q(p)))
 	}
 	if m := strings.TrimSpace(n.Config.Match); m != "" {
-		conds = append(conds, fmt.Sprintf("message(%q)", m))
+		conds = append(conds, fmt.Sprintf("message(%s)", q(m)))
 	}
 	// A MITRE technique compiles to its syslog-ng pattern (message regex
 	// and/or program), so a flow can route or drop by technique.
@@ -220,10 +228,10 @@ func filterExpr(n graph.Node) (string, error) {
 			return "", fmt.Errorf("filter %q: unknown MITRE technique %q", name(n), tid)
 		}
 		if t.Program != "" {
-			conds = append(conds, fmt.Sprintf("program(%q)", t.Program))
+			conds = append(conds, fmt.Sprintf("program(%s)", q(t.Program)))
 		}
 		if t.Message != "" {
-			conds = append(conds, fmt.Sprintf("message(%q)", t.Message))
+			conds = append(conds, fmt.Sprintf("message(%s)", q(t.Message)))
 		}
 	}
 	if len(conds) == 0 {
@@ -295,4 +303,43 @@ func name(n graph.Node) string {
 		return n.Name
 	}
 	return n.ID
+}
+
+// q renders s as a syslog-ng double-quoted string. %q escapes quotes,
+// backslashes and control characters; syslog-ng additionally expands
+// `backtick` references (to @define values and environment variables)
+// everywhere in the config text, strings included, so a literal backtick
+// is written doubled, which syslog-ng reads back as one backtick.
+func q(s string) string {
+	return strings.ReplaceAll(fmt.Sprintf("%q", s), "`", "``")
+}
+
+// comment makes s safe to place after "# " on one config line: line
+// breaks and other control characters become spaces (a newline would end
+// the comment and turn the rest into live config), and backticks are
+// escaped because syslog-ng expands them even inside comments.
+func comment(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if graph.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
+	return strings.ReplaceAll(s, "`", "``")
+}
+
+// logrotatePath double-quotes a log path for logrotate.conf. logrotate has
+// no escape sequences inside quotes, so instead of escaping, anything
+// outside a conservative charset (quotes, braces, globs, whitespace other
+// than a plain space, control characters) is refused.
+func logrotatePath(p string) (string, error) {
+	for _, r := range p {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case strings.ContainsRune("/._-+@:,= ", r):
+		default:
+			return "", fmt.Errorf("path %q contains characters logrotate.conf can't hold safely", p)
+		}
+	}
+	return `"` + p + `"`, nil
 }

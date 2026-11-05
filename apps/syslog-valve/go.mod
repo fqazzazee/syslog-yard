@@ -1,6 +1,6 @@
 module github.com/syslog-yard/syslog-valve
 
-go 1.24
+go 1.26.4
 
 require github.com/syslog-yard/shared v0.0.0
 

@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
-import { fetchNetEntries, fetchNetSummary, putNetConfig, refreshNetFeeds } from "./../api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Banner, IconButton, Loading } from "../../../../shared/web/src/ui";
+import { fetchNetConfig, fetchNetEntries, fetchNetSummary, putNetConfig, refreshNetFeeds, type NetRefreshResult } from "./../api";
+import { useVisibleInterval } from "./../hooks";
 import type { Entry, Filters, NetConfig, NetSummary, User } from "./../types";
 import { Icon } from "./Icon";
 
@@ -35,21 +37,34 @@ export default function NetView({ filters, me }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [drill, setDrill] = useState<{ label: string; q: { class?: string; ip?: string } } | null>(null);
   const [drillEntries, setDrillEntries] = useState<Entry[] | null>(null);
+  const [drillError, setDrillError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // A feed refresh outlived its request (202): it continues on the server
+  // and we poll the feed table until it changes.
+  const [pending, setPending] = useState(false);
+  const pendingRun = useRef(0);
   const admin = me?.role === "admin";
+  // Only the latest summary request may land (the window can change, and a
+  // manual reload can overlap the poll).
+  const seq = useRef(0);
 
   const reload = useCallback(() => {
-    fetchNetSummary(minutes).then(setSum).catch((e) => setError(String(e)));
+    const n = ++seq.current;
+    fetchNetSummary(minutes)
+      .then((s) => {
+        if (n !== seq.current) return;
+        setSum(s);
+        setError(null);
+      })
+      .catch((e) => n === seq.current && setError(String(e)));
   }, [minutes]);
 
-  useEffect(() => {
-    setDrill(null);
-    reload();
-    const t = setInterval(reload, 30_000);
-    return () => clearInterval(t);
-  }, [reload]);
+  useEffect(() => setDrill(null), [minutes]);
+  // Poll while the tab is visible; keep the last good summary on a blip.
+  useVisibleInterval(reload, 30_000, [reload]);
 
   useEffect(() => {
+    setDrillError(null);
     if (!drill) {
       setDrillEntries(null);
       return;
@@ -58,18 +73,50 @@ export default function NetView({ filters, me }: Props) {
     setDrillEntries(null);
     fetchNetEntries({ ...drill.q, minutes })
       .then((es) => !stale && setDrillEntries(es))
-      .catch((e) => !stale && setError(String(e)));
+      .catch((e) => !stale && setDrillError(String(e)));
     return () => {
       stale = true;
     };
   }, [drill, minutes]);
 
+  // followRefresh shows a refresh result; a pending one is polled (every
+  // 3 s, up to ~2 min) until the feed statuses move on.
+  const followRefresh = useCallback(
+    async (r: NetRefreshResult) => {
+      setSum((s) => (s ? { ...s, feeds: r.feeds } : s));
+      if (!r.pending) {
+        reload();
+        return;
+      }
+      const run = ++pendingRun.current;
+      const before = JSON.stringify(r.feeds);
+      setPending(true);
+      for (let i = 0; i < 40; i++) {
+        await new Promise((res) => setTimeout(res, 3000));
+        if (run !== pendingRun.current) return;
+        try {
+          const now = await fetchNetConfig();
+          if (JSON.stringify(now.feeds) !== before) {
+            setSum((s) => (s ? { ...s, feeds: now.feeds } : s));
+            break;
+          }
+        } catch {
+          // keep polling; the summary poll reports lasting errors
+        }
+      }
+      if (run === pendingRun.current) {
+        setPending(false);
+        reload();
+      }
+    },
+    [reload],
+  );
+  useEffect(() => () => void ++pendingRun.current, []);
+
   const refresh = async () => {
     setBusy(true);
     try {
-      const r = await refreshNetFeeds();
-      setSum((s) => (s ? { ...s, feeds: r.feeds } : s));
-      reload();
+      await followRefresh(await refreshNetFeeds());
     } catch (e) {
       setError(String(e));
     } finally {
@@ -77,13 +124,15 @@ export default function NetView({ filters, me }: Props) {
     }
   };
 
-  if (error) return <div className="error">{error}</div>;
-  if (!sum) return <div className="mitre-view empty">Classifying recent traffic…</div>;
+  if (!sum) {
+    return error ? <Banner kind="error">{error}</Banner> : <Loading label="Classifying recent traffic…" />;
+  }
 
   const malTotal = sum.malicious.reduce((a, h) => a + h.count, 0);
 
   return (
     <div className="mitre-view net-view">
+      {error && <Banner kind="error">{error}</Banner>}
       <div className="mitre-head">
         <p className="mitre-intro">
           {sum.scanned.toLocaleString()} entries classified by the addresses they mention
@@ -202,7 +251,9 @@ export default function NetView({ filters, me }: Props) {
               <Icon name="close" size={13} /> close
             </button>
           </h3>
-          {!drillEntries ? (
+          {drillError ? (
+            <Banner kind="error">{drillError}</Banner>
+          ) : !drillEntries ? (
             <div className="muted">Loading…</div>
           ) : drillEntries.length === 0 ? (
             <div className="muted">No matching entries in this window.</div>
@@ -234,8 +285,8 @@ export default function NetView({ filters, me }: Props) {
       <h3 className="net-h">
         Online databases
         {admin && (
-          <button className="net-close" disabled={busy} onClick={refresh} title="Fetch every enabled feed now">
-            <Icon name="cached" size={13} /> {busy ? "refreshing…" : "refresh now"}
+          <button className="net-close" disabled={busy || pending} onClick={refresh} title="Fetch every enabled feed now">
+            <Icon name="cached" size={13} /> {busy || pending ? "refreshing…" : "refresh now"}
           </button>
         )}
       </h3>
@@ -271,7 +322,10 @@ export default function NetView({ filters, me }: Props) {
           ))}
         </tbody>
       </table>
-      {admin && <NetConfigEditor onSaved={reload} />}
+      {pending && (
+        <Banner kind="info">Feeds are still downloading in the background — the table updates when they finish.</Banner>
+      )}
+      {admin && <NetConfigEditor onSaved={(r) => void followRefresh(r)} />}
     </div>
   );
 }
@@ -309,7 +363,7 @@ function NetCell({
 // NetConfigEditor lets an admin toggle feeds and maintain custom CIDR
 // categories ("VPN pool", "branch offices", …). Loaded lazily so the view
 // itself stays read-only for analysts.
-function NetConfigEditor({ onSaved }: { onSaved: () => void }) {
+function NetConfigEditor({ onSaved }: { onSaved: (r: NetRefreshResult) => void }) {
   const [open, setOpen] = useState(false);
   const [cfg, setCfg] = useState<NetConfig | null>(null);
   const [labels, setLabels] = useState<Record<string, string>>({});
@@ -318,15 +372,13 @@ function NetConfigEditor({ onSaved }: { onSaved: () => void }) {
 
   useEffect(() => {
     if (!open || cfg) return;
-    import("./../api").then(({ fetchNetConfig }) =>
-      fetchNetConfig()
-        .then((r) => {
-          // custom ?? []: tolerate an older server answering null here.
-          setCfg({ ...r.config, custom: r.config.custom ?? [] });
-          setLabels(Object.fromEntries(r.feeds.map((f) => [f.id, f.label])));
-        })
-        .catch((e) => setErr(String(e))),
-    );
+    fetchNetConfig()
+      .then((r) => {
+        // custom ?? []: tolerate an older server answering null here.
+        setCfg({ ...r.config, custom: r.config.custom ?? [] });
+        setLabels(Object.fromEntries(r.feeds.map((f) => [f.id, f.label])));
+      })
+      .catch((e) => setErr(String(e)));
   }, [open, cfg]);
 
   const save = async () => {
@@ -334,8 +386,7 @@ function NetConfigEditor({ onSaved }: { onSaved: () => void }) {
     setSaving(true);
     setErr("");
     try {
-      await putNetConfig(cfg);
-      onSaved();
+      onSaved(await putNetConfig(cfg));
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -386,15 +437,18 @@ function NetConfigEditor({ onSaved }: { onSaved: () => void }) {
               setCfg({ ...cfg, custom });
             }}
           />
-          <button onClick={() => setCfg({ ...cfg, custom: cfg.custom.filter((_, j) => j !== i) })}>
-            <Icon name="delete" size={13} />
-          </button>
+          <IconButton
+            icon="delete"
+            label={`Remove category ${c.name || i + 1}`}
+            iconSize={15}
+            onClick={() => setCfg({ ...cfg, custom: cfg.custom.filter((_, j) => j !== i) })}
+          />
         </div>
       ))}
       <button onClick={() => setCfg({ ...cfg, custom: [...cfg.custom, { name: "", cidrs: [] }] })}>
         <Icon name="add" size={13} /> Add category
       </button>
-      {err && <div className="error">{err}</div>}
+      {err && <Banner kind="error">{err}</Banner>}
       <div className="net-cfg-actions">
         <button className="primary" disabled={saving} onClick={save}>
           {saving ? "Saving…" : "Save"}

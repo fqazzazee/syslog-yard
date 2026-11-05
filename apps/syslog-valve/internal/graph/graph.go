@@ -132,24 +132,37 @@ func (g *Graph) EdgesFrom(id string) []Edge {
 	return out
 }
 
+// Validate checks the graph is well-formed and safe to compile. Every
+// string that can reach the generated syslog-ng or logrotate config is
+// checked here; codegen escapes defensively as well, but a value that
+// fails here never gets that far on save, apply or import.
 func (g *Graph) Validate() error {
 	seen := map[string]bool{}
 	for _, n := range g.Nodes {
-		if n.ID == "" {
-			return fmt.Errorf("node with empty id")
+		if !validID(n.ID) {
+			return fmt.Errorf("node %q: id must be 1-%d characters of A-Z a-z 0-9 _ . -", label(n), maxIDLen)
 		}
 		if seen[n.ID] {
 			return fmt.Errorf("duplicate node id %q", n.ID)
 		}
 		seen[n.ID] = true
+		if err := checkText(n); err != nil {
+			return err
+		}
 		if err := validateNode(n); err != nil {
 			return err
 		}
+	}
+	if err := g.checkIdents(); err != nil {
+		return err
 	}
 	for _, e := range g.Edges {
 		if err := g.validateEdge(e); err != nil {
 			return err
 		}
+	}
+	if err := g.checkListeners(); err != nil {
+		return err
 	}
 	return g.checkCycles()
 }
@@ -190,8 +203,11 @@ func validateNode(n Node) error {
 		return nil
 	case TypeCache:
 		c := n.Config
-		if strings.Contains(c.Dir, "..") || strings.HasPrefix(c.Dir, "/") {
-			return fmt.Errorf("node %q: cache dir must be a relative subdirectory", label(n))
+		if c.Dir != "" && !validDir(c.Dir) {
+			return fmt.Errorf("node %q: cache dir must be a relative subdirectory of A-Z a-z 0-9 . _ - / (no \"..\", no leading \"/\")", label(n))
+		}
+		if c.Location != "" && !shareName.MatchString(c.Location) {
+			return fmt.Errorf("node %q: invalid share name %q", label(n), c.Location)
 		}
 		if c.Rotate < 0 || c.MaxSizeMB < 0 || c.MaxAgeDays < 0 {
 			return fmt.Errorf("node %q: retention values must be >= 0", label(n))
@@ -206,6 +222,9 @@ func validateNode(n Node) error {
 		}
 		if strings.TrimSpace(c.URL) == "" {
 			return fmt.Errorf("node %q: notify needs a URL", label(n))
+		}
+		if err := CheckNotifyURL(c.URL); err != nil {
+			return fmt.Errorf("node %q: %v", label(n), err)
 		}
 		if c.RatePerMin < 0 {
 			return fmt.Errorf("node %q: ratePerMin must be >= 0", label(n))

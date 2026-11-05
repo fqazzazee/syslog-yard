@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
+import { Banner, IconButton } from "../../../../shared/web/src/ui";
 import { createChannel, deleteChannel, fetchNotificationLog, testChannel, updateChannel } from "./../api";
 import type { Channel, ChannelKind, Delivery } from "./../types";
-import { Icon } from "./Icon";
 import Modal from "./Modal";
 
 interface Props {
@@ -95,9 +95,7 @@ export default function ChannelsModal({ channels, onClose }: Props) {
               <input type="checkbox" checked={c.enabled} onChange={(e) => patch(i, { enabled: e.target.checked })} />
               on
             </label>
-            <button type="button" className="linkish" title="Delete channel" onClick={() => remove(c)}>
-              <Icon name="close" size={14} />
-            </button>
+            <IconButton icon="delete" label={`Delete channel ${c.name}`} variant="link" iconSize={15} onClick={() => remove(c)} />
           </div>
 
           <ChannelConfig channel={c} onConfig={(k, v) => patchConfig(i, k, v)} />
@@ -143,7 +141,7 @@ export default function ChannelsModal({ channels, onClose }: Props) {
         </button>
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && <Banner kind="error">{error}</Banner>}
       <RecentDeliveries />
     </Modal>
   );
@@ -151,7 +149,9 @@ export default function ChannelsModal({ channels, onClose }: Props) {
 
 // ChannelConfig renders the kind-specific fields.
 function ChannelConfig({ channel, onConfig }: { channel: Channel; onConfig: (k: string, v: unknown) => void }) {
-  const cfg = channel.config as Record<string, unknown>;
+  // config may be null from older servers, and for read-only roles the url
+  // can come back masked with only a has_url flag.
+  const cfg = (channel.config ?? {}) as Record<string, unknown>;
   const str = (k: string) => (cfg[k] === undefined || cfg[k] === null ? "" : String(cfg[k]));
 
   if (channel.kind === "smtp") {
@@ -190,10 +190,16 @@ function ChannelConfig({ channel, onConfig }: { channel: Channel; onConfig: (k: 
           Password {cfg.has_password ? "(stored)" : ""}
           <input
             type="password"
+            autoComplete="new-password"
             placeholder={cfg.has_password ? "leave blank to keep" : ""}
             value={str("password")}
             onChange={(e) => onConfig("password", e.target.value)}
           />
+          {!!cfg.has_password && (
+            <span className="field-help">
+              Changing the host, port, username or TLS mode needs the password entered again.
+            </span>
+          )}
         </label>
         <label>
           TLS
@@ -211,6 +217,7 @@ function ChannelConfig({ channel, onConfig }: { channel: Channel; onConfig: (k: 
     <div className="channel-config">
       <label>
         {channel.kind === "slack" ? "Incoming webhook URL" : "Endpoint URL"}
+        {cfg.has_url ? " (stored — shown masked)" : ""}
         <input
           value={str("url")}
           placeholder="https://hooks.example.com/…"

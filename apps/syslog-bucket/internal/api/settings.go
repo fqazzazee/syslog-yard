@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -59,7 +61,7 @@ func (s *server) resolveOIDC(ctx context.Context) (oidcSettings, string) {
 	if env := s.envOIDC(); env.Enabled {
 		return env, "env"
 	}
-	return oidcSettings{Name: "SSO", DefaultRole: store.RoleAnalyst}, "none"
+	return oidcSettings{Name: "SSO", DefaultRole: auth.DefaultOIDCRole}, "none"
 }
 
 func (s *server) resolveIdleMinutes(ctx context.Context) int {
@@ -83,7 +85,7 @@ func buildOIDC(c oidcSettings) *auth.OIDC {
 	}
 	role := c.DefaultRole
 	if !store.ValidRole(role) {
-		role = store.RoleAnalyst
+		role = auth.DefaultOIDCRole
 	}
 	return &auth.OIDC{
 		Issuer: c.Issuer, ClientID: c.ClientID, ClientSecret: c.ClientSecret,
@@ -96,7 +98,20 @@ func buildOIDC(c oidcSettings) *auth.OIDC {
 func (s *server) applyStoredSettings(ctx context.Context) {
 	oc, _ := s.resolveOIDC(ctx)
 	s.authSvc.SetOIDC(buildOIDC(oc))
-	s.authSvc.SetIdleTTL(time.Duration(s.resolveIdleMinutes(ctx)) * time.Minute)
+	idle := time.Duration(s.resolveIdleMinutes(ctx)) * time.Minute
+	s.authSvc.SetIdleTTL(idle)
+	s.capSessions(ctx, idle)
+}
+
+// capSessions shortens live sessions to the current idle window, so lowering
+// the timeout takes effect for sessions issued under a longer one. Raising it
+// is a no-op (the cap only ever moves expiry earlier).
+func (s *server) capSessions(ctx context.Context, idle time.Duration) {
+	if n, err := s.store.CapSessionExpiry(ctx, idle); err != nil {
+		slog.Error("cap session expiry", "error", err)
+	} else if n > 0 {
+		slog.Info("shortened sessions to the idle timeout", "sessions", n, "idle", idle)
+	}
 }
 
 func (s *server) getSettings(w http.ResponseWriter, r *http.Request) {
@@ -136,17 +151,23 @@ func (s *server) putOIDCSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A blank secret means "keep the one already stored", so a save from the UI
-	// (which never receives the secret) doesn't wipe it.
+	// (which never receives the secret) doesn't wipe it — but only for the same
+	// issuer: the secret is sent to the issuer's token endpoint, so carrying it
+	// over to a new issuer would hand it to whoever runs that one.
 	if in.ClientSecret == "" {
-		if prev, _ := s.resolveOIDC(r.Context()); prev.ClientSecret != "" {
-			in.ClientSecret = prev.ClientSecret
+		prev, _ := s.resolveOIDC(r.Context())
+		kept, err := keepClientSecret(prev, in)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
+		in.ClientSecret = kept
 	}
 	if in.Name == "" {
 		in.Name = "SSO"
 	}
 	if in.DefaultRole == "" {
-		in.DefaultRole = store.RoleAnalyst
+		in.DefaultRole = auth.DefaultOIDCRole
 	}
 	if err := s.store.PutSetting(r.Context(), "oidc", in); err != nil {
 		s.internalError(w, "save oidc settings", err)
@@ -162,6 +183,31 @@ func (s *server) putOIDCSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, map[string]any{"ok": true, "warning": warning})
+}
+
+// errIssuerSecretReentry answers an OIDC save that moves to a new issuer
+// without supplying the client secret again.
+var errIssuerSecretReentry = errors.New("the issuer changed — re-enter the client secret")
+
+// keepClientSecret decides what a blank client_secret in an OIDC save means:
+// the previous secret when the issuer is unchanged, nothing otherwise. A new
+// enabled issuer with no secret is refused so SSO isn't silently saved in a
+// state that can't sign anyone in.
+func keepClientSecret(prev, in oidcSettings) (string, error) {
+	if prev.ClientSecret == "" {
+		return "", nil
+	}
+	if normIssuer(prev.Issuer) == normIssuer(in.Issuer) {
+		return prev.ClientSecret, nil
+	}
+	if in.Enabled {
+		return "", errIssuerSecretReentry
+	}
+	return "", nil
+}
+
+func normIssuer(s string) string {
+	return strings.TrimRight(strings.TrimSpace(s), "/")
 }
 
 func (s *server) putSessionSettings(w http.ResponseWriter, r *http.Request) {
@@ -180,6 +226,8 @@ func (s *server) putSessionSettings(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "save session settings", err)
 		return
 	}
-	s.authSvc.SetIdleTTL(time.Duration(in.IdleMinutes) * time.Minute)
+	idle := time.Duration(in.IdleMinutes) * time.Minute
+	s.authSvc.SetIdleTTL(idle)
+	s.capSessions(r.Context(), idle)
 	writeJSON(w, map[string]bool{"ok": true})
 }

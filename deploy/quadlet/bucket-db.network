@@ -1,0 +1,5 @@
+# Postgres's own network, shared only with syslog-bucket. Internal = no
+# route out and nothing else on it.
+[Network]
+NetworkName=bucket-db
+Internal=true

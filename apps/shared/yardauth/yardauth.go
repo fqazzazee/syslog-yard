@@ -17,9 +17,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/syslog-yard/shared/secure"
 )
 
 const (
@@ -74,11 +77,28 @@ func (g *Guard) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/me", g.handleMe)
 	mux.HandleFunc("POST /api/auth/login", g.handleLogin)
 	mux.HandleFunc("POST /api/auth/logout", g.handleLogout)
-	mux.HandleFunc("PUT /api/auth/password", g.proxy)
-	mux.HandleFunc("GET /api/users", g.proxy)
-	mux.HandleFunc("POST /api/users", g.proxy)
-	mux.HandleFunc("PUT /api/users/{id}", g.proxy)
-	mux.HandleFunc("DELETE /api/users/{id}", g.proxy)
+	mux.HandleFunc("PUT /api/auth/password", g.proxyTo("/api/auth/password"))
+	mux.HandleFunc("GET /api/users", g.proxyTo("/api/users"))
+	mux.HandleFunc("POST /api/users", g.proxyTo("/api/users"))
+	mux.HandleFunc("PUT /api/users/{id}", g.proxyUser)
+	mux.HandleFunc("DELETE /api/users/{id}", g.proxyUser)
+}
+
+// proxyTo forwards to one fixed bucket path. The upstream URL is never
+// derived from the (decoded) request path, so an encoded "../" in it
+// cannot steer the proxy to another bucket endpoint.
+func (g *Guard) proxyTo(path string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { g.proxy(w, r, path) }
+}
+
+// proxyUser forwards /api/users/{id}, accepting only a decimal id.
+func (g *Guard) proxyUser(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "invalid user id", http.StatusBadRequest)
+		return
+	}
+	g.proxy(w, r, "/api/users/"+strconv.FormatInt(id, 10))
 }
 
 // public lists /api/ paths reachable without a session: liveness, the yard
@@ -209,7 +229,11 @@ func (g *Guard) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleLogin forwards the credentials to the bucket and, on success,
-// re-issues the bucket's session token as this tool's own cookie.
+// re-issues the bucket's session token as this tool's own cookie. The
+// client's address (secure.ClientIP) travels as X-Forwarded-For so the
+// bucket's per-(username, IP) login throttle sees the real client rather
+// than this tool; the bucket must believe that header only from peers it
+// is configured to trust as proxies (the yard tools).
 func (g *Guard) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !g.Enabled() {
 		http.Error(w, "authentication disabled", http.StatusNotFound)
@@ -227,6 +251,7 @@ func (g *Guard) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-For", secure.ClientIP(r))
 	resp, err := g.client.Do(req)
 	if err != nil {
 		http.Error(w, statusMessage(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
@@ -285,11 +310,11 @@ func (g *Guard) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// proxy forwards an account-management request to the bucket verbatim
-// (method, path, body, session cookie) and relays the answer. A re-issued
-// session cookie — the bucket rotates it on password change — is passed
-// along so the user stays signed in.
-func (g *Guard) proxy(w http.ResponseWriter, r *http.Request) {
+// proxy forwards an account-management request to the bucket path given
+// (method, body, session cookie, client IP) and relays the answer. A
+// re-issued session cookie — the bucket rotates it on password change — is
+// passed along so the user stays signed in.
+func (g *Guard) proxy(w http.ResponseWriter, r *http.Request, path string) {
 	if !g.Enabled() {
 		http.Error(w, "authentication disabled", http.StatusNotFound)
 		return
@@ -300,12 +325,13 @@ func (g *Guard) proxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req, err := http.NewRequestWithContext(r.Context(), r.Method,
-		g.authURL+r.URL.Path, strings.NewReader(string(body)))
+		g.authURL+path, strings.NewReader(string(body)))
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-For", secure.ClientIP(r))
 	var oldToken string
 	if c, err := r.Cookie(cookieName); err == nil {
 		oldToken = c.Value

@@ -183,7 +183,7 @@ func (r *Renderer) Render() (string, error) {
 		ctx.appname = ev.Appname
 	}
 
-	var sb strings.Builder
+	var sb cappedBuffer
 	t, err := r.preset.compiled[i].Clone()
 	if err != nil {
 		return "", err

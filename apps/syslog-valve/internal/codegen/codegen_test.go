@@ -42,6 +42,29 @@ func filteredGraph() *graph.Graph {
 	}
 }
 
+// Two forwards to the same host/port/transport (a filter's match and else
+// both feeding the bucket) must get distinct persist names, or syslog-ng
+// rejects the config at reload ("conflicting persist-names").
+func TestGenerateDistinctForwardPersistNames(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: []graph.Node{
+			{ID: "in", Type: graph.TypeSource, Name: "in", Config: graph.Config{Transport: "udp", Port: 514}},
+			{ID: "a", Type: graph.TypeForward, Name: "a", Config: graph.Config{Transport: "udp", Host: "bucket-syslog", Port: 514}},
+			{ID: "b", Type: graph.TypeForward, Name: "b", Config: graph.Config{Transport: "udp", Host: "bucket-syslog", Port: 514}},
+		},
+		Edges: []graph.Edge{{From: "in", To: "a"}, {From: "in", To: "b"}},
+	}
+	conf, err := Generate(g, "4.8", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`persist-name("forward_a")`, `persist-name("forward_b")`} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("generated config missing %q:\n%s", want, conf)
+		}
+	}
+}
+
 func TestGenerate(t *testing.T) {
 	conf, err := Generate(testGraph(), "4.8", nil)
 	if err != nil {
@@ -52,7 +75,7 @@ func TestGenerate(t *testing.T) {
 		`source s_src_1 {`,
 		`network(ip("0.0.0.0") transport("udp") port(514));`,
 		`destination d_fwd_1 {`,
-		`network("bucket-syslog" port(514) transport("udp"));`,
+		`network("bucket-syslog" port(514) transport("udp") persist-name("forward_fwd_1"));`,
 		"log {\n    source(s_src_1);\n    destination(d_fwd_1);\n};",
 	} {
 		if !strings.Contains(conf, want) {
@@ -211,7 +234,7 @@ func TestGenerateLogrotate(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"/data/cache/fw-noise/messages.log {",
+		`"/data/cache/fw-noise/messages.log" {`,
 		"copytruncate",
 		"rotate 5",
 		"size 50M",
@@ -273,8 +296,8 @@ func TestGenerateTLS(t *testing.T) {
 	}
 	for _, want := range []string{
 		`transport("tls") port(6514) tls(key-file("/data/certs/valve.key") cert-file("/data/certs/valve.crt") peer-verify(optional-untrusted))`,
-		`network("siem" port(6514) transport("tls") tls(peer-verify(required-trusted) ca-dir("/etc/ssl/certs")))`,
-		`network("lab" port(6514) transport("tls") tls(peer-verify(optional-untrusted)))`,
+		`network("siem" port(6514) transport("tls") tls(peer-verify(required-trusted) ca-dir("/etc/ssl/certs"))`,
+		`network("lab" port(6514) transport("tls") tls(peer-verify(optional-untrusted))`,
 	} {
 		if !strings.Contains(conf, want) {
 			t.Errorf("generated config missing %q:\n%s", want, conf)

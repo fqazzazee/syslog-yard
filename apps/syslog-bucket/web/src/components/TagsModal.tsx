@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Banner } from "../../../../shared/web/src/ui";
 import { createTag, deleteTag, updateTag } from "./../api";
 import type { Tag } from "./../types";
 import { Icon } from "./Icon";
@@ -91,7 +92,7 @@ export default function TagsModal({ tags, onClose }: Props) {
         </button>
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && <Banner kind="error">{error}</Banner>}
     </Modal>
   );
 }

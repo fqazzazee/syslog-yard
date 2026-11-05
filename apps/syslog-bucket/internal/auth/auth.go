@@ -12,7 +12,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,31 +32,54 @@ const (
 	defaultIdleTTL = 30 * 24 * time.Hour
 	minPassword    = 8
 
-	// Brute-force throttle: lock an account's login for loginWindow after
-	// loginMaxFails consecutive bad passwords.
-	loginMaxFails = 10
-	loginWindow   = 5 * time.Minute
+	// Brute-force throttle (see guard): one source is locked out of an
+	// account for loginWindow after loginMaxFails consecutive bad passwords;
+	// the account itself locks for accountWindow once accountMaxFails pile up
+	// from all sources within one accountWindow.
+	loginMaxFails   = 10
+	loginWindow     = 5 * time.Minute
+	accountMaxFails = 100
+	accountWindow   = 15 * time.Minute
 )
 
 type Service struct {
 	store        *store.Store
 	cookieSecure bool
-	loginLimiter *throttle
+	loginGuard   *guard // POST /api/auth/login, keyed by username
+	pwGuard      *guard // PUT /api/auth/password, keyed by user id
 
-	// oidc and idleTTL are runtime-configurable from the admin settings UI, so
-	// they're guarded rather than fixed at construction.
+	// oidc, idleTTL and trusted are runtime-configurable, so they're guarded
+	// rather than fixed at construction.
 	mu      sync.RWMutex
 	oidc    *OIDC // nil = OIDC disabled
 	idleTTL time.Duration
+	trusted []netip.Prefix // proxies whose X-Forwarded-For is believed
 }
 
 func New(st *store.Store, cookieSecure bool) *Service {
 	return &Service{
 		store:        st,
 		cookieSecure: cookieSecure,
-		loginLimiter: newThrottle(loginMaxFails, loginWindow),
+		loginGuard:   newGuard(),
+		pwGuard:      newGuard(),
 		idleTTL:      defaultIdleTTL,
 	}
+}
+
+// SetTrustedProxies sets the reverse proxies whose X-Forwarded-For header is
+// used to find the client address for brute-force throttling. Empty (the
+// default) means the TCP peer address is always used.
+func (s *Service) SetTrustedProxies(p []netip.Prefix) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.trusted = p
+}
+
+func (s *Service) clientIP(r *http.Request) string {
+	s.mu.RLock()
+	trusted := s.trusted
+	s.mu.RUnlock()
+	return clientIP(r, trusted)
 }
 
 // SetOIDC swaps the live identity-provider config (nil disables SSO). The next
@@ -98,7 +123,7 @@ func Bootstrap(ctx context.Context, st *store.Store, adminPassword string) error
 	}
 	generated := adminPassword == ""
 	if generated {
-		adminPassword = randHex(8)
+		adminPassword = generatePassword()
 	}
 	hash, err := HashPassword(adminPassword)
 	if err != nil {
@@ -126,7 +151,7 @@ func Bootstrap(ctx context.Context, st *store.Store, adminPassword string) error
 // `syslog-bucket reset-admin` or `scripts/yardctl reset-admin`).
 func ResetAdmin(ctx context.Context, st *store.Store, password string) (string, error) {
 	if password == "" {
-		password = randHex(8)
+		password = generatePassword()
 	} else if len(password) < minPassword {
 		return "", fmt.Errorf("password must be at least %d characters", minPassword)
 	}
@@ -163,6 +188,40 @@ func HashPassword(pw string) (string, error) {
 	return string(h), err
 }
 
+// dummyHash is a bcrypt hash of a random throwaway password at the same cost
+// as real ones. Logins for unknown, disabled, or OIDC-only accounts are
+// compared against it, so every failure costs one bcrypt and response timing
+// doesn't reveal which usernames exist.
+var dummyHash = sync.OnceValue(func() []byte {
+	h, err := bcrypt.GenerateFromPassword([]byte(randHex(16)), bcrypt.DefaultCost)
+	if err != nil {
+		panic("auth: generate dummy bcrypt hash: " + err.Error())
+	}
+	return h
+})
+
+// checkPassword reports whether pw signs u in: an enabled local account
+// whose bcrypt hash matches. It always runs exactly one bcrypt comparison.
+func checkPassword(u *store.User, pw string) bool {
+	hash := dummyHash()
+	usable := u != nil && !u.Disabled && u.PasswordHash != ""
+	if u != nil && u.PasswordHash != "" {
+		hash = []byte(u.PasswordHash)
+	}
+	return bcrypt.CompareHashAndPassword(hash, []byte(pw)) == nil && usable
+}
+
+func tooManyAttempts(w http.ResponseWriter, retry time.Duration) {
+	w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())+1))
+	http.Error(w, "too many failed attempts — try again later", http.StatusTooManyRequests)
+}
+
+// generatedPasswordBytes is the entropy of generated admin passwords: 128
+// bits, printed as 32 hex characters.
+const generatedPasswordBytes = 16
+
+func generatePassword() string { return randHex(generatedPasswordBytes) }
+
 func randHex(nBytes int) string {
 	b := make([]byte, nBytes)
 	rand.Read(b)
@@ -182,6 +241,13 @@ type ctxKey struct{}
 func UserFrom(ctx context.Context) *store.User {
 	u, _ := ctx.Value(ctxKey{}).(*store.User)
 	return u
+}
+
+// WithUser returns ctx carrying u as the authenticated user, as Middleware
+// does after resolving a session. It lets tests drive the router as a given
+// role without a database.
+func WithUser(ctx context.Context, u *store.User) context.Context {
+	return context.WithValue(ctx, ctxKey{}, u)
 }
 
 // publicAPI lists /api/ paths reachable without a session: liveness, the
@@ -237,8 +303,40 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 				return
 			}
 		}
+		if strings.HasPrefix(r.URL.Path, "/api/") && !csrfSafe(r) {
+			http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// csrfSafe rejects the one kind of state-changing request a foreign page can
+// send without a CORS preflight: a POST with a "simple" content type
+// (text/plain, form-encoded, multipart). SameSite=Lax doesn't cover it when
+// the page is same-site — any other port on the same host, e.g. another app
+// on localhost — so the cookie would ride along. PUT/PATCH/DELETE and JSON
+// POSTs are always preflighted cross-origin, which the API never answers.
+// Logout stays exempt: it has no body, and forcing one is harmless.
+func csrfSafe(r *http.Request) bool {
+	if r.Method != http.MethodPost || r.URL.Path == "/api/auth/logout" {
+		return true
+	}
+	mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return err == nil && mt == "application/json"
+}
+
+// SessionActive reports whether r's session cookie still belongs to a live
+// session of an enabled user. Long-lived streams (the live tail) poll it,
+// since the middleware only checks once at the start. Database errors count
+// as inactive; the client simply reconnects.
+func (s *Service) SessionActive(ctx context.Context, r *http.Request) bool {
+	c, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return false
+	}
+	u, err := s.store.GetSessionUser(ctx, hashToken(c.Value))
+	return err == nil && u != nil
 }
 
 // --- session plumbing ---
@@ -272,10 +370,9 @@ func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	key := strings.ToLower(strings.TrimSpace(req.Username))
-	if ok, retry := s.loginLimiter.allow(key); !ok {
-		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())+1))
-		http.Error(w, "too many failed attempts — try again later", http.StatusTooManyRequests)
+	key, ip := strings.ToLower(strings.TrimSpace(req.Username)), s.clientIP(r)
+	if ok, retry := s.loginGuard.allow(key, ip); !ok {
+		tooManyAttempts(w, retry)
 		return
 	}
 	u, err := s.store.GetUserByUsername(r.Context(), strings.TrimSpace(req.Username))
@@ -283,15 +380,14 @@ func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if u == nil || u.Disabled || u.PasswordHash == "" ||
-		bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Password)) != nil {
-		s.loginLimiter.fail(key)
+	if !checkPassword(u, req.Password) {
+		s.loginGuard.fail(key, ip)
 		// Flat delay + uniform message: no username/password oracle.
 		time.Sleep(500 * time.Millisecond)
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
-	s.loginLimiter.reset(key)
+	s.loginGuard.succeed(key, ip)
 	if err := s.issueSession(r.Context(), w, u.ID); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -346,10 +442,19 @@ func (s *Service) HandlePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "this account signs in via OIDC", http.StatusBadRequest)
 		return
 	}
-	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Old)) != nil {
+	// The old password is a guessable secret too: throttle it like a login so
+	// a stolen session can't be used to brute-force the real password.
+	key, ip := "id:"+strconv.FormatInt(u.ID, 10), s.clientIP(r)
+	if ok, retry := s.pwGuard.allow(key, ip); !ok {
+		tooManyAttempts(w, retry)
+		return
+	}
+	if !checkPassword(u, req.Old) {
+		s.pwGuard.fail(key, ip)
 		http.Error(w, "current password is incorrect", http.StatusForbidden)
 		return
 	}
+	s.pwGuard.succeed(key, ip)
 	if len(req.New) < minPassword {
 		http.Error(w, "new password must be at least 8 characters", http.StatusBadRequest)
 		return

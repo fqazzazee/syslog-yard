@@ -186,6 +186,17 @@ func (s *Store) SlideSession(ctx context.Context, tokenHash string, idle time.Du
 	return tag.RowsAffected() > 0, err
 }
 
+// CapSessionExpiry shortens every live session to expire no later than
+// now()+idle. Call it when the idle timeout is lowered: SlideSession only
+// ever pushes expiry forward, so without this a session minted under a long
+// timeout would keep it. Returns how many sessions were shortened.
+func (s *Store) CapSessionExpiry(ctx context.Context, idle time.Duration) (int64, error) {
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE sessions SET expires_at = now() + make_interval(secs => $1)
+		WHERE expires_at > now() + make_interval(secs => $1)`, idle.Seconds())
+	return tag.RowsAffected(), err
+}
+
 // DeleteUserSessions logs a user out everywhere (password change, disable).
 func (s *Store) DeleteUserSessions(ctx context.Context, userID int64) error {
 	_, err := s.Pool.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, userID)

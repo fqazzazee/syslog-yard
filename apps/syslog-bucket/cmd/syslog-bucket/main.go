@@ -150,7 +150,12 @@ func run() error {
 	}
 	httpSrv := &http.Server{
 		Addr:    cfg.APIAddr,
-		Handler: api.New(st, eng, hub, dispatcher, dist, hints, authSvc, cfg, netMgr),
+		Handler: api.New(st, eng, hub, dispatcher, dist, hints, authSvc, cfg, netMgr, ing),
+		// Same limits as hose and valve. No Read/WriteTimeout: they would
+		// cut long-lived WebSocket live tails.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20,
 	}
 	httpErr := make(chan error, 1)
 	go func() {
@@ -158,19 +163,39 @@ func run() error {
 		httpErr <- httpSrv.ListenAndServe()
 	}()
 
+	var runErr error
+	ingestDone := false
 	select {
 	case <-ctx.Done():
-		slog.Info("shutting down")
+	case runErr = <-ingestErr:
+		ingestDone = true
+	case err := <-httpErr:
+		if !errors.Is(err, http.ErrServerClosed) {
+			runErr = err
+		}
+	}
+
+	// Ordered shutdown; the deferred st.Close runs only after all of it:
+	//  1. cancel ctx: the API, ingest listener, and background loops stop;
+	//  2. ingest closes its connections, drains its queue into the database,
+	//     and returns once the batcher has exited (bounded by its drain
+	//     timeout);
+	//  3. the dispatcher gets a bounded window for deliveries already queued.
+	slog.Info("shutting down")
+	stop()
+	httpDone := make(chan struct{})
+	go func() {
+		defer close(httpDone)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		httpSrv.Shutdown(shutdownCtx)
-		return nil
-	case err := <-ingestErr:
-		return err
-	case err := <-httpErr:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
+	}()
+	if !ingestDone {
+		if err := <-ingestErr; err != nil {
+			slog.Error("ingest stopped with error", "error", err)
 		}
-		return err
 	}
+	dispatcher.Shutdown(3 * time.Second)
+	<-httpDone
+	return runErr
 }

@@ -2,10 +2,24 @@ import { useEffect, useRef, useState } from "react";
 import type { Entry } from "./types";
 
 // useLiveTail keeps a WebSocket open to /api/ws (reconnecting with backoff)
-// and feeds matching entries to onEntry. Pass url=null to pause.
-export function useLiveTail(url: string | null, onEntry: (e: Entry) => void): boolean {
+// and feeds matching entries to onEntry. Pass url=null to pause. onOpen runs
+// on every (re)connect so the caller can backfill whatever it missed while
+// the socket was down — the server only pushes entries from then on.
+// canReconnect runs after the socket drops: resolve false to stop (the
+// session is gone — the server closes tails of disabled/demoted users), true
+// to reconnect with backoff.
+export function useLiveTail(
+  url: string | null,
+  onEntry: (e: Entry) => void,
+  onOpen?: () => void,
+  canReconnect?: () => Promise<boolean>,
+): boolean {
   const cb = useRef(onEntry);
   cb.current = onEntry;
+  const openCb = useRef(onOpen);
+  openCb.current = onOpen;
+  const reconnectCb = useRef(canReconnect);
+  reconnectCb.current = canReconnect;
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -23,8 +37,10 @@ export function useLiveTail(url: string | null, onEntry: (e: Entry) => void): bo
       ws.onopen = () => {
         delay = 1000;
         setOpen(true);
+        openCb.current?.();
       };
       ws.onmessage = (ev) => {
+        if (stopped) return;
         try {
           const msg = JSON.parse(ev.data as string) as { type: string; entry: Entry };
           if (msg.type === "entry") cb.current(msg.entry);
@@ -35,8 +51,12 @@ export function useLiveTail(url: string | null, onEntry: (e: Entry) => void): bo
       ws.onclose = () => {
         setOpen(false);
         if (stopped) return;
-        timer = window.setTimeout(connect, delay);
-        delay = Math.min(delay * 2, 15_000);
+        const check = reconnectCb.current?.() ?? Promise.resolve(true);
+        void check.then((ok) => {
+          if (stopped || !ok) return;
+          timer = window.setTimeout(connect, delay);
+          delay = Math.min(delay * 2, 15_000);
+        });
       };
     };
     connect();
@@ -50,3 +70,7 @@ export function useLiveTail(url: string | null, onEntry: (e: Entry) => void): bo
 
   return open;
 }
+
+// useVisibleInterval is shared suite-wide (polls only while the tab is
+// visible).
+export { useVisibleInterval } from "../../../shared/web/src/hooks";

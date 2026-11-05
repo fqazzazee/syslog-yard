@@ -1,6 +1,9 @@
 services:
   syslog-hose:
-    build: .
+    build:
+      # context is the parent apps/ dir: the image also copies apps/shared
+      context: ..
+      dockerfile: syslog-hose/Dockerfile
     image: syslog-hose:latest
     container_name: syslog-hose
     ports:

@@ -32,6 +32,8 @@ type Manager struct {
 	store   *preset.Store
 	dataDir string
 
+	persistMu sync.Mutex // serializes snapshot+write of jobs.json
+
 	tailMu  sync.Mutex
 	tail    [tailSize]TailEvent
 	tailLen int
@@ -41,7 +43,15 @@ type Manager struct {
 // NewManager loads persisted jobs from dataDir/jobs.json and autostarts
 // the ones marked for it.
 func NewManager(store *preset.Store, dataDir string) (*Manager, error) {
-	m := &Manager{jobs: map[string]*job{}, store: store, dataDir: dataDir}
+	m := &Manager{
+		jobs: map[string]*job{}, store: store, dataDir: dataDir,
+		// Seed tail sequence numbers from the clock so they keep increasing
+		// across restarts: the UI keys tail lines by seq and keeps lines
+		// from before a reconnect. Microseconds stay below 2^53 (exact in
+		// a JS number), and ids can only collide if the hose averaged more
+		// than 1M events/s for its whole previous lifetime.
+		tailSeq: time.Now().UnixMicro(),
+	}
 	path := m.jobsPath()
 	if raw, err := os.ReadFile(path); err == nil {
 		var cfgs []JobConfig
@@ -64,19 +74,68 @@ func NewManager(store *preset.Store, dataDir string) (*Manager, error) {
 
 func (m *Manager) jobsPath() string { return filepath.Join(m.dataDir, "jobs.json") }
 
+// persist writes the current job set to jobs.json. persistMu spans the
+// snapshot and the write, so concurrent mutations land on disk in order
+// (an older snapshot can never overwrite a newer one and resurrect a
+// deleted job); the write is atomic and durable (unique temp file, fsync,
+// rename, fsync of the directory). Errors are logged: the in-memory state
+// stays authoritative until the next successful write.
 func (m *Manager) persist() {
+	m.persistMu.Lock()
+	defer m.persistMu.Unlock()
+
 	m.mu.RLock()
 	cfgs := make([]JobConfig, 0, len(m.jobs))
 	for _, j := range m.jobs {
-		cfgs = append(cfgs, j.cfg)
+		cfgs = append(cfgs, j.config())
 	}
 	m.mu.RUnlock()
 	sort.Slice(cfgs, func(i, k int) bool { return cfgs[i].Name < cfgs[k].Name })
-	raw, _ := json.MarshalIndent(cfgs, "", "  ")
-	tmp := m.jobsPath() + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o644); err == nil {
-		os.Rename(tmp, m.jobsPath())
+	raw, err := json.MarshalIndent(cfgs, "", "  ")
+	if err == nil {
+		err = writeFileAtomic(m.jobsPath(), raw, 0o644)
 	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "syslog-hose: saving jobs: %v\n", err)
+	}
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	ok := false
+	defer func() {
+		if !ok {
+			f.Close()
+			os.Remove(tmp)
+		}
+	}()
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	if err := f.Chmod(perm); err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	ok = true
+	if d, err := os.Open(dir); err == nil {
+		err = d.Sync()
+		d.Close()
+		return err
+	}
+	return nil
 }
 
 // Create validates, stores and persists a new job config.
@@ -106,22 +165,20 @@ func (m *Manager) Update(id string, cfg JobConfig) (JobStatus, error) {
 	if _, ok := m.store.Get(cfg.Preset); !ok {
 		return JobStatus{}, fmt.Errorf("preset %q not found", cfg.Preset)
 	}
+	cfg.ID = id
 	m.mu.Lock()
 	j, ok := m.jobs[id]
 	if !ok {
 		m.mu.Unlock()
-		return JobStatus{}, fmt.Errorf("job not found")
+		return JobStatus{}, errJobNotFound
 	}
-	j.mu.Lock()
-	running := j.running
-	j.mu.Unlock()
-	if running {
-		m.mu.Unlock()
-		return JobStatus{}, fmt.Errorf("stop the job before editing it")
-	}
-	cfg.ID = id
-	j.cfg = cfg
+	// the state check and the write happen under j.mu, so a concurrent
+	// Start either sees the new config or makes this Update fail
+	err := j.setConfig(cfg)
 	m.mu.Unlock()
+	if err != nil {
+		return JobStatus{}, err
+	}
 	m.persist()
 	return j.status(), nil
 }
@@ -132,43 +189,49 @@ func (m *Manager) Delete(id string) error {
 	j, ok := m.jobs[id]
 	if !ok {
 		m.mu.Unlock()
-		return fmt.Errorf("job not found")
+		return errJobNotFound
 	}
 	delete(m.jobs, id)
 	m.mu.Unlock()
-	j.halt()
+	// mark first so a Start that already looked the job up can't revive
+	// it after the halt below
+	j.markDeleted()
+	if err := j.halt(stopTimeout); err != nil {
+		fmt.Fprintf(os.Stderr, "syslog-hose: delete %s: %v\n", id, err)
+	}
 	m.persist()
 	return nil
 }
 
+func (m *Manager) get(id string) (*job, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	j, ok := m.jobs[id]
+	return j, ok
+}
+
 // Start launches a job's generator goroutine.
 func (m *Manager) Start(id string) error {
-	m.mu.RLock()
-	j, ok := m.jobs[id]
-	m.mu.RUnlock()
+	j, ok := m.get(id)
 	if !ok {
-		return fmt.Errorf("job not found")
+		return errJobNotFound
 	}
-	p, ok := m.store.Get(j.cfg.Preset)
-	if !ok {
-		return fmt.Errorf("preset %q not found", j.cfg.Preset)
-	}
-	return j.start(p, m.recordEvent, func(string) {})
+	return j.start(m.store.Get, m.recordEvent)
 }
 
-// Stop halts a running job and waits for its goroutine to exit.
+// Stop halts a running job and waits for its goroutine to exit. Stopping
+// an idle (or already stopping) job is a no-op, so double clicks and
+// Stop + Stop-all races are harmless.
 func (m *Manager) Stop(id string) error {
-	m.mu.RLock()
-	j, ok := m.jobs[id]
-	m.mu.RUnlock()
+	j, ok := m.get(id)
 	if !ok {
-		return fmt.Errorf("job not found")
+		return errJobNotFound
 	}
-	j.halt()
-	return nil
+	return j.halt(stopTimeout)
 }
 
-// StopAll halts every running job (used on shutdown and by the UI).
+// StopAll halts every running job (used on shutdown and by the UI). Jobs
+// are stopped in parallel so the total wait is bounded by one timeout.
 func (m *Manager) StopAll() {
 	m.mu.RLock()
 	jobs := make([]*job, 0, len(m.jobs))
@@ -176,9 +239,15 @@ func (m *Manager) StopAll() {
 		jobs = append(jobs, j)
 	}
 	m.mu.RUnlock()
+	var wg sync.WaitGroup
 	for _, j := range jobs {
-		j.halt()
+		wg.Go(func() {
+			if err := j.halt(stopTimeout); err != nil {
+				fmt.Fprintf(os.Stderr, "syslog-hose: stop all: %v\n", err)
+			}
+		})
 	}
+	wg.Wait()
 }
 
 // List returns the live status of every job, sorted by name.
@@ -197,7 +266,7 @@ func (m *Manager) List() []JobStatus {
 func (m *Manager) recordEvent(jobID, jobName, msg string) {
 	m.tailMu.Lock()
 	m.tailSeq++
-	m.tail[int(m.tailSeq)%tailSize] = TailEvent{
+	m.tail[m.tailSeq%tailSize] = TailEvent{
 		Seq: m.tailSeq, JobID: jobID, JobName: jobName, Time: time.Now(), Message: msg,
 	}
 	if m.tailLen < tailSize {
@@ -216,7 +285,7 @@ func (m *Manager) TailSince(since int64) []TailEvent {
 		lo = since + 1
 	}
 	for s := lo; s <= m.tailSeq; s++ {
-		out = append(out, m.tail[int(s)%tailSize])
+		out = append(out, m.tail[s%tailSize])
 	}
 	return out
 }

@@ -1,36 +1,52 @@
 import { useEffect, useRef, useState } from "react";
-import { Job, TailEvent } from "./api";
-import { Icon } from "./Icon";
+import { Button } from "../../../shared/web/src/ui";
+import type { Job, TailEvent } from "./api";
 
+// TailRow is a TailEvent plus a client-assigned key. The server's seq is not
+// unique across a server restart (the browser keeps its buffer), so it
+// can't be the React key on its own.
+export type TailRow = TailEvent & { uid: number };
+
+// Tail shows what the running jobs send. variant "drawer" is the
+// collapsible strip under the Jobs page; "page" fills the Live tail section.
 export function Tail(props: {
-  events: TailEvent[];
+  events: TailRow[];
   jobs: Job[];
-  visible: boolean;
-  onToggle: () => void;
+  paused: boolean;
   onPause: (paused: boolean) => void;
   onClear: () => void;
+  variant: "drawer" | "page";
+  open?: boolean;
+  onToggle?: () => void;
 }) {
   const [filter, setFilter] = useState("");
-  const [paused, setPaused] = useState(false);
-  const endRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const visible = props.variant === "page" || !!props.open;
 
   useEffect(() => {
-    if (props.visible && !paused) {
-      endRef.current?.scrollIntoView({ behavior: "instant", block: "end" });
-    }
-  }, [props.events, props.visible, paused]);
+    const el = bodyRef.current;
+    if (visible && !props.paused && el) el.scrollTop = el.scrollHeight;
+  }, [props.events, visible, props.paused]);
 
   const shown = filter ? props.events.filter((e) => e.jobId === filter) : props.events;
 
   return (
-    <div className={props.visible ? "tail open" : "tail"}>
+    <section className={`tail tail-${props.variant}${visible ? " open" : ""}`} aria-label="Live tail">
       <div className="tail-bar">
-        <button className="quiet" onClick={props.onToggle}>
-          <Icon name={props.visible ? "keyboard_arrow_down" : "keyboard_arrow_up"} size={16} /> Live tail
-        </button>
-        {props.visible && (
+        {props.variant === "drawer" && (
+          <Button
+            variant="quiet"
+            icon={visible ? "keyboard_arrow_down" : "keyboard_arrow_up"}
+            aria-expanded={visible}
+            aria-controls="hose-tail-body"
+            onClick={props.onToggle}
+          >
+            Live tail
+          </Button>
+        )}
+        {visible && (
           <>
-            <select value={filter} onChange={(e) => setFilter(e.target.value)}>
+            <select aria-label="Show job" value={filter} onChange={(e) => setFilter(e.target.value)}>
               <option value="">All jobs</option>
               {props.jobs.map((j) => (
                 <option key={j.id} value={j.id}>
@@ -38,34 +54,32 @@ export function Tail(props: {
                 </option>
               ))}
             </select>
-            <button
-              className="quiet"
-              onClick={() => {
-                const p = !paused;
-                setPaused(p);
-                props.onPause(p);
-              }}
+            <Button
+              variant="quiet"
+              icon={props.paused ? "play_arrow" : "pause"}
+              aria-pressed={props.paused}
+              onClick={() => props.onPause(!props.paused)}
             >
-              <Icon name={paused ? "play_arrow" : "pause"} size={15} /> {paused ? "Resume" : "Pause"}
-            </button>
-            <button className="quiet" onClick={props.onClear}>
+              {props.paused ? "Resume" : "Pause"}
+            </Button>
+            <Button variant="quiet" onClick={props.onClear}>
               Clear
-            </button>
-            <span className="dim">{shown.length} events buffered</span>
+            </Button>
+            <span className="tail-count">{shown.length} events buffered</span>
           </>
         )}
       </div>
-      {props.visible && (
-        <div className="tail-body">
+      {visible && (
+        <div className="tail-body" id="hose-tail-body" ref={bodyRef} tabIndex={0} role="log" aria-live="off" aria-label="Sent messages">
+          {shown.length === 0 && <div className="tail-empty">Waiting for a running job…</div>}
           {shown.map((e) => (
-            <div key={e.seq} className="tail-line">
+            <div key={e.uid} className="tail-line">
               <span className="tail-job">{e.jobName}</span>
               <span className="tail-msg">{e.message}</span>
             </div>
           ))}
-          <div ref={endRef} />
         </div>
       )}
-    </div>
+    </section>
   );
 }

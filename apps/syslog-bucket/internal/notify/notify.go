@@ -15,7 +15,9 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
@@ -26,7 +28,9 @@ const (
 	reloadInterval = 30 * time.Second
 	pruneInterval  = time.Hour
 	logRetention   = 7 * 24 * time.Hour
+	dropFlushEvery = 10 * time.Second
 	httpTimeout    = 10 * time.Second
+	testTimeout    = 25 * time.Second // bounds the UI's synchronous "send test"
 )
 
 var severityNames = []string{"emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"}
@@ -43,19 +47,46 @@ type Dispatcher struct {
 	client *http.Client
 	queue  chan job
 
+	// allowLoopback disables the webhook dialer's loopback/link-local guard;
+	// tests set it to reach httptest servers.
+	allowLoopback bool
+
 	mu       sync.RWMutex
 	channels map[int64]store.Channel
 	limiters map[int64]*limiter
+
+	// Queue-full drops are counted here and written to notification_log as
+	// one aggregate row per (channel, rule) every dropFlushEvery, so a storm
+	// never turns into an INSERT per dropped delivery on the ingest goroutine.
+	dropMu sync.Mutex
+	drops  map[dropKey]int
+
+	// Shutdown plumbing: workers deliver under deliverCtx (not Run's ctx) so
+	// queued jobs can still go out after the process starts stopping;
+	// Shutdown closes the queue and, past its deadline, cancels deliverCtx
+	// and sets abandon so leftover jobs are counted as dropped.
+	deliverCtx    context.Context
+	cancelDeliver context.CancelFunc
+	closeMu       sync.RWMutex
+	closed        bool
+	abandon       atomic.Bool
+	workerWG      sync.WaitGroup
+	started       bool // workers running; guarded by closeMu
 }
 
+type dropKey struct{ channelID, ruleID int64 }
+
 func New(st *store.Store) *Dispatcher {
-	return &Dispatcher{
+	d := &Dispatcher{
 		st:       st,
-		client:   &http.Client{Timeout: httpTimeout},
 		queue:    make(chan job, queueDepth),
 		channels: map[int64]store.Channel{},
 		limiters: map[int64]*limiter{},
+		drops:    map[dropKey]int{},
 	}
+	d.deliverCtx, d.cancelDeliver = context.WithCancel(context.Background())
+	d.client = d.newHTTPClient()
+	return d
 }
 
 // Reload refreshes the channel snapshot from the database. The API calls it
@@ -71,7 +102,13 @@ func (d *Dispatcher) Reload(ctx context.Context) error {
 	}
 	d.mu.Lock()
 	d.channels = m
-	// Keep a limiter per channel; drop limiters for deleted channels.
+	// Keep a limiter per channel: create one for each new channel here, under
+	// the write lock, and drop limiters for deleted channels.
+	for id := range m {
+		if d.limiters[id] == nil {
+			d.limiters[id] = newLimiter()
+		}
+	}
 	for id := range d.limiters {
 		if _, ok := m[id]; !ok {
 			delete(d.limiters, id)
@@ -82,19 +119,27 @@ func (d *Dispatcher) Reload(ctx context.Context) error {
 }
 
 // Run starts the worker pool plus periodic reload and log pruning until ctx
-// is cancelled.
+// is cancelled. The workers outlive ctx: they keep draining the queue until
+// Shutdown.
 func (d *Dispatcher) Run(ctx context.Context) {
-	for i := 0; i < workers; i++ {
-		go d.worker(ctx)
+	d.closeMu.Lock()
+	if !d.closed {
+		d.startWorkersLocked()
 	}
+	d.closeMu.Unlock()
 	reload := time.NewTicker(reloadInterval)
 	prune := time.NewTicker(pruneInterval)
+	dropFlush := time.NewTicker(dropFlushEvery)
 	defer reload.Stop()
 	defer prune.Stop()
+	defer dropFlush.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			d.flushDrops()
 			return
+		case <-dropFlush.C:
+			d.flushDrops()
 		case <-reload.C:
 			if err := d.Reload(ctx); err != nil && ctx.Err() == nil {
 				slog.Error("notify: reload channels", "error", err)
@@ -108,42 +153,131 @@ func (d *Dispatcher) Run(ctx context.Context) {
 }
 
 // Dispatch enqueues deliveries for entries a notify rule matched. Non-blocking:
-// if the queue is saturated the delivery is dropped and logged, never stalling
-// ingest.
+// if the queue is saturated the delivery is dropped and counted (flushed to
+// the log periodically by flushDrops), never stalling ingest.
 func (d *Dispatcher) Dispatch(entries []store.Entry) {
+	d.closeMu.RLock()
+	defer d.closeMu.RUnlock()
 	for _, e := range entries {
 		for _, n := range e.Notifies {
+			if d.closed {
+				d.countDrop(n.ChannelID, n.RuleID)
+				continue
+			}
 			select {
 			case d.queue <- job{entry: e, channelID: n.ChannelID, ruleID: n.RuleID}:
 			default:
-				slog.Warn("notify: queue full, dropping", "channel", n.ChannelID, "entry", e.ID)
-				id := e.ID
-				d.log(store.Delivery{ChannelID: n.ChannelID, EntryID: &id, RuleID: ptr(n.RuleID), Status: "dropped", Detail: "dispatch queue full"})
+				d.countDrop(n.ChannelID, n.RuleID)
 			}
 		}
 	}
 }
 
-func (d *Dispatcher) worker(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case j := <-d.queue:
-			d.handle(ctx, j)
-		}
+func (d *Dispatcher) countDrop(channelID, ruleID int64) {
+	d.dropMu.Lock()
+	d.drops[dropKey{channelID, ruleID}]++
+	d.dropMu.Unlock()
+}
+
+// flushDrops writes one notification_log row per (channel, rule) summarising
+// the deliveries dropped since the last flush.
+func (d *Dispatcher) flushDrops() {
+	d.dropMu.Lock()
+	drops := d.drops
+	d.drops = map[dropKey]int{}
+	d.dropMu.Unlock()
+	for k, n := range drops {
+		slog.Warn("notify: queue full, dropped deliveries", "channel", k.channelID, "rule", k.ruleID, "count", n)
+		d.log(store.Delivery{ChannelID: k.channelID, RuleID: ptr(k.ruleID), Status: "dropped",
+			Detail: fmt.Sprintf("dispatch queue full: %d deliveries dropped", n)})
 	}
 }
 
-func (d *Dispatcher) handle(ctx context.Context, j job) {
-	d.mu.RLock()
-	ch, ok := d.channels[j.channelID]
-	lim := d.limiters[j.channelID]
-	if ok && lim == nil {
-		lim = newLimiter()
-		d.limiters[j.channelID] = lim
+// startWorkersLocked starts the pool once; the caller holds closeMu, which
+// orders every workerWG.Add before Shutdown's Wait.
+func (d *Dispatcher) startWorkersLocked() {
+	if d.started {
+		return
 	}
+	d.started = true
+	for i := 0; i < workers; i++ {
+		d.workerWG.Add(1)
+		go d.worker()
+	}
+}
+
+func (d *Dispatcher) worker() {
+	defer d.workerWG.Done()
+	for j := range d.queue {
+		if d.abandon.Load() {
+			d.countDrop(j.channelID, j.ruleID)
+			continue
+		}
+		d.handle(d.deliverCtx, j)
+	}
+}
+
+// Shutdown stops accepting deliveries and gives the workers up to timeout to
+// send what is already queued. Past that, in-flight sends are cancelled and
+// the remainder is counted as dropped. Call it after ingest has stopped (no
+// more Dispatch calls are expected; late ones are counted as dropped).
+func (d *Dispatcher) Shutdown(timeout time.Duration) {
+	d.closeMu.Lock()
+	if d.closed {
+		d.closeMu.Unlock()
+		return
+	}
+	d.startWorkersLocked() // Run may not have started them yet
+	d.closed = true
+	close(d.queue)
+	d.closeMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		d.workerWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		slog.Warn("notify: shutdown deadline passed, abandoning queued deliveries", "queued", len(d.queue))
+		d.abandon.Store(true)
+		d.cancelDeliver()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+		}
+	}
+	d.cancelDeliver()
+	d.flushDrops()
+}
+
+// channel returns the channel snapshot and its limiter. Reload normally
+// creates the limiter; if a channel somehow lacks one, it is created under the
+// write lock (re-checked) so concurrent workers share a single limiter.
+func (d *Dispatcher) channel(id int64) (store.Channel, *limiter, bool) {
+	d.mu.RLock()
+	ch, ok := d.channels[id]
+	lim := d.limiters[id]
 	d.mu.RUnlock()
+	if !ok || lim != nil {
+		return ch, lim, ok
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ch, ok = d.channels[id]
+	if !ok {
+		return ch, nil, false
+	}
+	if lim = d.limiters[id]; lim == nil {
+		lim = newLimiter()
+		d.limiters[id] = lim
+	}
+	return ch, lim, true
+}
+
+func (d *Dispatcher) handle(ctx context.Context, j job) {
+	ch, lim, ok := d.channel(j.channelID)
 
 	rec := store.Delivery{ChannelID: j.channelID, EntryID: &j.entry.ID, RuleID: ptr(j.ruleID)}
 	if !ok || !ch.Enabled {
@@ -167,6 +301,8 @@ func (d *Dispatcher) handle(ctx context.Context, j job) {
 // TestSend delivers a synthetic entry to a channel synchronously, bypassing
 // the rate limiter — backs the UI's "send test" button.
 func (d *Dispatcher) TestSend(ctx context.Context, ch store.Channel) error {
+	ctx, cancel := context.WithTimeout(ctx, testTimeout)
+	defer cancel()
 	e := store.Entry{
 		ReceivedAt: time.Now(),
 		Severity:   4,
@@ -178,6 +314,9 @@ func (d *Dispatcher) TestSend(ctx context.Context, ch store.Channel) error {
 }
 
 func (d *Dispatcher) log(rec store.Delivery) {
+	if d.st == nil {
+		return
+	}
 	if err := d.st.LogDelivery(context.Background(), rec); err != nil {
 		slog.Error("notify: log delivery", "error", err)
 	}
@@ -189,15 +328,26 @@ func summary(e store.Entry) string {
 	if int(e.Severity) >= 0 && int(e.Severity) < len(severityNames) {
 		sev = severityNames[e.Severity]
 	}
-	msg := e.Msg
-	if len(msg) > 300 {
-		msg = msg[:300] + "…"
-	}
-	s := fmt.Sprintf("[%s] %s %s: %s", sev, e.Host, e.AppName, msg)
+	msg := truncateRunes(e.Msg, 300)
+	// Host/app are device-supplied: keep the summary on one line.
+	s := fmt.Sprintf("[%s] %s %s: %s", sev, headerValue(e.Host), headerValue(e.AppName), msg)
 	if len(e.Mitre) > 0 {
 		s += " · MITRE " + joinComma(e.Mitre)
 	}
 	return s
+}
+
+// truncateRunes shortens s to at most max bytes without splitting a UTF-8
+// sequence, appending an ellipsis when it cut anything.
+func truncateRunes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
 
 func ptr(v int64) *int64 {

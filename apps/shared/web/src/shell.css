@@ -1,0 +1,320 @@
+/* syslog-yard app shell: top bar, tool switcher, side navigation (full,
+ * icon rail, narrow-screen drawer) and the main landmark. See AppShell.tsx. */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+.yard-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+.skip-link {
+  position: absolute;
+  left: var(--space-2);
+  top: -100px;
+  z-index: var(--z-toast);
+  padding: var(--space-2) var(--space-3);
+  background: var(--accent);
+  color: var(--on-accent);
+  border-radius: var(--radius);
+  font-weight: var(--weight-bold);
+}
+.skip-link:focus {
+  top: var(--space-2);
+}
+
+.yard-topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--topbar-h);
+  padding: 0 var(--space-3) 0 var(--space-2);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  z-index: var(--z-sticky);
+}
+.yard-topbar-spacer {
+  flex: 1;
+}
+.yard-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 6px;
+  margin-right: var(--space-2);
+  color: var(--fg);
+  text-decoration: none;
+  font-size: var(--text-lg);
+  white-space: nowrap;
+  border-radius: var(--radius);
+}
+.yard-brand .icon {
+  color: var(--accent);
+}
+.yard-brand b {
+  font-weight: var(--weight-bold);
+}
+.yard-switcher {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.yard-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: calc(var(--radius-lg) - 3px);
+  color: var(--fg-muted);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+.yard-tool:hover {
+  color: var(--fg);
+  background: var(--surface-2);
+}
+.yard-tool .icon {
+  color: var(--tool-hue);
+}
+.yard-tool.current {
+  color: var(--fg);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-1);
+}
+.yard-tool.solo {
+  background: none;
+  box-shadow: none;
+}
+[data-tool="hose"] {
+  --tool-hue: var(--hose);
+}
+[data-tool="valve"] {
+  --tool-hue: var(--valve);
+}
+[data-tool="bucket"] {
+  --tool-hue: var(--bucket);
+}
+
+.yard-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  position: relative;
+}
+.yard-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+.yard-main:focus {
+  outline: none;
+}
+
+/* side navigation */
+.yard-sidenav {
+  flex: none;
+  width: var(--sidenav-w);
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.nav-group + .nav-group {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-2);
+}
+.nav-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  color: var(--fg);
+  text-decoration: none;
+}
+.nav-group-head:hover {
+  background: var(--surface-2);
+}
+.nav-group-head > .icon {
+  color: var(--tool-hue);
+}
+.nav-group-head .nav-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  min-width: 0;
+}
+.nav-group-name {
+  font-weight: var(--weight-bold);
+}
+.nav-group-tag {
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+}
+.nav-group:not(.current) .nav-group-name {
+  color: var(--fg-muted);
+}
+.nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.nav-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  padding: 5px 8px 5px 12px;
+  border-radius: var(--radius);
+  color: var(--fg);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.nav-link .nav-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav-link > .icon {
+  color: var(--fg-muted);
+}
+.nav-group:not(.current) .nav-link {
+  color: var(--fg-muted);
+}
+.nav-link:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.nav-link.active {
+  background: var(--selected);
+  color: var(--fg);
+  font-weight: var(--weight-medium);
+}
+.nav-link.active > .icon {
+  color: var(--accent);
+}
+.nav-link.active::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* collapsed rail: icons only, labels kept for assistive tech */
+.nav-rail .yard-sidenav {
+  width: var(--rail-w);
+  padding: var(--space-2) 6px;
+}
+.nav-rail .nav-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.nav-rail .nav-link,
+.nav-rail .nav-group-head {
+  justify-content: center;
+  padding: 7px 0;
+}
+.nav-rail .nav-link > .ybadge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 0 4px;
+  font-size: 9px;
+}
+.nav-rail .nav-link.active::before {
+  left: 0;
+}
+
+/* narrow screens: the nav becomes an overlay drawer */
+.nav-narrow .yard-sidenav {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: var(--z-drawer);
+  width: min(300px, 86vw);
+  box-shadow: var(--shadow-3);
+  transform: translateX(-102%);
+  visibility: hidden;
+  transition: transform var(--dur) var(--ease), visibility 0s linear var(--dur);
+}
+.nav-narrow.drawer-open .yard-sidenav {
+  transform: none;
+  visibility: visible;
+  transition: transform var(--dur) var(--ease);
+}
+.yard-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: calc(var(--z-drawer) - 1);
+  background: var(--backdrop);
+}
+
+@media (max-width: 899px) {
+  .yard-brand-text {
+    display: none;
+  }
+  .yard-brand {
+    margin-right: 0;
+  }
+}
+@media (max-width: 639px) {
+  .yard-topbar {
+    gap: 4px;
+    padding-right: var(--space-2);
+  }
+  .yard-tool {
+    padding: 4px 8px;
+  }
+  .yard-tool-label,
+  .user-btn-name,
+  .user-btn .role-badge {
+    display: none;
+  }
+  .page-header {
+    padding: var(--space-2) var(--space-3);
+  }
+  .page {
+    padding: var(--space-3);
+  }
+}
+

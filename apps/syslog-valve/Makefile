@@ -12,5 +12,6 @@ test:
 run: build
 	VALVE_DATA=./data ./syslog-valve
 
+# The build context is the parent apps/ dir: the image also copies apps/shared.
 image:
-	podman build -t syslog-valve:latest . 2>/dev/null || docker build -t syslog-valve:latest .
+	podman build -t syslog-valve:latest -f Dockerfile .. 2>/dev/null || docker build -t syslog-valve:latest -f Dockerfile ..

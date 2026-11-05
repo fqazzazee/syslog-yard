@@ -27,8 +27,9 @@ type Cond struct {
 	Op    string `json:"op,omitempty"`
 	Value any    `json:"value,omitempty"`
 
-	// Free-text search over msg. SQL uses websearch syntax; the in-memory
-	// matcher approximates it as "every word is a substring".
+	// Free-text search over msg in websearch syntax (words, "phrases", or,
+	// -negation), matched on whole lexemes; see textsearch.go for the
+	// in-memory side.
 	Text string `json:"text,omitempty"`
 
 	// Entry carries this tag.
@@ -354,21 +355,6 @@ func ordCompare(got, want float64, op string) bool {
 	default:
 		return got >= want
 	}
-}
-
-// textMatch approximates websearch_to_tsquery: every whitespace-separated
-// token must appear in the message, case-insensitively.
-func textMatch(msg, query string) bool {
-	m := strings.ToLower(msg)
-	for _, tok := range strings.Fields(strings.ToLower(query)) {
-		if tok = strings.Trim(tok, `"`); tok == "" {
-			continue
-		}
-		if !strings.Contains(m, tok) {
-			return false
-		}
-	}
-	return true
 }
 
 func strValue(v any) (string, error) {

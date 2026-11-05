@@ -6,6 +6,7 @@ Description=syslog-valve — visual syslog router/filter
 Image=localhost/syslog-valve:latest
 ContainerName=syslog-valve
 Network=yard.network
+# Prefix with 127.0.0.1: to publish on loopback only (single-host lab).
 PublishPort=8081:8081
 # Host entry into the valve's "External IN" block (add one in the UI and
 # Apply); add pairs per extra listener. Internal traffic uses 514.
@@ -24,6 +25,18 @@ Environment=YARD_AUTH_URL=http://syslog-bucket:8080
 # list its name so the UI offers it.
 # Volume=/mnt/nas/syslog:/shares/archive:z
 # Environment=YARD_SHARES=archive
+# Stays root inside the container (syslog-ng binds the listeners you draw;
+# existing valve-data volumes are root-owned) but keeps only what it uses:
+# ports <1024, and writing/rotating/re-owning cache files on volumes and
+# shares owned by another uid. See deploy/compose.yaml.
+DropCapability=all
+AddCapability=CAP_NET_BIND_SERVICE CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+NoNewPrivileges=true
+HealthCmd=wget -q -T 3 -O /dev/null http://127.0.0.1:8081/api/healthz
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=10s
 
 [Service]
 Restart=always

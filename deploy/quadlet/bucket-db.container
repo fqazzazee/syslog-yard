@@ -4,9 +4,13 @@ Description=syslog-bucket Postgres store (internal only)
 [Container]
 Image=docker.io/library/postgres:17-alpine
 ContainerName=bucket-db
-Network=yard.network
+Network=bucket-db.network
 Volume=bucket-dbdata.volume:/var/lib/postgresql/data
 Environment=POSTGRES_USER=syslog_bucket
+# Used only when the volume is first initialised. The historical static
+# default is kept so existing volumes keep working. For a new install set
+# your own here AND in BUCKET_DB_URL (syslog-bucket.container); to rotate
+# an existing one see docs/SECURITY.md.
 Environment=POSTGRES_PASSWORD=syslog_bucket
 Environment=POSTGRES_DB=syslog_bucket
 HealthCmd=pg_isready -U syslog_bucket

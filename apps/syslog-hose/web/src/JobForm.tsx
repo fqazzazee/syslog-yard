@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { api, Job, PresetSummary } from "./api";
+import { Dialog } from "../../../shared/web/src/Dialog";
+import { errorText } from "../../../shared/web/src/http";
+import { Banner, Button } from "../../../shared/web/src/ui";
+import { api, type Job, type PresetSummary } from "./api";
 
 const DEFAULTS: Partial<Job> = {
   name: "",
@@ -48,26 +51,39 @@ export function JobForm(props: {
     api
       .preview({ preset: cfg.preset, count: 5, hostname: cfg.hostname, format: cfg.format })
       .then((r) => setSamples(r.samples))
-      .catch((e: Error) => setError(e.message));
+      .catch((e: unknown) => setError(errorText(e)));
   };
 
   const save = () => {
     setError("");
     const p = editingId ? api.updateJob(editingId, cfg) : api.createJob(cfg);
-    p.then(props.onSaved).catch((e: Error) => setError(e.message));
+    p.then(props.onSaved).catch((e: unknown) => setError(errorText(e)));
   };
 
   return (
-    <div className="modal-backdrop" onClick={props.onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>{editingId ? "Edit job" : "New job"}</h2>
-
-        <div className="grid2">
+    <Dialog
+      title={editingId ? "Edit job" : "New job"}
+      size="lg"
+      onClose={props.onClose}
+      footer={
+        <>
+          <Button onClick={preview} className="danger-left">
+            Preview samples
+          </Button>
+          <Button onClick={props.onClose}>Cancel</Button>
+          <Button variant="primary" onClick={save}>
+            {editingId ? "Save" : "Create"}
+          </Button>
+        </>
+      }
+    >
+        <div className="form-grid">
           <label>
             Name
             <input
               value={cfg.name ?? ""}
               placeholder="Edge FortiGate"
+              autoFocus
               onChange={(e) => set("name", e.target.value)}
             />
           </label>
@@ -130,7 +146,7 @@ export function JobForm(props: {
         </div>
 
         <h3>Rate</h3>
-        <div className="grid2">
+        <div className="form-grid">
           <label>
             Events per second
             <input
@@ -206,7 +222,7 @@ export function JobForm(props: {
         </div>
 
         <h3>Identity overrides</h3>
-        <div className="grid2">
+        <div className="form-grid">
           <label>
             HOSTNAME field
             <input
@@ -240,17 +256,7 @@ export function JobForm(props: {
             ))}
           </pre>
         )}
-        {error && <div className="form-error">{error}</div>}
-
-        <div className="modal-actions">
-          <button onClick={preview}>Preview samples</button>
-          <div className="spacer" />
-          <button onClick={props.onClose}>Cancel</button>
-          <button className="primary" onClick={save}>
-            {editingId ? "Save" : "Create"}
-          </button>
-        </div>
-      </div>
-    </div>
+        {error && <Banner kind="error">{error}</Banner>}
+    </Dialog>
   );
 }

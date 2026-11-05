@@ -15,7 +15,9 @@ services:
 
   app:
     build:
-      context: ..
+      # context is apps/ so the image can also copy apps/shared
+      context: ../..
+      dockerfile: syslog-bucket/Dockerfile
     environment:
       BUCKET_DB_URL: postgres://syslog_bucket:syslog_bucket@db:5432/syslog_bucket?sslmode=disable
       BUCKET_API_ADDR: ":8080"
@@ -31,7 +33,7 @@ services:
     image: docker.io/balabit/syslog-ng:4.8.3
     command: ["--no-caps", "-F"]
     volumes:
-      - ./syslog-ng/syslog-ng.conf:/etc/syslog-ng/syslog-ng.conf:ro
+      - ./syslog-ng/syslog-ng.conf:/etc/syslog-ng/syslog-ng.conf:ro,z
     ports:
       # Host ports are unprivileged (5514/5601) so this works rootless;
       # point devices at 514/601 directly or remap as needed.

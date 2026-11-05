@@ -11,8 +11,8 @@ import (
 // common structured convention in syslog payloads) into Entry.Structured.
 type Generic struct{}
 
-func (Generic) Name() string                { return "generic" }
-func (Generic) Match(_ *store.Entry) bool   { return true }
+func (Generic) Name() string              { return "generic" }
+func (Generic) Match(_ *store.Entry) bool { return true }
 
 const maxStructuredKeys = 50
 

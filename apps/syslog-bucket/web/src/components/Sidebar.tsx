@@ -1,5 +1,12 @@
+// The bucket's rich navigation, rendered inside the shared side nav (in
+// place of the plain section list while the nav is expanded): views,
+// frameworks, buckets, tags, rules and notification channels, each with its
+// create/edit affordances. Views are hash links (see routes.ts).
+import type { ReactNode } from "react";
+import { IconButton } from "../../../../shared/web/src/ui";
+import { hrefFor, type Page } from "./../routes";
 import type { Bucket, Channel, Framework, Rule, Selection, Tag, User } from "./../types";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 import { TagChip } from "./Tags";
 
 interface Props {
@@ -8,15 +15,58 @@ interface Props {
   rules: Rule[];
   channels: Channel[];
   frameworks: Framework[];
-  selection: Selection;
+  selection: Selection | null; // null while a list page is open
+  page: Page | null;
   me: User;
   readOnly: boolean; // viewer role: no create/edit affordances
-  onSelect: (sel: Selection) => void;
   onEditBucket: (b: Bucket | null) => void; // null = new
   onEditRule: (r: Rule | null) => void;
   onEditFramework: (f: Framework | null) => void; // null = new custom framework
   onManageTags: () => void;
   onManageChannels: () => void;
+}
+
+function NavLink({
+  href,
+  icon,
+  active,
+  title,
+  className,
+  children,
+}: {
+  href: string;
+  icon: IconName;
+  active: boolean;
+  title?: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <a
+      href={href}
+      className={`nav-link${active ? " active" : ""}${className ? ` ${className}` : ""}`}
+      aria-current={active ? "page" : undefined}
+      title={title}
+    >
+      <Icon name={icon} size={16} />
+      <span className="nav-text">{children}</span>
+    </a>
+  );
+}
+
+function SubHead({ label, href, active, action }: { label: string; href?: string; active?: boolean; action?: ReactNode }) {
+  return (
+    <div className="nav-subhead">
+      {href ? (
+        <a href={href} aria-current={active ? "page" : undefined} className={active ? "active" : undefined}>
+          {label}
+        </a>
+      ) : (
+        <span>{label}</span>
+      )}
+      {action}
+    </div>
+  );
 }
 
 export default function Sidebar({
@@ -26,164 +76,168 @@ export default function Sidebar({
   channels,
   frameworks,
   selection,
+  page,
   me,
   readOnly,
-  onSelect,
   onEditBucket,
   onEditRule,
   onEditFramework,
   onManageTags,
   onManageChannels,
 }: Props) {
-  const isAll = selection.kind === "all";
-  const isMitre = selection.kind === "mitre" || selection.kind === "technique";
-  const isOT = selection.kind === "ot" || selection.kind === "otalert";
+  const kind = selection?.kind;
   const isAdmin = me.role === "admin";
   return (
-    <nav className="sidebar">
-      <button className={`nav-item${isAll ? " active" : ""}`} onClick={() => onSelect({ kind: "all" })}>
-        <Icon name="description" size={16} /> All Logs
-      </button>
+    <div className="bucket-nav">
+      <NavLink href="#/logs" icon="description" active={kind === "all"}>
+        All Logs
+      </NavLink>
+      <NavLink href="#/attack" icon="crisis_alert" active={kind === "mitre" || kind === "technique"}>
+        MITRE ATT&CK
+      </NavLink>
+      <NavLink href="#/ot" icon="factory" active={kind === "ot" || kind === "otalert"}>
+        ICS/OT Alerts
+      </NavLink>
+      <NavLink href="#/network" icon="lan" active={kind === "net"}>
+        Network
+      </NavLink>
 
-      <div className="nav-section">
-        <span>Frameworks</span>
-        {isAdmin && (
-          <button className="linkish" title="New custom framework" onClick={() => onEditFramework(null)}>
-            <Icon name="add" size={15} />
-          </button>
-        )}
-      </div>
-      <button className={`nav-item${isMitre ? " active" : ""}`} onClick={() => onSelect({ kind: "mitre" })}>
-        <Icon name="crisis_alert" size={16} /> MITRE ATT&CK
-      </button>
-      <button className={`nav-item${isOT ? " active" : ""}`} onClick={() => onSelect({ kind: "ot" })}>
-        <Icon name="factory" size={16} /> ICS/OT Alerts
-      </button>
-      <button
-        className={`nav-item${selection.kind === "net" ? " active" : ""}`}
-        onClick={() => onSelect({ kind: "net" })}
-      >
-        <Icon name="lan" size={16} /> Network
-      </button>
+      <SubHead
+        label="Frameworks"
+        href={hrefFor("frameworks")}
+        active={page === "frameworks"}
+        action={
+          isAdmin && (
+            <IconButton icon="add" label="New custom framework" variant="link" iconSize={16} onClick={() => onEditFramework(null)} />
+          )
+        }
+      />
       {frameworks.map((f) => {
         const active =
-          (selection.kind === "framework" || selection.kind === "frameworkitem") && selection.fw === f.id;
+          (selection?.kind === "framework" || selection?.kind === "frameworkitem") && selection.fw === f.id;
         const custom = f.id.startsWith("custom-");
         return (
-          <div key={f.id} className={`nav-item${active ? " active" : ""}`}>
-            <button
-              className="nav-label"
-              title={f.desc}
-              onClick={() => onSelect({ kind: "framework", fw: f.id })}
-            >
-              <Icon name={custom ? "category" : "shield"} size={15} /> {f.short}
-            </button>
+          <div key={f.id} className="nav-row">
+            <NavLink href={hrefFor({ kind: "framework", fw: f.id })} icon={custom ? "category" : "shield"} active={active} title={f.desc}>
+              {f.short}
+            </NavLink>
             {custom && isAdmin && (
-              <button className="nav-edit" title="Edit custom framework" onClick={() => onEditFramework(f)}>
-                <Icon name="edit" size={14} />
-              </button>
+              <IconButton
+                className="nav-edit"
+                icon="edit"
+                label={`Edit framework ${f.short}`}
+                variant="quiet"
+                iconSize={15}
+                onClick={() => onEditFramework(f)}
+              />
             )}
           </div>
         );
       })}
 
-      <div className="nav-section">
-        <span>Buckets</span>
-        {!readOnly && (
-          <button className="linkish" title="New bucket" onClick={() => onEditBucket(null)}>
-            <Icon name="add" size={15} />
-          </button>
-        )}
-      </div>
+      <SubHead
+        label="Buckets"
+        href={hrefFor("buckets")}
+        active={page === "buckets"}
+        action={!readOnly && <IconButton icon="add" label="New bucket" variant="link" iconSize={16} onClick={() => onEditBucket(null)} />}
+      />
       {buckets.map((b) => {
-        const active = selection.kind === "bucket" && selection.id === b.id;
+        const active = selection?.kind === "bucket" && selection.id === b.id;
         const foreign = b.owner_id !== undefined && b.owner_id !== me.id;
         return (
-          <div key={b.id} className={`nav-item${active ? " active" : ""}`}>
-            <button
-              className="nav-label"
+          <div key={b.id} className="nav-row">
+            <NavLink
+              href={hrefFor({ kind: "bucket", id: b.id })}
+              icon="folder"
+              active={active}
               title={foreign && b.owner_name ? `Shared by ${b.owner_name}` : b.description || undefined}
-              onClick={() => onSelect({ kind: "bucket", id: b.id })}
             >
-              <Icon name="folder" size={15} /> {b.name}
+              {b.name}
               {b.shared && b.owner_id === me.id && (
                 <span className="share-mark" title="Shared with others">
-                  <Icon name="share" size={12} />
+                  <Icon name="share" size={12} title="shared" />
                 </span>
               )}
               {foreign && b.owner_name && <span className="owner-mark">· {b.owner_name}</span>}
-            </button>
+            </NavLink>
             {b.can_edit && (
-              <button className="nav-edit" title="Edit bucket" onClick={() => onEditBucket(b)}>
-                <Icon name="edit" size={14} />
-              </button>
+              <IconButton
+                className="nav-edit"
+                icon="edit"
+                label={`Edit bucket ${b.name}`}
+                variant="quiet"
+                iconSize={15}
+                onClick={() => onEditBucket(b)}
+              />
             )}
           </div>
         );
       })}
       {buckets.length === 0 && <p className="nav-empty">Saved searches appear here.</p>}
 
-      <div className="nav-section">
-        <span>Tags</span>
-        {!readOnly && (
-          <button className="linkish" title="Manage tags" onClick={onManageTags}>
-            <Icon name="add" size={15} />
-          </button>
-        )}
-      </div>
+      <SubHead
+        label="Tags"
+        action={!readOnly && <IconButton icon="sell" label="Manage tags" variant="link" iconSize={16} onClick={onManageTags} />}
+      />
       <div className="nav-tags">
         {tags.map((t) => {
-          const active = selection.kind === "tag" && selection.id === t.id;
+          const active = selection?.kind === "tag" && selection.id === t.id;
           return (
-            <button
+            <a
               key={t.id}
+              href={hrefFor({ kind: "tag", id: t.id })}
               className={`nav-tag${active ? " active" : ""}`}
-              onClick={() => onSelect({ kind: "tag", id: t.id })}
+              aria-current={active ? "page" : undefined}
+              aria-label={`Tag ${t.name}`}
             >
               <TagChip tag={t} />
-            </button>
+            </a>
           );
         })}
+        {tags.length === 0 && <p className="nav-empty">No tags yet.</p>}
       </div>
 
-      <div className="nav-section">
-        <span>Rules</span>
-        {!readOnly && (
-          <button className="linkish" title="New rule" onClick={() => onEditRule(null)}>
-            <Icon name="add" size={15} />
-          </button>
-        )}
-      </div>
+      <SubHead
+        label="Rules"
+        href={hrefFor("rules")}
+        active={page === "rules"}
+        action={!readOnly && <IconButton icon="add" label="New rule" variant="link" iconSize={16} onClick={() => onEditRule(null)} />}
+      />
       {rules.map((r) => (
-        <div key={r.id} className="nav-item">
-          <button
-            className={`nav-label${r.enabled ? "" : " disabled"}`}
-            disabled={readOnly}
-            onClick={() => !readOnly && onEditRule(r)}
-          >
-            <Icon name="rule" size={15} /> {r.name}
-          </button>
-        </div>
+        <button
+          key={r.id}
+          type="button"
+          className={`nav-link nav-button${r.enabled ? "" : " disabled"}`}
+          disabled={readOnly}
+          title={r.enabled ? `Edit rule ${r.name}` : `${r.name} (disabled)`}
+          onClick={() => !readOnly && onEditRule(r)}
+        >
+          <Icon name="rule" size={16} />
+          <span className="nav-text">{r.name}</span>
+        </button>
       ))}
 
       {!readOnly && (
         <>
-          <div className="nav-section">
-            <span>Notifications</span>
-            <button className="linkish" title="Manage channels" onClick={onManageChannels}>
-              <Icon name="add" size={15} />
-            </button>
-          </div>
+          <SubHead
+            label="Notifications"
+            action={<IconButton icon="add" label="Manage notification channels" variant="link" iconSize={16} onClick={onManageChannels} />}
+          />
           {channels.map((c) => (
-            <div key={c.id} className="nav-item">
-              <button className={`nav-label${c.enabled ? "" : " disabled"}`} onClick={onManageChannels}>
-                <Icon name="notifications" size={15} /> {c.name}
-              </button>
-            </div>
+            <button
+              key={c.id}
+              type="button"
+              className={`nav-link nav-button${c.enabled ? "" : " disabled"}`}
+              title={`Edit channel ${c.name}`}
+              onClick={onManageChannels}
+            >
+              <Icon name="notifications" size={16} />
+              <span className="nav-text">{c.name}</span>
+            </button>
           ))}
           {channels.length === 0 && <p className="nav-empty">Webhook / Slack / email destinations.</p>}
         </>
       )}
-    </nav>
+    </div>
   );
 }
