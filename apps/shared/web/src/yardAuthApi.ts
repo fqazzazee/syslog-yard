@@ -29,13 +29,16 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
     if (res.status === 401 && !url.startsWith("/api/auth/")) {
       window.dispatchEvent(new Event("auth-expired"));
     }
-    let msg = `${res.status}`;
+    // Prefer a JSON {"error": "..."} body, then the plain-text body, then
+    // the status line.
     const raw = (await res.text().catch(() => "")).trim();
+    let msg = raw || `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""}`;
     try {
-      const body = JSON.parse(raw);
-      msg = body.error || msg;
+      const body: unknown = JSON.parse(raw);
+      const err = body && typeof body === "object" ? (body as { error?: unknown }).error : undefined;
+      if (typeof err === "string" && err.trim()) msg = err.trim();
     } catch {
-      msg = raw || msg;
+      // not JSON: keep the raw text
     }
     throw new Error(msg);
   }
