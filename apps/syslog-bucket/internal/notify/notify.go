@@ -29,6 +29,7 @@ const (
 	logRetention   = 7 * 24 * time.Hour
 	dropFlushEvery = 10 * time.Second
 	httpTimeout    = 10 * time.Second
+	testTimeout    = 25 * time.Second // bounds the UI's synchronous "send test"
 )
 
 var severityNames = []string{"emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"}
@@ -45,6 +46,10 @@ type Dispatcher struct {
 	client *http.Client
 	queue  chan job
 
+	// allowLoopback disables the webhook dialer's loopback/link-local guard;
+	// tests set it to reach httptest servers.
+	allowLoopback bool
+
 	mu       sync.RWMutex
 	channels map[int64]store.Channel
 	limiters map[int64]*limiter
@@ -59,14 +64,15 @@ type Dispatcher struct {
 type dropKey struct{ channelID, ruleID int64 }
 
 func New(st *store.Store) *Dispatcher {
-	return &Dispatcher{
+	d := &Dispatcher{
 		st:       st,
-		client:   &http.Client{Timeout: httpTimeout},
 		queue:    make(chan job, queueDepth),
 		channels: map[int64]store.Channel{},
 		limiters: map[int64]*limiter{},
 		drops:    map[dropKey]int{},
 	}
+	d.client = d.newHTTPClient()
+	return d
 }
 
 // Reload refreshes the channel snapshot from the database. The API calls it
@@ -224,6 +230,8 @@ func (d *Dispatcher) handle(ctx context.Context, j job) {
 // TestSend delivers a synthetic entry to a channel synchronously, bypassing
 // the rate limiter — backs the UI's "send test" button.
 func (d *Dispatcher) TestSend(ctx context.Context, ch store.Channel) error {
+	ctx, cancel := context.WithTimeout(ctx, testTimeout)
+	defer cancel()
 	e := store.Entry{
 		ReceivedAt: time.Now(),
 		Severity:   4,
@@ -250,7 +258,8 @@ func summary(e store.Entry) string {
 		sev = severityNames[e.Severity]
 	}
 	msg := truncateRunes(e.Msg, 300)
-	s := fmt.Sprintf("[%s] %s %s: %s", sev, e.Host, e.AppName, msg)
+	// Host/app are device-supplied: keep the summary on one line.
+	s := fmt.Sprintf("[%s] %s %s: %s", sev, headerValue(e.Host), headerValue(e.AppName), msg)
 	if len(e.Mitre) > 0 {
 		s += " · MITRE " + joinComma(e.Mitre)
 	}

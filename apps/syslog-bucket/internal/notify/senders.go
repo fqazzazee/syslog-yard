@@ -1,19 +1,28 @@
 package notify
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/smtp"
+	"net/url"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
+
+// smtpTimeout bounds a whole SMTP conversation (dial through QUIT).
+const smtpTimeout = 20 * time.Second
 
 // deliver routes an entry to a channel by kind.
 func (d *Dispatcher) deliver(ctx context.Context, ch store.Channel, e store.Entry, text string) error {
@@ -23,10 +32,56 @@ func (d *Dispatcher) deliver(ctx context.Context, ch store.Channel, e store.Entr
 	case "slack":
 		return d.sendChat(ctx, ch, text)
 	case "smtp":
-		return d.sendSMTP(ch, e, text)
+		return d.sendSMTP(ctx, ch, e, text)
 	default:
 		return fmt.Errorf("unknown channel kind %q", ch.Kind)
 	}
+}
+
+// newHTTPClient builds the webhook client: no redirect following (a 3xx is
+// reported as a failure, never chased to another host) and a dialer that
+// refuses loopback / link-local / unspecified destinations. RFC 1918 ranges
+// stay reachable — webhook sinks commonly live on the compose network.
+func (d *Dispatcher) newHTTPClient() *http.Client {
+	dialer := &net.Dialer{Timeout: httpTimeout, Control: d.dialControl}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.DialContext = dialer.DialContext
+	return &http.Client{
+		Timeout:   httpTimeout,
+		Transport: tr,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// errBlockedAddr is returned when a webhook resolves to a forbidden address.
+var errBlockedAddr = errors.New("destination address not allowed")
+
+// dialControl runs after DNS resolution for every connection attempt, so it
+// sees the actual IP being dialed (no TOCTOU between resolve and connect).
+func (d *Dispatcher) dialControl(_, address string, _ syscall.RawConn) error {
+	if d.allowLoopback {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return fmt.Errorf("%w: %s", errBlockedAddr, host)
+	}
+	if blockedAddr(ip) {
+		return fmt.Errorf("%w: %s", errBlockedAddr, ip)
+	}
+	return nil
+}
+
+func blockedAddr(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
 }
 
 type webhookConfig struct {
@@ -65,20 +120,33 @@ func (d *Dispatcher) sendChat(ctx context.Context, ch store.Channel, text string
 	return d.post(ctx, cfg.URL, "application/json", body)
 }
 
-func (d *Dispatcher) post(ctx context.Context, url, contentType string, body []byte) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(body)))
+// post sends one webhook request. Errors carry only the status code or the
+// transport failure — never the response body (which would reflect whatever
+// an internal endpoint returned into the API and notification_log) and never
+// the URL (Slack/Teams webhook URLs embed their secret token).
+func (d *Dispatcher) post(ctx context.Context, rawURL, contentType string, body []byte) error {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return errors.New("webhook url must be an http(s) URL")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return errors.New("webhook url is invalid")
 	}
 	req.Header.Set("Content-Type", contentType)
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return err
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			err = uerr.Err
+		}
+		return fmt.Errorf("webhook request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	// Drain a little so the connection can be reused; the content is ignored.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode >= 300 {
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
-		return fmt.Errorf("webhook returned %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+		return fmt.Errorf("webhook returned %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -94,8 +162,9 @@ type smtpConfig struct {
 }
 
 // sendSMTP composes and sends an email. STARTTLS (587) is the default;
-// "tls" dials implicit TLS (465); "none" sends in the clear (lab only).
-func (d *Dispatcher) sendSMTP(ch store.Channel, e store.Entry, text string) error {
+// "tls" dials implicit TLS (465); "none" sends in the clear (lab only). The
+// whole conversation is bounded by smtpTimeout and aborted with ctx.
+func (d *Dispatcher) sendSMTP(ctx context.Context, ch store.Channel, e store.Entry, text string) error {
 	var cfg smtpConfig
 	if err := json.Unmarshal(ch.Config, &cfg); err != nil {
 		return err
@@ -107,7 +176,7 @@ func (d *Dispatcher) sendSMTP(ch store.Channel, e store.Entry, text string) erro
 		cfg.Port = 587
 	}
 	subject := fmt.Sprintf("[syslog-yard] %s — %s %s", strings.TrimSpace(severityName(e.Severity)), e.Host, e.AppName)
-	msg := buildMessage(cfg.From, cfg.To, subject, text+"\r\n\r\n"+e.Msg)
+	msg := buildMessage(cfg.From, cfg.To, subject, text+"\n\n"+e.Msg)
 	addr := net.JoinHostPort(cfg.Host, fmt.Sprint(cfg.Port))
 
 	var auth smtp.Auth
@@ -115,28 +184,54 @@ func (d *Dispatcher) sendSMTP(ch store.Channel, e store.Entry, text string) erro
 		auth = smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
 	}
 
-	if cfg.TLS == "tls" {
-		return sendImplicitTLS(addr, cfg.Host, auth, cfg.From, cfg.To, msg)
-	}
-	// STARTTLS (when offered) and plain are both handled by SendMail.
-	return smtp.SendMail(addr, auth, cfg.From, cfg.To, msg)
-}
-
-// sendImplicitTLS handles port-465 style servers that expect TLS from the
-// first byte (SendMail can't do this).
-func sendImplicitTLS(addr, host string, auth smtp.Auth, from string, to []string, msg []byte) error {
-	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: httpTimeout}, "tcp", addr, &tls.Config{ServerName: host})
+	ctx, cancel := context.WithTimeout(ctx, smtpTimeout)
+	defer cancel()
+	conn, err := (&net.Dialer{Timeout: httpTimeout}).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}
+	defer conn.Close()
+	deadline, _ := ctx.Deadline()
+	if err := conn.SetDeadline(deadline); err != nil {
+		return err
+	}
+	// Cancelling ctx (shutdown, client gone) aborts a blocked read/write.
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stop()
+
+	if cfg.TLS == "tls" {
+		tc := tls.Client(conn, &tls.Config{ServerName: cfg.Host})
+		if err := tc.HandshakeContext(ctx); err != nil {
+			return err
+		}
+		conn = tc
+	}
+	return smtpConverse(conn, cfg.Host, cfg.TLS != "tls" && cfg.TLS != "none", auth, cfg.From, cfg.To, msg)
+}
+
+// smtpConverse runs the SMTP exchange on an established connection, upgrading
+// with STARTTLS when asked and offered (as smtp.SendMail does).
+func smtpConverse(conn net.Conn, host string, startTLS bool, auth smtp.Auth, from string, to []string, msg []byte) error {
 	c, err := smtp.NewClient(conn, host)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
+	if err := c.Hello("localhost"); err != nil {
+		return err
+	}
+	if startTLS {
+		if ok, _ := c.Extension("STARTTLS"); ok {
+			if err := c.StartTLS(&tls.Config{ServerName: host}); err != nil {
+				return err
+			}
+		}
+	}
 	if auth != nil {
-		if err := c.Auth(auth); err != nil {
-			return err
+		if ok, _ := c.Extension("AUTH"); ok {
+			if err := c.Auth(auth); err != nil {
+				return err
+			}
 		}
 	}
 	if err := c.Mail(from); err != nil {
@@ -160,15 +255,36 @@ func sendImplicitTLS(addr, host string, auth smtp.Auth, from string, to []string
 	return c.Quit()
 }
 
+// headerValue strips CR/LF (and other control characters) so device-supplied
+// text can never start a new header line.
+func headerValue(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' || r == 0 {
+			return ' '
+		}
+		if (r < 0x20 && r != '\t') || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func buildMessage(from string, to []string, subject, body string) []byte {
+	rcpts := make([]string, len(to))
+	for i, t := range to {
+		rcpts[i] = headerValue(t)
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", from)
-	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(to, ", "))
-	fmt.Fprintf(&b, "Subject: %s\r\n", subject)
+	fmt.Fprintf(&b, "From: %s\r\n", headerValue(from))
+	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(rcpts, ", "))
+	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", headerValue(subject)))
 	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
 	b.WriteString("\r\n")
+	// Normalize every line ending (CRLF, bare CR, bare LF) to CRLF.
+	body = strings.ReplaceAll(body, "\r\n", "\n")
+	body = strings.ReplaceAll(body, "\r", "\n")
 	b.WriteString(strings.ReplaceAll(body, "\n", "\r\n"))
 	return []byte(b.String())
 }
