@@ -205,6 +205,20 @@ func TestHealthzIsPublic(t *testing.T) {
 	}
 }
 
+func TestAllowAnonymous(t *testing.T) {
+	bucket := fakeBucket(t)
+	g := New(bucket.URL, false)
+	g.AllowAnonymous("/api/certs/pem")
+	h := g.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }))
+	for path, want := range map[string]int{"/api/certs/pem": 200, "/api/certs": 401} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if w.Code != want {
+			t.Errorf("GET %s without a session: got %d, want %d", path, w.Code, want)
+		}
+	}
+}
+
 func TestLoginBodyTooLarge(t *testing.T) {
 	bucket := fakeBucket(t)
 	mux := http.NewServeMux()

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Dialog } from "../../../shared/web/src/Dialog";
 import { errorText } from "../../../shared/web/src/http";
-import { Banner, Button } from "../../../shared/web/src/ui";
+import { Banner, Button, Field } from "../../../shared/web/src/ui";
 import { api, type Job, type PresetSummary } from "./api";
 
 const DEFAULTS: Partial<Job> = {
@@ -11,6 +11,8 @@ const DEFAULTS: Partial<Job> = {
   port: 514,
   transport: "udp",
   tlsInsecure: false,
+  tlsCA: "",
+  tlsServerName: "",
   format: "",
   rate: 5,
   rateMode: "steady",
@@ -29,6 +31,8 @@ const DEFAULTS: Partial<Job> = {
 export function JobForm(props: {
   initial: Partial<Job>;
   presets: PresetSummary[];
+  // the server can fetch the valve's certificate (HOSE_VALVE_URL is set)
+  canTrustValve?: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -36,6 +40,8 @@ export function JobForm(props: {
   const [cfg, setCfg] = useState<Partial<Job>>({ ...DEFAULTS, ...props.initial });
   const [samples, setSamples] = useState<string[]>([]);
   const [error, setError] = useState("");
+  const [trustNote, setTrustNote] = useState("");
+  const [trusting, setTrusting] = useState(false);
 
   useEffect(() => {
     if (!cfg.preset && props.presets.length > 0) {
@@ -53,6 +59,24 @@ export function JobForm(props: {
       .then((r) => setSamples(r.samples))
       .catch((e: unknown) => setError(errorText(e)));
   };
+
+  // Fetch the valve's public certificate through the hose server and pin it.
+  const trustValve = () => {
+    setError("");
+    setTrustNote("");
+    setTrusting(true);
+    api
+      .valveCert()
+      .then((c) => {
+        setCfg((cur) => ({ ...cur, tlsCA: c.pem, tlsInsecure: false }));
+        const names = c.names.length > 0 ? c.names.join(", ") : c.subject;
+        setTrustNote(`Pinned the valve's certificate (valid for ${names}; expires ${c.notAfter.slice(0, 10)}).`);
+      })
+      .catch((e: unknown) => setError(errorText(e)))
+      .finally(() => setTrusting(false));
+  };
+
+  const hasCA = (cfg.tlsCA ?? "").trim() !== "";
 
   const save = () => {
     setError("");
@@ -133,17 +157,73 @@ export function JobForm(props: {
               <option value="raw">Raw (PRI + payload)</option>
             </select>
           </label>
-          {cfg.transport === "tls" && (
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={cfg.tlsInsecure ?? false}
-                onChange={(e) => set("tlsInsecure", e.target.checked)}
-              />
-              Skip certificate verification (lab)
-            </label>
-          )}
         </div>
+
+        {cfg.transport === "tls" && (
+          <>
+            <h3>TLS</h3>
+            <div className="form-stack">
+              <Field
+                label="Trusted CA or certificate (PEM)"
+                help={
+                  <>
+                    Verify the receiver against this CA bundle, or pin its own certificate, instead of the
+                    system roots. Paste certificates only, never a private key. Leave empty to use the
+                    system roots.
+                  </>
+                }
+              >
+                <textarea
+                  className="mono"
+                  rows={5}
+                  spellCheck={false}
+                  value={cfg.tlsCA ?? ""}
+                  placeholder={"-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----"}
+                  disabled={cfg.tlsInsecure}
+                  onChange={(e) => {
+                    setTrustNote("");
+                    set("tlsCA", e.target.value);
+                  }}
+                />
+              </Field>
+              {props.canTrustValve && (
+                <div>
+                  <Button onClick={trustValve} disabled={trusting || cfg.tlsInsecure}>
+                    {trusting ? "Fetching…" : "Trust valve's certificate"}
+                  </Button>
+                  <p className="field-help">
+                    Fetches syslog-valve's public certificate (generate it in the valve's TLS IN node first)
+                    and pins it above.
+                  </p>
+                </div>
+              )}
+              {trustNote && <Banner kind="success">{trustNote}</Banner>}
+              <Field
+                label="Server name"
+                help="Name the certificate is checked against, when it differs from the destination host (e.g. syslog-valve when sending to an IP)."
+              >
+                <input
+                  value={cfg.tlsServerName ?? ""}
+                  placeholder={cfg.host || "(destination host)"}
+                  disabled={cfg.tlsInsecure}
+                  onChange={(e) => set("tlsServerName", e.target.value)}
+                />
+              </Field>
+              <Field
+                inline
+                label="Skip certificate verification (lab)"
+                help={hasCA ? "Clear the trusted certificate to skip verification instead." : undefined}
+              >
+                <input
+                  type="checkbox"
+                  checked={cfg.tlsInsecure ?? false}
+                  disabled={hasCA}
+                  onChange={(e) => set("tlsInsecure", e.target.checked)}
+                />
+              </Field>
+            </div>
+          </>
+        )}
 
         <h3>Rate</h3>
         <div className="form-grid">

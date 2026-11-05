@@ -75,6 +75,7 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 		writeJSON(w, mitre.Get())
 	})
 	s.mux.HandleFunc("GET /api/certs", s.certStatus)
+	s.mux.HandleFunc("GET /api/certs/pem", s.certPEM)
 	s.mux.HandleFunc("POST /api/certs/selfsigned", s.certGenerate)
 	s.mux.HandleFunc("GET /api/tail", s.tail)
 	s.mux.HandleFunc("GET /api/notify/log", s.notifyLog)
@@ -90,6 +91,9 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 	if guard == nil {
 		guard = yardauth.New("", false)
 	}
+	// The certificate is public (every TLS client receives it in the
+	// handshake); syslog-hose fetches it server-side to trust it.
+	guard.AllowAnonymous("/api/certs/pem")
 	guard.Routes(s.mux)
 	s.handler = secure.Headers(guard.Middleware(bodyLimits.Wrap(s.mux)))
 	return s
@@ -458,6 +462,23 @@ func (s *Server) getHints(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) certStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, certs.Inspect(codegen.CertFile))
+}
+
+// certPEM serves the public certificate of the valve's TLS IN ports as
+// PEM, so senders (syslog-hose's "Trust valve's certificate") can pin it.
+// Only CERTIFICATE blocks are ever served, never the key.
+func (s *Server) certPEM(w http.ResponseWriter, _ *http.Request) {
+	data, err := certs.PublicPEM(codegen.CertFile)
+	if errors.Is(err, os.ErrNotExist) {
+		httpError(w, http.StatusNotFound, fmt.Errorf("the valve has no TLS certificate yet: generate one in a TLS IN node's panel"))
+		return
+	}
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-pem-file")
+	w.Write(data)
 }
 
 // certGenerate (re)creates the valve's self-signed TLS identity. SANs

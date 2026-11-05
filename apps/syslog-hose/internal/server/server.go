@@ -19,12 +19,15 @@ import (
 
 // Server wires the manager and preset store into an http.Handler.
 type Server struct {
-	mgr     *engine.Manager
-	store   *preset.Store
-	ui      fs.FS
-	hints   map[string]string
-	mux     *http.ServeMux
-	handler http.Handler
+	mgr   *engine.Manager
+	store *preset.Store
+	ui    fs.FS
+	hints map[string]string
+	mux   *http.ServeMux
+	// valveURL is a syslog-valve API base reachable from this process
+	// (SetValveURL); "" disables GET /api/valve-cert.
+	valveURL string
+	handler  http.Handler
 }
 
 // New builds the handler. ui is the built web app (may be nil in tests);
@@ -62,6 +65,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/preview", s.preview)
 	s.mux.HandleFunc("GET /api/stream", s.stream)
 	s.mux.HandleFunc("GET /api/hints", s.getHints)
+	s.mux.HandleFunc("GET /api/valve-cert", s.valveCert)
 	// liveness for container healthchecks; public in yardauth
 	s.mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true, "status": "ok"})

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/syslog-yard/shared/yardauth"
 	"github.com/syslog-yard/syslog-valve/internal/codegen"
 	"github.com/syslog-yard/syslog-valve/internal/graph"
 	"github.com/syslog-yard/syslog-valve/internal/notify"
@@ -242,6 +244,26 @@ func TestPutGraphRejectsHostileInput(t *testing.T) {
 	big := bytes.Repeat([]byte(" "), maxGraphBody+1)
 	if rec := e.do("PUT", "/api/graph", big); rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized body: %d", rec.Code)
+	}
+}
+
+// The public certificate is reachable without a session (syslog-hose
+// fetches it server-side); the rest of /api/certs is not.
+func TestCertPEMIsPublic(t *testing.T) {
+	e := newEnv(t)
+	srv := New(e.sup, e.dataDir, nil, nil, nil, e.rotator, nil, e.nd, yardauth.New("http://127.0.0.1:1", false))
+	for path, guarded := range map[string]bool{"/api/certs/pem": false, "/api/certs": true} {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if isAuthErr := rec.Code == http.StatusUnauthorized; isAuthErr != guarded {
+			t.Errorf("GET %s without a session: %d %s", path, rec.Code, rec.Body)
+		}
+	}
+	if _, err := os.Stat(codegen.CertFile); errors.Is(err, os.ErrNotExist) {
+		rec := e.do("GET", "/api/certs/pem", nil)
+		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "no TLS certificate") {
+			t.Fatalf("no certificate yet: %d %s", rec.Code, rec.Body)
+		}
 	}
 }
 
