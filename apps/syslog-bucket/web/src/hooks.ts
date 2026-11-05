@@ -2,10 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import type { Entry } from "./types";
 
 // useLiveTail keeps a WebSocket open to /api/ws (reconnecting with backoff)
-// and feeds matching entries to onEntry. Pass url=null to pause.
-export function useLiveTail(url: string | null, onEntry: (e: Entry) => void): boolean {
+// and feeds matching entries to onEntry. Pass url=null to pause. onOpen runs
+// on every (re)connect so the caller can backfill whatever it missed while
+// the socket was down — the server only pushes entries from then on.
+export function useLiveTail(
+  url: string | null,
+  onEntry: (e: Entry) => void,
+  onOpen?: () => void,
+): boolean {
   const cb = useRef(onEntry);
   cb.current = onEntry;
+  const openCb = useRef(onOpen);
+  openCb.current = onOpen;
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -23,8 +31,10 @@ export function useLiveTail(url: string | null, onEntry: (e: Entry) => void): bo
       ws.onopen = () => {
         delay = 1000;
         setOpen(true);
+        openCb.current?.();
       };
       ws.onmessage = (ev) => {
+        if (stopped) return;
         try {
           const msg = JSON.parse(ev.data as string) as { type: string; entry: Entry };
           if (msg.type === "entry") cb.current(msg.entry);

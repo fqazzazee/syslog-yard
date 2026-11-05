@@ -64,6 +64,37 @@ export interface RuleSeed {
 }
 
 const MAX_ROWS = 2000;
+const OLDER_PAGE = 200;
+// A reconnect backfill fetches at most this many missed rows (the server's
+// page cap); a bigger gap falls back to a full reload.
+const BACKFILL_PAGE = 1000;
+
+// mergeEntries adds incoming rows to prev, skipping ids already present (the
+// existing copy wins: it may carry a triage edit). The result stays in
+// newest-first id order; cap trims the oldest rows. Returns prev unchanged
+// when nothing new arrived, so React can skip the render.
+function mergeEntries(prev: Entry[], incoming: Entry[], cap?: number): Entry[] {
+  if (incoming.length === 0) return prev;
+  const seen = new Set<number>();
+  for (const e of prev) seen.add(e.id);
+  const fresh: Entry[] = [];
+  for (const e of incoming) {
+    if (seen.has(e.id)) continue;
+    seen.add(e.id);
+    fresh.push(e);
+  }
+  if (fresh.length === 0) return prev;
+  fresh.sort((a, b) => b.id - a.id);
+  let out: Entry[];
+  if (prev.length === 0 || fresh[fresh.length - 1].id > prev[0].id) {
+    out = [...fresh, ...prev]; // the common case: everything new is newer
+  } else if (fresh[0].id < prev[prev.length - 1].id) {
+    out = [...prev, ...fresh]; // an older page
+  } else {
+    out = [...prev, ...fresh].sort((a, b) => b.id - a.id);
+  }
+  return cap !== undefined && out.length > cap ? out.slice(0, cap) : out;
+}
 
 const initialFilters: Filters = {
   q: "",
@@ -130,6 +161,22 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const entriesRef = useRef<Entry[]>([]);
   entriesRef.current = entries;
+  // Every full reload (filters/selection change) starts a new generation;
+  // async results from an older generation are dropped.
+  const genRef = useRef(0);
+  // Whether this generation's first page has landed. Until then live
+  // arrivals are held in pendingLive and merged into that page.
+  const loadedRef = useRef(false);
+  const pendingLive = useRef<Entry[]>([]);
+  const frameRef = useRef<number | null>(null);
+  // The socket (re)connected before the first page landed: backfill after.
+  const backfillAfterLoad = useRef(false);
+  const [reloadTick, setReloadTick] = useState(0);
+  const olderBusy = useRef(false);
+  const [olderLoading, setOlderLoading] = useState(false);
+  // "Load older" hit the end: the oldest id at that moment. Derived rather
+  // than a flag so trimming the list (live cap) re-enables the button.
+  const [olderEndId, setOlderEndId] = useState<number | null>(null);
 
   const readOnly = me.role === "viewer";
 
@@ -191,26 +238,73 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
   // A column sort returns one ranked page; time sort streams + paginates.
   const pageLimit = filters.sort === "time" ? 200 : 1000;
 
+  // Backfill rows that arrived while the live socket was down (or before it
+  // first opened). Uses time order with after_id regardless of the column
+  // sort, since only that mode supports it; a gap wider than one page means
+  // the list is too far behind, so reload it instead.
+  const backfill = useCallback(async () => {
+    const gen = genRef.current;
+    const known = [...pendingLive.current, ...entriesRef.current];
+    const newest = known.reduce((m, e) => Math.max(m, e.id), 0);
+    const timeFilters: Filters = { ...filters, sort: "time", desc: true };
+    try {
+      const rows =
+        newest > 0
+          ? await fetchEntries(timeFilters, selection, { afterId: newest, limit: BACKFILL_PAGE })
+          : await fetchEntries(timeFilters, selection, { limit: OLDER_PAGE });
+      if (gen !== genRef.current) return;
+      if (newest > 0 && rows.length >= BACKFILL_PAGE) {
+        setReloadTick((t) => t + 1);
+        return;
+      }
+      setEntries((prev) => mergeEntries(prev, rows, MAX_ROWS));
+    } catch {
+      // Best effort: the socket is up again and the next reload catches up.
+    }
+  }, [filters, selection]);
+  const backfillRef = useRef(backfill);
+  backfillRef.current = backfill;
+
   // Full reload when filters or the selected bucket/tag/technique change.
   useEffect(() => {
     if (isMatrix) return;
-    let stale = false;
+    const gen = ++genRef.current;
+    loadedRef.current = false;
+    pendingLive.current = [];
+    backfillAfterLoad.current = false;
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    olderBusy.current = false;
+    setOlderLoading(false);
+    setOlderEndId(null);
     fetchEntries(filters, selection, { limit: pageLimit })
       .then((rows) => {
-        if (stale) return;
-        setEntries(rows);
+        if (gen !== genRef.current) return;
+        // Merge (not replace) so live arrivals that beat this response stay.
+        const buffered = pendingLive.current;
+        pendingLive.current = [];
+        loadedRef.current = true;
+        const merged = mergeEntries(mergeEntries([], rows), buffered, MAX_ROWS);
+        setEntries(merged);
+        if (filters.sort === "time" && rows.length < pageLimit && merged.length > 0) {
+          setOlderEndId(merged[merged.length - 1].id);
+        }
         setError(null);
+        if (backfillAfterLoad.current) {
+          backfillAfterLoad.current = false;
+          void backfillRef.current();
+        }
       })
-      .catch((e) => !stale && setError(String(e)));
-    return () => {
-      stale = true;
-    };
-  }, [filters, selection, isMatrix, pageLimit]);
+      .catch((e) => gen === genRef.current && setError(String(e)));
+  }, [filters, selection, isMatrix, pageLimit, reloadTick]);
 
   // Display order is computed client-side so live arrivals slot into the
   // chosen sort without a refetch (the server still decides which rows the
-  // page contains).
+  // page contains). entries is kept newest-first, so time order is free.
   const sortedEntries = useMemo(() => {
+    if (filters.sort === "time") return filters.desc ? entries : [...entries].reverse();
     const dir = filters.desc ? -1 : 1;
     const tiebreak = (a: Entry, b: Entry) => b.id - a.id;
     const arr = [...entries];
@@ -254,15 +348,36 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
   };
 
   // Live tail: the server pushes entries matching the same condition the
-  // list query uses; prepend them as they arrive.
+  // list query uses. Arrivals are batched per animation frame (one merge and
+  // one re-sort per frame, not per message) and deduped by id.
   const wsURL = useMemo(
     () => (live && !isMatrix ? liveTailURL(filters, selection) : null),
     [live, filters, selection, isMatrix],
   );
+  const flushLive = useCallback(() => {
+    frameRef.current = null;
+    if (!loadedRef.current) return;
+    const batch = pendingLive.current;
+    pendingLive.current = [];
+    setEntries((prev) => mergeEntries(prev, batch, MAX_ROWS));
+  }, []);
   const wsOpen = useLiveTail(
     wsURL,
-    useCallback((e: Entry) => {
-      setEntries((prev) => (prev.some((p) => p.id === e.id) ? prev : [e, ...prev].slice(0, MAX_ROWS)));
+    useCallback(
+      (e: Entry) => {
+        const buf = pendingLive.current;
+        buf.push(e);
+        // Frames don't run in a hidden tab; don't let the buffer grow forever.
+        if (buf.length > MAX_ROWS * 2) pendingLive.current = buf.slice(-MAX_ROWS);
+        if (loadedRef.current && frameRef.current === null) {
+          frameRef.current = requestAnimationFrame(flushLive);
+        }
+      },
+      [flushLive],
+    ),
+    useCallback(() => {
+      if (loadedRef.current) void backfillRef.current();
+      else backfillAfterLoad.current = true;
     }, []),
   );
 
@@ -275,15 +390,31 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
 
   const loadOlder = async () => {
     const current = entriesRef.current;
-    if (current.length === 0) return;
-    const oldest = current[current.length - 1].id;
+    if (current.length === 0 || olderBusy.current) return;
+    const gen = genRef.current;
+    const oldest = current[current.length - 1].id; // entries are newest-first
+    olderBusy.current = true;
+    setOlderLoading(true);
     try {
-      const older = await fetchEntries(filters, selection, { beforeId: oldest });
-      setEntries((prev) => [...prev, ...older]);
+      const older = await fetchEntries(filters, selection, { beforeId: oldest, limit: OLDER_PAGE });
+      if (gen !== genRef.current) return; // the query changed meanwhile
+      const merged = mergeEntries(entriesRef.current, older);
+      setEntries((prev) => mergeEntries(prev, older));
+      if (older.length < OLDER_PAGE && merged.length > 0) setOlderEndId(merged[merged.length - 1].id);
     } catch (e) {
-      setError(String(e));
+      if (gen === genRef.current) setError(String(e));
+    } finally {
+      if (gen === genRef.current) {
+        olderBusy.current = false;
+        setOlderLoading(false);
+      }
     }
   };
+  const olderState: "idle" | "loading" | "end" = olderLoading
+    ? "loading"
+    : olderEndId !== null && entries.length > 0 && entries[entries.length - 1].id === olderEndId
+      ? "end"
+      : "idle";
 
   // Reflect a triage change (status/priority/tags) in the list and the
   // detail pane without a refetch.
@@ -463,6 +594,7 @@ function Workspace({ me, onSignOut }: { me: User; onSignOut: () => void }) {
                   onSort={onSort}
                   onSelect={setSelected}
                   onSelectTechnique={onSelectTechnique}
+                  olderState={olderState}
                   onLoadOlder={() => void loadOlder()}
                 />
                 {selected && (

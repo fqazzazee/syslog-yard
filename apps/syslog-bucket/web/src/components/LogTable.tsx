@@ -12,6 +12,7 @@ interface Props {
   onSort: (key: SortKey) => void;
   onSelect: (e: Entry) => void;
   onSelectTechnique: (id: string) => void;
+  olderState: "idle" | "loading" | "end";
   onLoadOlder: () => void;
 }
 
@@ -35,6 +36,7 @@ export default function LogTable({
   onSort,
   onSelect,
   onSelectTechnique,
+  olderState,
   onLoadOlder,
 }: Props) {
   // A clickable header: click toggles direction when already active, else
@@ -119,8 +121,12 @@ export default function LogTable({
         </tbody>
       </table>
       {timeSort && (
-        <button className="load-older" onClick={onLoadOlder}>
-          Load older entries
+        <button className="load-older" onClick={onLoadOlder} disabled={olderState !== "idle"}>
+          {olderState === "loading"
+            ? "Loading…"
+            : olderState === "end"
+              ? "No older entries"
+              : "Load older entries"}
         </button>
       )}
     </div>
