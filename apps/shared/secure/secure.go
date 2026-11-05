@@ -5,6 +5,7 @@
 package secure
 
 import (
+	"context"
 	"log/slog"
 	"mime"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 // contentSecurityPolicy for the embedded SPAs. Scripts are external,
@@ -78,6 +80,10 @@ type Policy struct {
 	// TrustedProxies are the peers (by RemoteAddr) whose X-Forwarded-Host
 	// is believed when comparing Origin against the request's host.
 	TrustedProxies []netip.Prefix
+	// TrustedHosts are proxies named by hostname: the syslog-hose and
+	// syslog-valve containers, whose addresses change on every restart.
+	// They are resolved when a request needs them and cached for hostTTL.
+	TrustedHosts []string
 }
 
 var (
@@ -91,13 +97,15 @@ var (
 // trusts less.
 func envPolicy() *Policy {
 	envOnce.Do(func() {
-		proxies, rejected := ParseTrustedProxies(os.Getenv("YARD_TRUSTED_PROXIES"))
+		proxies, hosts, rejected := ParseTrustedProxies(os.Getenv("YARD_TRUSTED_PROXIES"))
 		for _, r := range rejected {
-			slog.Warn("YARD_TRUSTED_PROXIES: ignoring entry that is not an IP or CIDR", "entry", r)
+			slog.Warn("YARD_TRUSTED_PROXIES: ignoring entry that is not an IP, CIDR or hostname", "entry", r)
 		}
+		warnSelfTrust(proxies)
 		envPol = &Policy{
 			TrustedOrigins: fields(os.Getenv("YARD_TRUSTED_ORIGINS")),
 			TrustedProxies: proxies,
+			TrustedHosts:   hosts,
 		}
 	})
 	return envPol
@@ -107,27 +115,135 @@ func envPolicy() *Policy {
 // reads it: parsed once, invalid entries logged and skipped.
 func TrustedProxies() []netip.Prefix { return envPolicy().TrustedProxies }
 
+// TrustedProxyHosts answers the hostnames in YARD_TRUSTED_PROXIES.
+func TrustedProxyHosts() []string { return envPolicy().TrustedHosts }
+
+// warnSelfTrust logs a trusted range that holds one of this process's own
+// addresses. Under rootless podman (pasta) and Docker's userland proxy, a
+// client connecting to a published port arrives from the container network
+// itself, often from the container's own address, so trusting the whole
+// yard subnet lets any client forge X-Forwarded-For. Loopback is exempt:
+// host-network installs legitimately trust a reverse proxy on 127.0.0.1.
+func warnSelfTrust(proxies []netip.Prefix) {
+	if len(proxies) == 0 {
+		return
+	}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return
+	}
+	for _, ia := range addrs {
+		n, ok := ia.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		a, ok := netip.AddrFromSlice(n.IP)
+		if !ok || a.Unmap().IsLoopback() {
+			continue
+		}
+		a = a.Unmap()
+		for _, p := range proxies {
+			if p.Contains(a) {
+				slog.Warn("YARD_TRUSTED_PROXIES covers this container's own network: "+
+					"clients reaching a published port can appear from it and forge X-Forwarded-For; "+
+					"name the proxies instead (e.g. syslog-hose syslog-valve)",
+					"entry", p.String(), "own_address", a.String())
+			}
+		}
+	}
+}
+
 func fields(s string) []string {
 	return strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' })
 }
 
-// ParseTrustedProxies parses the YARD_TRUSTED_PROXIES syntax: IP addresses
-// and CIDR prefixes separated by commas and/or whitespace. A bare address
-// becomes a single-host prefix (IPv4-mapped IPv6 unmapped). Entries that
-// parse as neither are returned in rejected, for the caller to report, and
-// left out: one typo narrows the trusted set instead of voiding it.
-func ParseTrustedProxies(v string) (proxies []netip.Prefix, rejected []string) {
+// ParseTrustedProxies parses the YARD_TRUSTED_PROXIES syntax: IP addresses,
+// CIDR prefixes and hostnames separated by commas and/or whitespace. A bare
+// address becomes a single-host prefix (IPv4-mapped IPv6 unmapped); a
+// hostname (e.g. syslog-hose) is returned in hosts, to be resolved when
+// used. Entries that are none of these are returned in rejected, for the
+// caller to report, and left out: one typo narrows the trusted set instead
+// of voiding it.
+func ParseTrustedProxies(v string) (proxies []netip.Prefix, hosts, rejected []string) {
 	for _, s := range fields(v) {
 		if p, err := netip.ParsePrefix(s); err == nil {
 			proxies = append(proxies, p.Masked())
 		} else if a, err := netip.ParseAddr(s); err == nil {
 			a = a.Unmap()
 			proxies = append(proxies, netip.PrefixFrom(a, a.BitLen()))
+		} else if validHostname(s) {
+			hosts = append(hosts, strings.ToLower(s))
 		} else {
 			rejected = append(rejected, s)
 		}
 	}
-	return proxies, rejected
+	return proxies, hosts, rejected
+}
+
+// validHostname reports whether s is a DNS name: dot-separated labels of
+// letters, digits and inner hyphens, at most 253 characters.
+func validHostname(s string) bool {
+	if s == "" || len(s) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(strings.TrimSuffix(s, "."), ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// Trusted hostnames are resolved on demand and cached: long enough that a
+// busy login page doesn't query DNS per request, short enough that a
+// restarted container's new address is picked up quickly. A failed lookup
+// trusts nobody and is retried sooner.
+const (
+	hostTTL    = 30 * time.Second
+	hostNegTTL = 5 * time.Second
+)
+
+type hostEntry struct {
+	addrs []netip.Addr
+	until time.Time
+}
+
+var (
+	hostMu    sync.Mutex
+	hostCache = map[string]hostEntry{}
+	// lookupHost is swapped out by tests.
+	lookupHost = func(ctx context.Context, host string) ([]netip.Addr, error) {
+		return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	}
+)
+
+func resolveHost(host string) []netip.Addr {
+	now := time.Now()
+	hostMu.Lock()
+	e, ok := hostCache[host]
+	hostMu.Unlock()
+	if ok && now.Before(e.until) {
+		return e.addrs
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	addrs, err := lookupHost(ctx, host)
+	ttl := hostTTL
+	if err != nil {
+		addrs, ttl = nil, hostNegTTL
+	}
+	for i := range addrs {
+		addrs[i] = addrs[i].Unmap()
+	}
+	hostMu.Lock()
+	hostCache[host] = hostEntry{addrs: addrs, until: now.Add(ttl)}
+	hostMu.Unlock()
+	return addrs
 }
 
 // Guard wraps next with the cross-origin checks described on Policy.
@@ -257,7 +373,7 @@ func (p *Policy) fromTrustedProxy(r *http.Request) bool {
 }
 
 func (p *Policy) trusted(host string) bool {
-	if len(p.TrustedProxies) == 0 {
+	if len(p.TrustedProxies) == 0 && len(p.TrustedHosts) == 0 {
 		return false
 	}
 	a, err := netip.ParseAddr(host)
@@ -268,6 +384,13 @@ func (p *Policy) trusted(host string) bool {
 	for _, pr := range p.TrustedProxies {
 		if pr.Contains(a) {
 			return true
+		}
+	}
+	for _, h := range p.TrustedHosts {
+		for _, ha := range resolveHost(h) {
+			if ha == a {
+				return true
+			}
 		}
 	}
 	return false

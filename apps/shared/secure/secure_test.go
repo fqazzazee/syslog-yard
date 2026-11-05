@@ -1,11 +1,14 @@
 package secure
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 )
 
 func ok(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }
@@ -139,7 +142,7 @@ func TestHeadersSetsHardeningAndGuards(t *testing.T) {
 }
 
 func TestClientIP(t *testing.T) {
-	trusted, _ := ParseTrustedProxies("10.0.0.0/8")
+	trusted, _, _ := ParseTrustedProxies("10.0.0.0/8")
 	pol := &Policy{TrustedProxies: trusted}
 	cases := []struct{ remote, xff, want string }{
 		{"192.0.2.1:4000", "", "192.0.2.1"},
@@ -163,7 +166,7 @@ func TestClientIP(t *testing.T) {
 }
 
 func TestParseTrustedProxies(t *testing.T) {
-	got, rejected := ParseTrustedProxies("10.0.0.0/8, 192.0.2.7 ::1,bogus\t10.0.0.0/33 ::ffff:192.0.2.9,,")
+	got, hosts, rejected := ParseTrustedProxies("10.0.0.0/8, 192.0.2.7 ::1,bad_entry!\t10.0.0.0/33 ::ffff:192.0.2.9,,Syslog-Hose syslog-valve.yard.lan -bad-")
 	if len(got) != 4 {
 		t.Fatalf("got %v", got)
 	}
@@ -173,10 +176,74 @@ func TestParseTrustedProxies(t *testing.T) {
 	if got[3] != netip.MustParsePrefix("192.0.2.9/32") {
 		t.Fatalf("mapped address not unmapped: %v", got[3])
 	}
-	if len(rejected) != 2 || rejected[0] != "bogus" || rejected[1] != "10.0.0.0/33" {
+	if len(hosts) != 2 || hosts[0] != "syslog-hose" || hosts[1] != "syslog-valve.yard.lan" {
+		t.Fatalf("hosts = %q", hosts)
+	}
+	if len(rejected) != 3 || rejected[0] != "bad_entry!" || rejected[1] != "10.0.0.0/33" || rejected[2] != "-bad-" {
 		t.Fatalf("rejected = %q", rejected)
 	}
-	if got, rejected := ParseTrustedProxies(""); got != nil || rejected != nil {
-		t.Fatalf("empty: %v %v", got, rejected)
+	if got, hosts, rejected := ParseTrustedProxies(""); got != nil || hosts != nil || rejected != nil {
+		t.Fatalf("empty: %v %v %v", got, hosts, rejected)
+	}
+}
+
+// Proxies named by hostname (the hose and valve containers) are trusted at
+// whatever address they currently resolve to, and only there: a client that
+// reaches the bucket directly, which under rootless podman shows up from
+// another address on the same network, cannot forge X-Forwarded-For.
+func TestClientIPTrustedHosts(t *testing.T) {
+	addrs := map[string][]netip.Addr{"syslog-hose": {netip.MustParseAddr("10.89.0.2")}}
+	lookups := 0
+	orig := lookupHost
+	lookupHost = func(_ context.Context, h string) ([]netip.Addr, error) {
+		lookups++
+		if a, ok := addrs[h]; ok {
+			return append([]netip.Addr(nil), a...), nil
+		}
+		return nil, errors.New("no such host")
+	}
+	t.Cleanup(func() {
+		lookupHost = orig
+		hostMu.Lock()
+		hostCache = map[string]hostEntry{}
+		hostMu.Unlock()
+	})
+	pol := &Policy{TrustedHosts: []string{"syslog-hose", "syslog-valve"}}
+	ip := func(remote, xff string) string {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = remote
+		r.Header.Set("X-Forwarded-For", xff)
+		return pol.ClientIP(r)
+	}
+	if got := ip("10.89.0.2:5000", "198.51.100.4"); got != "198.51.100.4" {
+		t.Errorf("via hose: got %s, want the forwarded client", got)
+	}
+	if got := ip("10.89.0.4:5000", "198.51.100.4"); got != "10.89.0.4" {
+		t.Errorf("direct from the yard network: got %s, want the peer (header ignored)", got)
+	}
+	// syslog-valve does not resolve: trusting nobody is the safe failure.
+	if got := ip("10.89.0.3:5000", "198.51.100.4"); got != "10.89.0.3" {
+		t.Errorf("unresolvable host: got %s, want the peer", got)
+	}
+	// Cached: further requests do not query DNS again.
+	before := lookups
+	ip("10.89.0.2:5000", "198.51.100.4")
+	if lookups != before {
+		t.Errorf("lookup not cached: %d -> %d", before, lookups)
+	}
+	// The hose restarts at a new address; once the cache entry expires the
+	// old address is no longer trusted.
+	addrs["syslog-hose"] = []netip.Addr{netip.MustParseAddr("10.89.0.9")}
+	hostMu.Lock()
+	for h, e := range hostCache {
+		e.until = time.Now().Add(-time.Second)
+		hostCache[h] = e
+	}
+	hostMu.Unlock()
+	if got := ip("10.89.0.2:5000", "198.51.100.4"); got != "10.89.0.2" {
+		t.Errorf("old hose address still trusted: got %s", got)
+	}
+	if got := ip("10.89.0.9:5000", "198.51.100.4"); got != "198.51.100.4" {
+		t.Errorf("new hose address not trusted: got %s", got)
 	}
 }
