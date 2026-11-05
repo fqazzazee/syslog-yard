@@ -82,6 +82,7 @@ export type SortKey = "time" | "severity" | "priority" | "host" | "app" | "devic
 
 export interface Stats {
   approx_total: number;
+  total_exact?: boolean; // approx_total is an exact count (newer servers)
   last_minute: number;
   ingest?: IngestStats; // newer servers
 }

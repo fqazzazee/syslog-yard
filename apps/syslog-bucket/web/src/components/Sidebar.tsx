@@ -5,7 +5,7 @@
 //
 // SidebarRail covers the collapsed icon rail, where the shell shows only the
 // bucket's sections: it adds what no section reaches (tags, the tag manager,
-// notification channels).
+// notification channels, and for admins the audit log).
 import type { ReactNode } from "react";
 import { Menu, type MenuItem } from "../../../../shared/web/src/Menu";
 import { IconButton } from "../../../../shared/web/src/ui";
@@ -262,12 +262,16 @@ export default function Sidebar({
 export function SidebarRail({
   tags,
   selection,
+  page,
+  me,
   readOnly,
   onManageTags,
   onManageChannels,
 }: {
   tags: Tag[];
   selection: Selection | null;
+  page: Page | null;
+  me: User;
   readOnly: boolean;
   onManageTags: () => void;
   onManageChannels: () => void;
@@ -305,6 +309,13 @@ export function SidebarRail({
             <Icon name="notifications" size={17} />
             <span className="nav-text">Notification channels</span>
           </button>
+        </li>
+      )}
+      {me.role === "admin" && (
+        <li>
+          <NavLink href={hrefFor("audit")} icon="history" active={page === "audit"} title="Audit log">
+            Audit log
+          </NavLink>
         </li>
       )}
     </ul>

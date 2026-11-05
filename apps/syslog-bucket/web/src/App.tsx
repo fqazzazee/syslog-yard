@@ -537,7 +537,8 @@ function Workspace({
   const statsMeta = stats && (
     <>
       <span>
-        ~{stats.approx_total.toLocaleString()} entries · {stats.last_minute}/min
+        {stats.total_exact ? "" : "~"}
+        {stats.approx_total.toLocaleString()} entries · {stats.last_minute}/min
       </span>
       {stats.ingest && <IngestHealth ingest={stats.ingest} />}
     </>
@@ -579,6 +580,8 @@ function Workspace({
         <SidebarRail
           tags={tags}
           selection={page ? null : selection}
+          page={page}
+          me={me}
           readOnly={readOnly}
           onManageTags={() => setModal({ kind: "tags" })}
           onManageChannels={() => setModal({ kind: "channels" })}
