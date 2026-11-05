@@ -6,7 +6,13 @@ export type Theme = "dark" | "light";
 const KEY = "yard-theme";
 
 export function getTheme(): Theme {
-  return localStorage.getItem(KEY) === "light" ? "light" : "dark";
+  // Storage access can throw (blocked site data, some private modes); this
+  // runs before first render, so it must never take the app down.
+  try {
+    return localStorage.getItem(KEY) === "light" ? "light" : "dark";
+  } catch {
+    return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  }
 }
 
 export function applyTheme(t: Theme): void {
@@ -25,6 +31,8 @@ export function toggleTheme(): Theme {
 }
 
 // Apply the saved theme once, before first render, to avoid a flash of dark.
-export function initTheme(): void {
+// tool selects that tool's accent hue (tokens.css :root[data-tool]).
+export function initTheme(tool?: "hose" | "valve" | "bucket"): void {
+  if (tool) document.documentElement.dataset.tool = tool;
   applyTheme(getTheme());
 }

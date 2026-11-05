@@ -83,6 +83,18 @@ export type SortKey = "time" | "severity" | "priority" | "host" | "app" | "devic
 export interface Stats {
   approx_total: number;
   last_minute: number;
+  ingest?: IngestStats; // newer servers
+}
+
+// IngestStats is the ingest pipeline's health (GET /api/stats).
+export interface IngestStats {
+  queue_depth: number; // entries waiting for the batcher
+  queue_capacity: number; // full = backpressure
+  inserted: number;
+  failed: number; // failed insert attempts (each retry counts)
+  dropped: number; // entries lost after being accepted
+  bad_records: number; // unparseable / unresolvable input records
+  retrying: boolean; // waiting out a database error
 }
 
 // Cond mirrors the backend condition AST (internal/rules). A node sets at
@@ -189,7 +201,10 @@ export interface Channel {
   id: number;
   name: string;
   kind: ChannelKind;
-  config: Record<string, unknown>;
+  // Kind-specific settings. Secrets are write-only: SMTP returns
+  // has_password instead of the password, and viewers get webhook URLs
+  // masked to the host plus has_url.
+  config: Record<string, unknown> & { has_url?: boolean; has_password?: boolean };
   enabled: boolean;
   rate_per_min: number;
 }

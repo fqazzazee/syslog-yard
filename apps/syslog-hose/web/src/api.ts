@@ -1,5 +1,6 @@
 // The auth/user-management slice (AuthUser, YardUser, the /api/auth and
 // /api/users calls) is shared suite-wide — see apps/shared/web.
+import { jsonInit, request } from "../../../shared/web/src/http";
 import { authApi } from "../../../shared/web/src/yardAuthApi";
 
 export type { AuthUser, YardUser } from "../../../shared/web/src/yardAuthApi";
@@ -50,50 +51,30 @@ export interface TailEvent {
   message: string;
 }
 
-async function req<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
-  if (!res.ok) {
-    // A 401 outside the auth endpoints means the session died mid-use;
-    // tell the app shell to fall back to the login screen.
-    if (res.status === 401 && !url.startsWith("/api/auth/")) {
-      window.dispatchEvent(new Event("auth-expired"));
-    }
-    let msg = `${res.status}`;
-    const raw = (await res.text().catch(() => "")).trim();
-    try {
-      const body = JSON.parse(raw);
-      msg = body.error || msg;
-    } catch {
-      msg = raw || msg;
-    }
-    throw new Error(msg);
-  }
-  if (res.status === 204) return undefined as T;
-  return res.json();
-}
-
-const json = (method: string, body: unknown): RequestInit => ({
-  method,
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(body),
-});
+const req = request;
+const json = jsonInit;
 
 export const api = {
   jobs: () => req<Job[]>("/api/jobs"),
   createJob: (cfg: Partial<Job>) => req<Job>("/api/jobs", json("POST", cfg)),
   updateJob: (id: string, cfg: Partial<Job>) =>
-    req<Job>(`/api/jobs/${id}`, json("PUT", cfg)),
-  deleteJob: (id: string) => req<void>(`/api/jobs/${id}`, { method: "DELETE" }),
-  startJob: (id: string) => req<void>(`/api/jobs/${id}/start`, { method: "POST" }),
-  stopJob: (id: string) => req<void>(`/api/jobs/${id}/stop`, { method: "POST" }),
+    req<Job>(`/api/jobs/${encodeURIComponent(id)}`, json("PUT", cfg)),
+  deleteJob: (id: string) => req<void>(`/api/jobs/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  startJob: (id: string) => req<void>(`/api/jobs/${encodeURIComponent(id)}/start`, { method: "POST" }),
+  stopJob: (id: string) => req<void>(`/api/jobs/${encodeURIComponent(id)}/stop`, { method: "POST" }),
   stopAll: () => req<void>("/api/jobs/stop-all", { method: "POST" }),
   presets: () => req<PresetSummary[]>("/api/presets"),
   preset: (name: string) =>
     req<{ name: string; builtin: boolean; yaml: string }>(
       `/api/presets/${encodeURIComponent(name)}`,
     ),
+  // Preset bodies are YAML, so this one stays text/plain.
   savePreset: (yaml: string) =>
-    req<{ name: string }>("/api/presets", { method: "POST", body: yaml }),
+    req<{ name: string }>("/api/presets", {
+      method: "POST",
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      body: yaml,
+    }),
   deletePreset: (name: string) =>
     req<void>(`/api/presets/${encodeURIComponent(name)}`, { method: "DELETE" }),
   hints: () => req<Record<string, string>>("/api/hints"),

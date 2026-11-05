@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
+import { Banner, IconButton } from "../../../../shared/web/src/ui";
 import { fetchMitre } from "./../api";
 import type { Cond, MitreTechnique, Tag } from "./../types";
-import { Icon } from "./Icon";
 
 // The builder edits the common shape — a flat AND of leaf conditions. Trees
 // with any/not nesting fall back to a raw JSON editor so nothing the backend
@@ -142,7 +142,7 @@ export default function ConditionBuilder({ value, onChange, tags }: Props) {
             }
           }}
         />
-        {jsonError && <div className="error">{jsonError}</div>}
+        {jsonError && <Banner kind="error">{jsonError}</Banner>}
         <button
           type="button"
           className="linkish"
@@ -266,9 +266,7 @@ export default function ConditionBuilder({ value, onChange, tags }: Props) {
             </>
           )}
 
-          <button type="button" className="linkish" onClick={() => setRows(rows.filter((_, j) => j !== i))}>
-            <Icon name="close" size={14} />
-          </button>
+          <IconButton icon="close" label="Remove condition" variant="link" iconSize={14} onClick={() => setRows(rows.filter((_, j) => j !== i))} />
         </div>
       ))}
 

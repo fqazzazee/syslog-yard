@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { About } from "./About";
-import { AccountMenu } from "./AccountMenu";
-import { api, AuthUser, Job, PresetSummary, TailEvent } from "./api";
-import { Icon } from "./Icon";
+import { AppShell } from "../../../shared/web/src/AppShell";
+import { useHashRoute } from "../../../shared/web/src/hooks";
+import { errorText } from "../../../shared/web/src/http";
+import { Login } from "../../../shared/web/src/Login";
+import { Badge, Banner, Button, EmptyState, PageHeader } from "../../../shared/web/src/ui";
+import { api, type AuthUser, type Job, type PresetSummary, type TailEvent } from "./api";
 import { JobForm } from "./JobForm";
-import { Login } from "./Login";
 import { PresetsView } from "./PresetsView";
-import { Tail } from "./Tail";
-import { getTheme, toggleTheme } from "./theme";
-import { YardNav } from "./YardNav";
+import { Tail, type TailRow } from "./Tail";
 
-type TabName = "jobs" | "presets";
+const SECTIONS = ["jobs", "presets", "tail"] as const;
+type SectionId = (typeof SECTIONS)[number];
+const TITLES: Record<SectionId, string> = { jobs: "Jobs", presets: "Presets", tail: "Live tail" };
 
-type AuthState = { enabled: boolean; user: AuthUser | null };
+type AuthState = { enabled: boolean; user: AuthUser | null; expired?: boolean };
 
 // App gates the workspace behind yard auth when the deployment enables it
 // (YARD_AUTH_URL); standalone runs stay open.
@@ -31,14 +32,20 @@ export default function App() {
         }
       })
       .catch(() => setAuth({ enabled: false, user: null }));
-    const expired = () => setAuth((a) => (a?.enabled ? { enabled: true, user: null } : a));
+    const expired = () => setAuth((a) => (a?.enabled && a.user ? { enabled: true, user: null, expired: true } : a));
     window.addEventListener("auth-expired", expired);
     return () => window.removeEventListener("auth-expired", expired);
   }, []);
 
   if (auth === undefined) return null;
   if (auth.enabled && !auth.user) {
-    return <Login onLogin={(user) => setAuth({ enabled: true, user })} />;
+    return (
+      <Login
+        tool="hose"
+        notice={auth.expired ? "Your session ended — sign in again." : undefined}
+        onLogin={(user) => setAuth({ enabled: true, user })}
+      />
+    );
   }
   return (
     <Workspace
@@ -49,18 +56,27 @@ export default function App() {
 }
 
 function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () => void }) {
-  const [tab, setTab] = useState<TabName>("jobs");
+  const [path, navigate] = useHashRoute();
+  const routed = (SECTIONS as readonly string[]).includes(path[0]) ? (path[0] as SectionId) : null;
+  const section: SectionId = routed ?? "jobs";
   const [jobs, setJobs] = useState<Job[]>([]);
   const [presets, setPresets] = useState<PresetSummary[]>([]);
-  const [events, setEvents] = useState<TailEvent[]>([]);
+  const [events, setEvents] = useState<TailRow[]>([]);
+  const nextUid = useRef(0);
   const [editing, setEditing] = useState<Partial<Job> | null>(null);
   const [error, setError] = useState("");
-  const [showTail, setShowTail] = useState(true);
-  const [aboutOpen, setAboutOpen] = useState(false);
-  const [theme, setTheme] = useState(getTheme());
+  // The drawer starts closed on phones, where the Live tail page is roomier.
+  const [showTail, setShowTail] = useState(() => !window.matchMedia("(max-width: 639px)").matches);
+  const [paused, setPaused] = useState(false);
   const [hints, setHints] = useState<Record<string, string>>({});
-  const paused = useRef(false);
+  const pausedRef = useRef(false);
+  pausedRef.current = paused;
   const readOnly = user?.role === "viewer";
+
+  // Unknown or empty hash: land on Jobs without adding a history entry.
+  useEffect(() => {
+    if (!routed) navigate(["jobs"], { replace: true });
+  }, [routed, navigate]);
 
   const refreshPresets = () => api.presets().then(setPresets).catch(() => {});
 
@@ -69,10 +85,17 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
     api.hints().then(setHints).catch(() => {});
     const es = new EventSource("/api/stream");
     es.onmessage = (m) => {
-      const data = JSON.parse(m.data) as { jobs: Job[]; events: TailEvent[] };
+      let data: { jobs?: Job[]; events?: TailEvent[] };
+      try {
+        data = JSON.parse(m.data) as typeof data;
+      } catch {
+        return; // a malformed frame must not kill the stream handler
+      }
       setJobs(data.jobs ?? []);
-      if (!paused.current && data.events?.length) {
-        setEvents((prev) => [...prev, ...data.events].slice(-300));
+      const incoming = data.events ?? [];
+      if (!pausedRef.current && incoming.length) {
+        const rows = incoming.map((e) => ({ ...e, uid: ++nextUid.current }));
+        setEvents((prev) => [...prev, ...rows].slice(-300));
       }
     };
     es.onerror = () => {
@@ -85,7 +108,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
     setError("");
     fn()
       .then(() => api.jobs().then(setJobs))
-      .catch((e: Error) => setError(e.message));
+      .catch((e: unknown) => setError(errorText(e)));
   };
 
   const running = jobs.filter((j) => j.running).length;
@@ -100,93 +123,100 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
     return { host: dest.slice(0, i), port: Number(dest.slice(i + 1)) || 514 };
   };
 
+  const tailProps = {
+    events,
+    jobs,
+    paused,
+    onPause: setPaused,
+    onClear: () => setEvents([]),
+  };
+
   return (
-    <div className="app">
-      <header>
-        <h1 className="brand">
-          <span className="logo">
-            <Icon name="water_drop" size={22} />
-          </span>{" "}
-          syslog-hose
-        </h1>
-        <span className="sub">syslog generator</span>
-        <YardNav links={hints} current="hose" />
-        <nav>
-          <button className={tab === "jobs" ? "tab active" : "tab"} onClick={() => setTab("jobs")}>
-            <Icon name="bolt" size={16} /> Jobs {running > 0 && <span className="badge">{running} running</span>}
-          </button>
-          <button
-            className={tab === "presets" ? "tab active" : "tab"}
-            onClick={() => setTab("presets")}
-          >
-            <Icon name="category" size={16} /> Presets
-          </button>
-        </nav>
-        <div className="spacer" />
-        {running > 0 && !readOnly && (
-          <button className="danger" onClick={() => act(api.stopAll)}>
-            <Icon name="stop" size={16} /> Stop all
-          </button>
-        )}
-        <button
-          className="help-btn"
-          title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-          onClick={() => setTheme(toggleTheme())}
-        >
-          <Icon name={theme === "dark" ? "light_mode" : "dark_mode"} size={18} />
-        </button>
-        <button className="help-btn" title="About & help" onClick={() => setAboutOpen(true)}>
-          <Icon name="help" size={18} />
-        </button>
-        {user && <AccountMenu user={user} onSignOut={onSignOut} />}
-      </header>
-      {aboutOpen && <About tool="hose" onClose={() => setAboutOpen(false)} />}
-
+    <AppShell
+      tool="hose"
+      links={hints}
+      section={section}
+      title={TITLES[section]}
+      user={user}
+      onSignOut={onSignOut}
+      sectionBadges={{
+        jobs: running > 0 ? (
+          <Badge tone="accent" title={`${running} running`}>
+            {running}
+          </Badge>
+        ) : null,
+      }}
+    >
       {error && (
-        <div className="error-bar" onClick={() => setError("")}>
-          {error} <Icon name="close" size={15} />
-        </div>
+        <Banner className="page-banner" onDismiss={() => setError("")}>
+          {error}
+        </Banner>
       )}
 
-      {tab === "jobs" && (
-        <main>
-          {!readOnly && (
-            <div className="toolbar">
-              <button className="primary" onClick={() => setEditing(newJob())}>
-                + New job
-              </button>
-            </div>
-          )}
-          {jobs.length === 0 && (
-            <div className="empty">
-              No jobs yet. Create one to start spraying syslog at something.
-            </div>
-          )}
-          <div className="cards">
-            {jobs.map((j) => (
-              <JobCard
-                key={j.id}
-                job={j}
-                readOnly={readOnly}
-                onStart={() => act(() => api.startJob(j.id))}
-                onStop={() => act(() => api.stopJob(j.id))}
-                onEdit={() => setEditing(j)}
-                onDuplicate={() =>
-                  setEditing({ ...j, id: undefined, name: `${j.name} (copy)` } as Partial<Job>)
-                }
-                onDelete={() => {
-                  if (confirm(`Delete job "${j.name}"?`)) act(() => api.deleteJob(j.id));
-                }}
-              />
-            ))}
+      {section === "jobs" && (
+        <>
+          <PageHeader
+            title="Jobs"
+            icon="bolt"
+            meta={running > 0 && <Badge tone="accent">{running} running</Badge>}
+            actions={
+              !readOnly && (
+                <>
+                  {running > 0 && (
+                    <Button variant="danger" icon="stop" onClick={() => act(api.stopAll)}>
+                      Stop all
+                    </Button>
+                  )}
+                  <Button variant="primary" icon="add" onClick={() => setEditing(newJob())}>
+                    New job
+                  </Button>
+                </>
+              )
+            }
+          />
+          <div className="page">
+            {jobs.length === 0 ? (
+              <EmptyState icon="water_drop" title="No jobs yet">
+                {readOnly ? "Jobs created by analysts appear here." : "Create one to start spraying syslog at something."}
+              </EmptyState>
+            ) : (
+              <div className="cards">
+                {jobs.map((j) => (
+                  <JobCard
+                    key={j.id}
+                    job={j}
+                    readOnly={readOnly}
+                    onStart={() => act(() => api.startJob(j.id))}
+                    onStop={() => act(() => api.stopJob(j.id))}
+                    onEdit={() => setEditing(j)}
+                    onDuplicate={() => setEditing({ ...j, id: undefined, name: `${j.name} (copy)` } as Partial<Job>)}
+                    onDelete={() => {
+                      if (confirm(`Delete job "${j.name}"?`)) act(() => api.deleteJob(j.id));
+                    }}
+                  />
+                ))}
+              </div>
+            )}
           </div>
-        </main>
+          <Tail {...tailProps} variant="drawer" open={showTail} onToggle={() => setShowTail(!showTail)} />
+        </>
       )}
 
-      {tab === "presets" && (
-        <main>
-          <PresetsView presets={presets} onChanged={refreshPresets} />
-        </main>
+      {section === "presets" && (
+        <PresetsView
+          presets={presets}
+          readOnly={readOnly}
+          routeName={path[1]}
+          onOpen={(name) => navigate(name ? ["presets", name] : ["presets"])}
+          onChanged={refreshPresets}
+        />
+      )}
+
+      {section === "tail" && (
+        <>
+          <PageHeader title="Live tail" icon="terminal" meta="Everything the running jobs send, newest last" />
+          <Tail {...tailProps} variant="page" />
+        </>
       )}
 
       {editing !== null && (
@@ -196,20 +226,14 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
-            api.jobs().then(setJobs);
+            api
+              .jobs()
+              .then(setJobs)
+              .catch((e: unknown) => setError(errorText(e)));
           }}
         />
       )}
-
-      <Tail
-        events={events}
-        jobs={jobs}
-        visible={showTail}
-        onToggle={() => setShowTail(!showTail)}
-        onPause={(p) => (paused.current = p)}
-        onClear={() => setEvents([])}
-      />
-    </div>
+    </AppShell>
   );
 }
 
@@ -229,17 +253,18 @@ function JobCard(props: {
   onDelete: () => void;
 }) {
   const j = props.job;
+  const titleId = `job-${j.id}-title`;
   return (
-    <div className={j.running ? "card running" : "card"}>
+    <article className={j.running ? "card running" : "card"} aria-labelledby={titleId}>
       <div className="card-head">
-        <span className={j.running ? "dot on" : "dot"} />
-        <strong>{j.name}</strong>
-        <span className="chip">{j.preset}</span>
+        <span className={j.running ? "dot on" : "dot"} role="img" aria-label={j.running ? "running" : "stopped"} />
+        <h2 id={titleId}>{j.name}</h2>
+        <Badge>{j.preset}</Badge>
       </div>
       <div className="card-dest">
-        → {j.host}:{j.port} <span className="chip dim">{j.transport.toUpperCase()}</span>
-        {j.format && <span className="chip dim">{j.format}</span>}
-        {j.autostart && <span className="chip dim">autostart</span>}
+        → {j.host}:{j.port} <span className="chip">{j.transport.toUpperCase()}</span>
+        {j.format && <span className="chip">{j.format}</span>}
+        {j.autostart && <span className="chip">autostart</span>}
       </div>
       <div className="card-stats">
         <span>
@@ -261,23 +286,23 @@ function JobCard(props: {
       {!props.readOnly && (
         <div className="card-actions">
           {j.running ? (
-            <button className="danger" onClick={props.onStop}>
-              <Icon name="stop" size={15} /> Stop
-            </button>
+            <Button variant="danger" icon="stop" onClick={props.onStop}>
+              Stop
+            </Button>
           ) : (
-            <button className="primary" onClick={props.onStart}>
-              <Icon name="play_arrow" size={15} /> Start
-            </button>
+            <Button variant="primary" icon="play_arrow" onClick={props.onStart}>
+              Start
+            </Button>
           )}
-          <button onClick={props.onEdit} disabled={j.running} title={j.running ? "Stop first" : ""}>
+          <Button icon="edit" onClick={props.onEdit} disabled={j.running} title={j.running ? "Stop the job first" : undefined}>
             Edit
-          </button>
-          <button onClick={props.onDuplicate}>Duplicate</button>
-          <button className="quiet" onClick={props.onDelete}>
+          </Button>
+          <Button onClick={props.onDuplicate}>Duplicate</Button>
+          <Button variant="quiet" icon="delete" onClick={props.onDelete}>
             Delete
-          </button>
+          </Button>
         </div>
       )}
-    </div>
+    </article>
   );
 }
