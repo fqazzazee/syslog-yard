@@ -65,7 +65,8 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   const nextUid = useRef(0);
   const [editing, setEditing] = useState<Partial<Job> | null>(null);
   const [error, setError] = useState("");
-  const [showTail, setShowTail] = useState(true);
+  // The drawer starts closed on phones, where the Live tail page is roomier.
+  const [showTail, setShowTail] = useState(() => !window.matchMedia("(max-width: 639px)").matches);
   const [paused, setPaused] = useState(false);
   const [hints, setHints] = useState<Record<string, string>>({});
   const pausedRef = useRef(false);

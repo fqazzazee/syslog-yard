@@ -245,6 +245,8 @@ pre.conf {
 .vnode.vfilter {
   --node-hue: var(--warning);
   padding-bottom: 18px;
+  /* room for the match/else port labels */
+  padding-right: 44px;
 }
 .vnode.vcache {
   --node-hue: var(--bucket);

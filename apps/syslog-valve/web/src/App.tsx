@@ -582,6 +582,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
                 onPaneClick={() => setSelected(null)}
                 deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
                 fitView
+                minZoom={0.2}
                 colorMode={theme}
               >
                 <Background />

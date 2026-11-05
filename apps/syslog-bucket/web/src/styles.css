@@ -190,10 +190,12 @@ button.live.on {
 .logtable.empty {
   display: flex;
 }
+
 .logtable table {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  min-width: 760px;
+  min-width: 900px;
+  table-layout: fixed;
 }
 .logtable td {
   padding: 4px 10px;
@@ -206,6 +208,11 @@ button.live.on {
   white-space: normal;
   word-break: break-word;
 }
+.logtable td.col-host,
+.logtable td.col-app {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .logtable tbody tr {
   cursor: pointer;
 }
@@ -216,7 +223,7 @@ button.live.on {
   color: var(--fg-muted);
 }
 .col-time {
-  width: 150px;
+  width: 176px;
   color: var(--fg-muted);
 }
 .col-sev {
@@ -254,6 +261,35 @@ button.live.on {
   margin: var(--space-3) auto var(--space-5);
 }
 
+/* the table sheds columns as its pane narrows (detail open, phones);
+   the detail pane shows everything */
+.logtable {
+  container-type: inline-size;
+}
+@container (max-width: 900px) {
+  .logtable .col-app,
+  .logtable .col-class {
+    display: none;
+  }
+  .logtable table {
+    min-width: 600px;
+  }
+}
+@container (max-width: 600px) {
+  .logtable .col-pri,
+  .logtable .col-host {
+    display: none;
+  }
+  .logtable table {
+    min-width: 0;
+  }
+  .logtable .col-time {
+    width: 104px;
+  }
+  .logtable td.col-time {
+    white-space: normal;
+  }
+}
 /* severity badges */
 .badge {
   display: inline-block;
@@ -301,6 +337,7 @@ button.live.on {
   vertical-align: middle;
   background: var(--bg);
   font-family: var(--font-sans);
+  white-space: nowrap;
 }
 .tagchip button {
   min-height: 0;
@@ -351,6 +388,7 @@ button.live.on {
   font-family: var(--font-mono);
   vertical-align: middle;
   text-decoration: none;
+  white-space: nowrap;
 }
 button.mitre-chip:hover:not(:disabled) {
   border-color: var(--accent);
