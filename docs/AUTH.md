@@ -93,7 +93,7 @@ You can configure it two ways:
 | `BUCKET_OIDC_CLIENT_SECRET` | client secret |
 | `BUCKET_OIDC_REDIRECT_URL` | the externally visible callback URL |
 | `BUCKET_OIDC_NAME` | login-button label (default `SSO`) |
-| `BUCKET_OIDC_DEFAULT_ROLE` | role for first-time OIDC users (default `analyst`) |
+| `BUCKET_OIDC_DEFAULT_ROLE` | role for first-time OIDC users (default `viewer`) |
 
 The settings live in the bucket's `app_settings` table, so they survive
 restarts and are shared by every bucket replica pointed at the same database.
@@ -194,3 +194,10 @@ an existing admin can change its role under Users.
 - `GET /api/healthz` and `GET /api/hints` stay unauthenticated (liveness
   probes, cross-tool nav); everything else under `/api/` requires a
   session, on every tool.
+- State-changing requests (POST/PUT/PATCH/DELETE) must come from the UI's
+  own origin: every tool rejects cross-site/same-site fetch metadata and a
+  mismatched `Origin`. Behind a reverse proxy that rewrites `Host`, set
+  `YARD_TRUSTED_ORIGINS=https://yard.example.com` (or
+  `YARD_TRUSTED_PROXIES=<proxy IP/CIDR>` to honour its `X-Forwarded-Host`)
+  on each tool, and `BUCKET_WS_ORIGINS` on the bucket for live tail. See
+  [SECURITY.md](SECURITY.md).
