@@ -60,7 +60,7 @@ func (s *server) resolveOIDC(ctx context.Context) (oidcSettings, string) {
 	if env := s.envOIDC(); env.Enabled {
 		return env, "env"
 	}
-	return oidcSettings{Name: "SSO", DefaultRole: store.RoleAnalyst}, "none"
+	return oidcSettings{Name: "SSO", DefaultRole: auth.DefaultOIDCRole}, "none"
 }
 
 func (s *server) resolveIdleMinutes(ctx context.Context) int {
@@ -84,7 +84,7 @@ func buildOIDC(c oidcSettings) *auth.OIDC {
 	}
 	role := c.DefaultRole
 	if !store.ValidRole(role) {
-		role = store.RoleAnalyst
+		role = auth.DefaultOIDCRole
 	}
 	return &auth.OIDC{
 		Issuer: c.Issuer, ClientID: c.ClientID, ClientSecret: c.ClientSecret,
@@ -153,7 +153,7 @@ func (s *server) putOIDCSettings(w http.ResponseWriter, r *http.Request) {
 		in.Name = "SSO"
 	}
 	if in.DefaultRole == "" {
-		in.DefaultRole = store.RoleAnalyst
+		in.DefaultRole = auth.DefaultOIDCRole
 	}
 	if err := s.store.PutSetting(r.Context(), "oidc", in); err != nil {
 		s.internalError(w, "save oidc settings", err)

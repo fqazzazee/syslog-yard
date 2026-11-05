@@ -56,7 +56,7 @@ func FromEnv() Config {
 		OIDCClientSecret: os.Getenv("BUCKET_OIDC_CLIENT_SECRET"),
 		OIDCRedirectURL:  os.Getenv("BUCKET_OIDC_REDIRECT_URL"),
 		OIDCName:         getenv("BUCKET_OIDC_NAME", "SSO"),
-		OIDCDefaultRole:  getenv("BUCKET_OIDC_DEFAULT_ROLE", "analyst"),
+		OIDCDefaultRole:  getenv("BUCKET_OIDC_DEFAULT_ROLE", "viewer"), // read-only until promoted
 
 		WSOrigins:      splitList(os.Getenv("BUCKET_WS_ORIGINS")),
 		TrustedProxies: os.Getenv("BUCKET_TRUSTED_PROXIES"),

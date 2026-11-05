@@ -3,7 +3,19 @@ package api
 import (
 	"errors"
 	"testing"
+
+	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
+
+func TestBuildOIDCDefaultRole(t *testing.T) {
+	if o := buildOIDC(oidcSettings{Enabled: true, Issuer: "https://idp"}); o.DefaultRole != store.RoleViewer {
+		t.Errorf("unset default role = %q, want viewer", o.DefaultRole)
+	}
+	// A stored explicit role is honoured, so existing deployments keep theirs.
+	if o := buildOIDC(oidcSettings{Enabled: true, Issuer: "https://idp", DefaultRole: store.RoleAnalyst}); o.DefaultRole != store.RoleAnalyst {
+		t.Errorf("explicit analyst role = %q, want analyst", o.DefaultRole)
+	}
+}
 
 func TestKeepClientSecret(t *testing.T) {
 	prev := oidcSettings{Enabled: true, Issuer: "https://idp.example.com/realms/yard", ClientSecret: "s3cret"}
