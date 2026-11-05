@@ -39,6 +39,16 @@ func TestCheckPassword(t *testing.T) {
 	}
 }
 
+func TestGeneratePassword(t *testing.T) {
+	a, b := generatePassword(), generatePassword()
+	if len(a) < 32 {
+		t.Errorf("generated password %q has under 128 bits", a)
+	}
+	if a == b {
+		t.Error("generated passwords repeat")
+	}
+}
+
 // The middleware's allow/deny decisions for anonymous requests and for the
 // viewer role need no database — no cookie means no session lookup.
 func TestMiddlewareGating(t *testing.T) {

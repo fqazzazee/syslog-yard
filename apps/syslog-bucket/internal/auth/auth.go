@@ -122,7 +122,7 @@ func Bootstrap(ctx context.Context, st *store.Store, adminPassword string) error
 	}
 	generated := adminPassword == ""
 	if generated {
-		adminPassword = randHex(8)
+		adminPassword = generatePassword()
 	}
 	hash, err := HashPassword(adminPassword)
 	if err != nil {
@@ -150,7 +150,7 @@ func Bootstrap(ctx context.Context, st *store.Store, adminPassword string) error
 // `syslog-bucket reset-admin` or `scripts/yardctl reset-admin`).
 func ResetAdmin(ctx context.Context, st *store.Store, password string) (string, error) {
 	if password == "" {
-		password = randHex(8)
+		password = generatePassword()
 	} else if len(password) < minPassword {
 		return "", fmt.Errorf("password must be at least %d characters", minPassword)
 	}
@@ -214,6 +214,12 @@ func tooManyAttempts(w http.ResponseWriter, retry time.Duration) {
 	w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())+1))
 	http.Error(w, "too many failed attempts — try again later", http.StatusTooManyRequests)
 }
+
+// generatedPasswordBytes is the entropy of generated admin passwords: 128
+// bits, printed as 32 hex characters.
+const generatedPasswordBytes = 16
+
+func generatePassword() string { return randHex(generatedPasswordBytes) }
 
 func randHex(nBytes int) string {
 	b := make([]byte, nBytes)
