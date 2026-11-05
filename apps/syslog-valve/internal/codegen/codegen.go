@@ -77,8 +77,12 @@ func Generate(g *graph.Graph, version string, shares Shares) (string, error) {
 					tls = " tls(peer-verify(optional-untrusted))"
 				}
 			}
-			fmt.Fprintf(&b, "\n# forward %s\ndestination d_%s {\n    network(%s port(%d) transport(%s)%s);\n};\n",
-				comment(name(n)), graph.Ident(n.ID), q(n.Config.Host), n.Config.Port, q(n.Config.Transport), tls)
+			// Explicit persist-name: two forwards to the same host/port/
+			// transport (e.g. a filter's match and else both feeding the
+			// bucket) would otherwise get the same automatic persist name,
+			// and syslog-ng refuses the whole config.
+			fmt.Fprintf(&b, "\n# forward %s\ndestination d_%s {\n    network(%s port(%d) transport(%s)%s persist-name(\"forward_%s\"));\n};\n",
+				comment(name(n)), graph.Ident(n.ID), q(n.Config.Host), n.Config.Port, q(n.Config.Transport), tls, graph.Ident(n.ID))
 		case graph.TypeCache:
 			p, err := CachePath(n, shares)
 			if err != nil {
