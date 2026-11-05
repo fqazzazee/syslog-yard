@@ -182,6 +182,48 @@ an existing admin can change its role under **Users…** in the account menu.
 - If you run the bucket behind a reverse proxy, the redirect URL is the public
   URL the browser sees, not the internal container address.
 
+## Audit log
+
+The bucket records administrative and triage actions in an audit log.
+Admins read it under **Admin → Audit log** in the bucket's side nav
+(`#/audit`), or from `GET /api/audit`. Each row has the time, the actor
+(user id and a snapshot of the username, so rows outlive deleted accounts),
+the client address, the action, its target, a short summary and whether it
+succeeded.
+
+| Area | Actions |
+|------|---------|
+| Sign-in | `auth.login` (success and failure, with the username tried), `auth.logout`, `auth.password_change` (including a wrong current password) |
+| Accounts | `user.create`, `user.update` (role, disabled, name and email changes as before → after), `user.password_reset` (by an admin, or the `reset-admin` command), `user.delete` |
+| Settings | `settings.oidc`, `settings.session`, `net.config` (network feeds and custom ranges) |
+| Rules | `rule.create`, `rule.update`, `rule.delete`, `rule.apply` (apply to history, with match counts) |
+| Buckets | `bucket.create`, `bucket.update`, `bucket.delete`, `bucket.share` |
+| Tags, channels, frameworks | `tag.*`, `channel.*`, `framework.*` (create, update, delete) |
+| Triage | `entry.update` (status, priority), `entry.tag`, `entry.untag`, `entry.classify` (ATT&CK / OT codes added or removed) |
+
+- **No secrets.** Summaries name what changed, never the values of
+  passwords, the OIDC client secret, SMTP passwords or webhook URLs. An
+  OIDC save records only whether the secret was replaced, kept or cleared;
+  a channel edit records `config_changed` without the config.
+- **Failed sign-ins** have no account attached: the actor column holds the
+  username that was tried. Attempts refused by the throttle aren't
+  recorded, so a flood of guesses can't flood the log.
+- **Client address.** The same address the login throttle uses: the TCP
+  peer, or the `X-Forwarded-For` client when the peer is listed in
+  `YARD_TRUSTED_PROXIES`. Sign-ins through the hose or valve show those
+  containers' address unless the bucket trusts them.
+- **Never in the way.** Events are queued and written in the background; a
+  full queue or a failed write logs the event to the bucket's container log
+  and the request carries on.
+- **Retention.** Rows older than `BUCKET_AUDIT_RETENTION_DAYS` (default 180;
+  `0` keeps them forever) are pruned at start and then hourly.
+- **API.** `GET /api/audit` (admin only) returns
+  `{"events": [...], "next_cursor": "..."}`, newest first. Filters:
+  `actor` (username, case-insensitive), `actor_id`, `action`, `target_type`,
+  `target_id`, `success=true|false`, `since` / `until` (RFC 3339; `until` is
+  exclusive), `limit` (default 100, at most 500). Pass `next_cursor` back as
+  `cursor` for the next page; it is `null` on the last one.
+
 ## Sessions & deployment notes
 
 - Sessions are opaque cookies (`HttpOnly`, `SameSite=Lax`); only a SHA-256 of

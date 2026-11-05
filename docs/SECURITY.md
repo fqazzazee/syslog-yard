@@ -187,9 +187,15 @@ never back into config or commands.
   valve's syslog IN ports trust their network — they have no per-sender
   auth beyond optional TLS. Keep ingest internal (it is not published by
   compose) and treat stored log content as untrusted input.
-- **No audit log yet.** Who changed which rule/bucket/user is not recorded
-  (planned in the bucket's M4). Roles limit *who can*, but actions aren't
-  attributed after the fact.
+- **The audit log covers the bucket only, and lives beside the data.** The
+  bucket records sign-ins, account and settings changes, rule, bucket, tag,
+  channel and framework edits and entry triage ([AUTH.md](AUTH.md#audit-log)).
+  Hose and valve actions (jobs, flow changes) are not in it. Recording is
+  best effort: if the queue is full or the database write fails, the event
+  goes to the bucket's process log instead. Anyone with write access to
+  Postgres can edit or delete rows, so forward the bucket's container log
+  to a separate store if you need a tamper-evident trail. Rows are pruned
+  after `BUCKET_AUDIT_RETENTION_DAYS` (default 180).
 - **Self-signed valve TLS.** The one-click cert is for lab use; forwarding
   in lab mode uses `peer-verify(optional-untrusted)`. Use real certificates
   and verified forwarding (the node's "verify peer" option) in production.

@@ -56,7 +56,8 @@ with violet as its accent colour.
   admins) notification channels, each heading with its add or manage button.
   Collapsed to an icon rail it shows only the sections; on a phone it's a
   drawer. The **Buckets**, **Rules** and **Frameworks** headings open list
-  pages (`#/buckets`, `#/rules`, `#/frameworks`).
+  pages (`#/buckets`, `#/rules`, `#/frameworks`). Admins also get an
+  **Admin** group with the **Audit log** (`#/audit`).
 - **Account menu.** **Account…** and **Sign out** for everyone, **Users…**
   and **Settings…** (single sign-on, session timeout) for admins.
 - **Every view is a link:** `#/logs`, `#/buckets/<id>`, `#/tags/<id>`,
@@ -86,6 +87,7 @@ with violet as its accent colour.
 | `BUCKET_ADMIN_PASSWORD` | _(generated)_ | initial admin password, first start only; unset = a random 128-bit password, logged once |
 | `BUCKET_COOKIE_SECURE`  | `false`       | mark session cookies `Secure` (HTTPS)    |
 | `BUCKET_OIDC_*`         | _(unset)_     | OIDC SSO: `_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET`, `_REDIRECT_URL`, `_NAME` (default `SSO`), `_DEFAULT_ROLE` (default `viewer`). See [docs/AUTH.md](../../docs/AUTH.md) |
+| `BUCKET_AUDIT_RETENTION_DAYS` | `180`   | days to keep audit-log rows; `0` keeps them forever. See [docs/AUTH.md](../../docs/AUTH.md#audit-log) |
 | `BUCKET_WS_ORIGINS`     | _(unset)_     | extra Origin host patterns (comma-separated, `path.Match` syntax, e.g. `localhost:5173`) allowed to open the live-tail WebSocket; same-origin always works. For development or a proxy that rewrites `Host` |
 | `YARD_TRUSTED_PROXIES`  | _(unset)_     | comma-separated IPs/CIDRs whose `X-Forwarded-For` (login throttle) and `X-Forwarded-Host` (cross-origin guard) are believed. See [docs/SECURITY.md](../../docs/SECURITY.md#client-addresses-behind-the-hose-valve-or-a-proxy) |
 | `YARD_TRUSTED_ORIGINS`  | _(unset)_     | extra Origins (e.g. `https://yard.example.com`) accepted on state-changing requests, for a reverse proxy that rewrites `Host` |
@@ -149,6 +151,11 @@ and `retrying` (true while waiting out a database error).
   admin's refresh (or a save of the network settings) answers 200 with the
   feed status if the fetch finishes within 3 s, otherwise 202
   `{"pending": true}` while it carries on in the background.
+- **Audit log:** `GET /api/audit` (admin only) lists recorded actions
+  newest first, filtered by `actor`, `action`, `target_type`, `target_id`,
+  `success` and `since` / `until`, and paged with `cursor` (the previous
+  page's `next_cursor`). What is recorded is listed in
+  [docs/AUTH.md](../../docs/AUTH.md#audit-log).
 - **CSRF:** besides the suite-wide cross-origin guard, every POST to `/api/`
   must be `Content-Type: application/json` (415 otherwise); logout is
   exempt. Clients such as `curl` need `-H 'Content-Type: application/json'`.
