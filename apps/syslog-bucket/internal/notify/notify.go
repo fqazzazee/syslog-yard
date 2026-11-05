@@ -71,7 +71,13 @@ func (d *Dispatcher) Reload(ctx context.Context) error {
 	}
 	d.mu.Lock()
 	d.channels = m
-	// Keep a limiter per channel; drop limiters for deleted channels.
+	// Keep a limiter per channel: create one for each new channel here, under
+	// the write lock, and drop limiters for deleted channels.
+	for id := range m {
+		if d.limiters[id] == nil {
+			d.limiters[id] = newLimiter()
+		}
+	}
 	for id := range d.limiters {
 		if _, ok := m[id]; !ok {
 			delete(d.limiters, id)
@@ -135,15 +141,32 @@ func (d *Dispatcher) worker(ctx context.Context) {
 	}
 }
 
-func (d *Dispatcher) handle(ctx context.Context, j job) {
+// channel returns the channel snapshot and its limiter. Reload normally
+// creates the limiter; if a channel somehow lacks one, it is created under the
+// write lock (re-checked) so concurrent workers share a single limiter.
+func (d *Dispatcher) channel(id int64) (store.Channel, *limiter, bool) {
 	d.mu.RLock()
-	ch, ok := d.channels[j.channelID]
-	lim := d.limiters[j.channelID]
-	if ok && lim == nil {
-		lim = newLimiter()
-		d.limiters[j.channelID] = lim
-	}
+	ch, ok := d.channels[id]
+	lim := d.limiters[id]
 	d.mu.RUnlock()
+	if !ok || lim != nil {
+		return ch, lim, ok
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ch, ok = d.channels[id]
+	if !ok {
+		return ch, nil, false
+	}
+	if lim = d.limiters[id]; lim == nil {
+		lim = newLimiter()
+		d.limiters[id] = lim
+	}
+	return ch, lim, true
+}
+
+func (d *Dispatcher) handle(ctx context.Context, j job) {
+	ch, lim, ok := d.channel(j.channelID)
 
 	rec := store.Delivery{ChannelID: j.channelID, EntryID: &j.entry.ID, RuleID: ptr(j.ruleID)}
 	if !ok || !ch.Enabled {
@@ -178,6 +201,9 @@ func (d *Dispatcher) TestSend(ctx context.Context, ch store.Channel) error {
 }
 
 func (d *Dispatcher) log(rec store.Delivery) {
+	if d.st == nil {
+		return
+	}
 	if err := d.st.LogDelivery(context.Background(), rec); err != nil {
 		slog.Error("notify: log delivery", "error", err)
 	}

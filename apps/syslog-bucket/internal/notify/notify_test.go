@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/syslog-yard/syslog-bucket/internal/store"
@@ -79,6 +80,40 @@ func TestDeliverWebhookError(t *testing.T) {
 	ch := store.Channel{Kind: "slack", Config: json.RawMessage(`{"url":"` + srv.URL + `"}`)}
 	if err := d.deliver(context.Background(), ch, store.Entry{}, "x"); err == nil {
 		t.Fatal("expected error on 500 response")
+	}
+}
+
+// A burst of deliveries for a channel the dispatcher has no limiter for yet
+// must share one limiter (no concurrent map write, no rate-limit bypass).
+// Run with -race.
+func TestHandleBurstNewChannelSharesLimiter(t *testing.T) {
+	var mu sync.Mutex
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+	}))
+	defer srv.Close()
+
+	d := New(nil)
+	const rate = 5
+	d.mu.Lock()
+	d.channels[1] = store.Channel{ID: 1, Kind: "slack", Enabled: true, RatePerMin: rate,
+		Config: json.RawMessage(`{"url":"` + srv.URL + `"}`)}
+	d.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			d.handle(context.Background(), job{entry: store.Entry{ID: int64(i)}, channelID: 1})
+		}(i)
+	}
+	wg.Wait()
+	if hits != rate {
+		t.Errorf("delivered %d, want exactly %d (one shared limiter)", hits, rate)
 	}
 }
 
