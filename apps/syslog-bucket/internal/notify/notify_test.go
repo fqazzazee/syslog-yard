@@ -6,8 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
@@ -114,6 +116,38 @@ func TestHandleBurstNewChannelSharesLimiter(t *testing.T) {
 	wg.Wait()
 	if hits != rate {
 		t.Errorf("delivered %d, want exactly %d (one shared limiter)", hits, rate)
+	}
+}
+
+// Queue-full drops are counted in memory, not logged one INSERT at a time.
+func TestDispatchQueueFullCountsDrops(t *testing.T) {
+	d := New(nil)
+	d.queue = make(chan job, 1)
+	e := store.Entry{ID: 1, Notifies: []store.Notify{{ChannelID: 3, RuleID: 9}}}
+	d.Dispatch([]store.Entry{e, e, e})
+	d.dropMu.Lock()
+	got := d.drops[dropKey{3, 9}]
+	d.dropMu.Unlock()
+	if got != 2 {
+		t.Fatalf("drops = %d, want 2", got)
+	}
+	d.flushDrops()
+	if len(d.drops) != 0 {
+		t.Errorf("flush should reset counters: %v", d.drops)
+	}
+}
+
+func TestTruncateRunesKeepsUTF8Valid(t *testing.T) {
+	s := strings.Repeat("a", 299) + "é" + "tail"
+	got := truncateRunes(s, 300)
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncated string is not valid UTF-8: %q", got)
+	}
+	if got != strings.Repeat("a", 299)+"…" {
+		t.Errorf("got %q", got)
+	}
+	if truncateRunes("short", 300) != "short" {
+		t.Error("short strings must be unchanged")
 	}
 }
 

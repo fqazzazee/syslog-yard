@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
@@ -26,6 +27,7 @@ const (
 	reloadInterval = 30 * time.Second
 	pruneInterval  = time.Hour
 	logRetention   = 7 * 24 * time.Hour
+	dropFlushEvery = 10 * time.Second
 	httpTimeout    = 10 * time.Second
 )
 
@@ -46,7 +48,15 @@ type Dispatcher struct {
 	mu       sync.RWMutex
 	channels map[int64]store.Channel
 	limiters map[int64]*limiter
+
+	// Queue-full drops are counted here and written to notification_log as
+	// one aggregate row per (channel, rule) every dropFlushEvery, so a storm
+	// never turns into an INSERT per dropped delivery on the ingest goroutine.
+	dropMu sync.Mutex
+	drops  map[dropKey]int
 }
+
+type dropKey struct{ channelID, ruleID int64 }
 
 func New(st *store.Store) *Dispatcher {
 	return &Dispatcher{
@@ -55,6 +65,7 @@ func New(st *store.Store) *Dispatcher {
 		queue:    make(chan job, queueDepth),
 		channels: map[int64]store.Channel{},
 		limiters: map[int64]*limiter{},
+		drops:    map[dropKey]int{},
 	}
 }
 
@@ -95,12 +106,17 @@ func (d *Dispatcher) Run(ctx context.Context) {
 	}
 	reload := time.NewTicker(reloadInterval)
 	prune := time.NewTicker(pruneInterval)
+	dropFlush := time.NewTicker(dropFlushEvery)
 	defer reload.Stop()
 	defer prune.Stop()
+	defer dropFlush.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			d.flushDrops()
 			return
+		case <-dropFlush.C:
+			d.flushDrops()
 		case <-reload.C:
 			if err := d.Reload(ctx); err != nil && ctx.Err() == nil {
 				slog.Error("notify: reload channels", "error", err)
@@ -114,19 +130,37 @@ func (d *Dispatcher) Run(ctx context.Context) {
 }
 
 // Dispatch enqueues deliveries for entries a notify rule matched. Non-blocking:
-// if the queue is saturated the delivery is dropped and logged, never stalling
-// ingest.
+// if the queue is saturated the delivery is dropped and counted (flushed to
+// the log periodically by flushDrops), never stalling ingest.
 func (d *Dispatcher) Dispatch(entries []store.Entry) {
 	for _, e := range entries {
 		for _, n := range e.Notifies {
 			select {
 			case d.queue <- job{entry: e, channelID: n.ChannelID, ruleID: n.RuleID}:
 			default:
-				slog.Warn("notify: queue full, dropping", "channel", n.ChannelID, "entry", e.ID)
-				id := e.ID
-				d.log(store.Delivery{ChannelID: n.ChannelID, EntryID: &id, RuleID: ptr(n.RuleID), Status: "dropped", Detail: "dispatch queue full"})
+				d.countDrop(n.ChannelID, n.RuleID)
 			}
 		}
+	}
+}
+
+func (d *Dispatcher) countDrop(channelID, ruleID int64) {
+	d.dropMu.Lock()
+	d.drops[dropKey{channelID, ruleID}]++
+	d.dropMu.Unlock()
+}
+
+// flushDrops writes one notification_log row per (channel, rule) summarising
+// the deliveries dropped since the last flush.
+func (d *Dispatcher) flushDrops() {
+	d.dropMu.Lock()
+	drops := d.drops
+	d.drops = map[dropKey]int{}
+	d.dropMu.Unlock()
+	for k, n := range drops {
+		slog.Warn("notify: queue full, dropped deliveries", "channel", k.channelID, "rule", k.ruleID, "count", n)
+		d.log(store.Delivery{ChannelID: k.channelID, RuleID: ptr(k.ruleID), Status: "dropped",
+			Detail: fmt.Sprintf("dispatch queue full: %d deliveries dropped", n)})
 	}
 }
 
@@ -215,15 +249,25 @@ func summary(e store.Entry) string {
 	if int(e.Severity) >= 0 && int(e.Severity) < len(severityNames) {
 		sev = severityNames[e.Severity]
 	}
-	msg := e.Msg
-	if len(msg) > 300 {
-		msg = msg[:300] + "…"
-	}
+	msg := truncateRunes(e.Msg, 300)
 	s := fmt.Sprintf("[%s] %s %s: %s", sev, e.Host, e.AppName, msg)
 	if len(e.Mitre) > 0 {
 		s += " · MITRE " + joinComma(e.Mitre)
 	}
 	return s
+}
+
+// truncateRunes shortens s to at most max bytes without splitting a UTF-8
+// sequence, appending an ellipsis when it cut anything.
+func truncateRunes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
 
 func ptr(v int64) *int64 {
