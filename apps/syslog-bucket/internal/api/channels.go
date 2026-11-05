@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -14,7 +15,9 @@ import (
 //
 // Channels are managed by analysts/admins (the auth middleware already blocks
 // viewers from non-GET). SMTP passwords are write-only: redacted on read,
-// preserved on update when left blank.
+// preserved on update when left blank — but only while the server they are
+// sent to stays the same, so an edit can't redirect a stored password to a
+// host the editor controls.
 
 func (s *server) listChannels(w http.ResponseWriter, r *http.Request) {
 	channels, err := s.store.ListChannels(r.Context())
@@ -63,7 +66,12 @@ func (s *server) updateChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	c.Config = mergeSecrets(existing.Config, c.Config)
+	merged, err := mergeSecrets(*existing, c)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	c.Config = merged
 	found, err := s.store.UpdateChannel(r.Context(), c)
 	if err != nil {
 		s.writeError(w, "update channel", err)
@@ -182,25 +190,64 @@ func redactConfig(raw json.RawMessage) json.RawMessage {
 	return out
 }
 
-// mergeSecrets carries a stored password forward when the incoming config
-// leaves it blank.
-func mergeSecrets(existing, incoming json.RawMessage) json.RawMessage {
-	in := map[string]any{}
-	if len(incoming) == 0 || json.Unmarshal(incoming, &in) != nil {
-		return incoming
+// errSecretReentry answers an edit that moves an SMTP channel to a different
+// server or account without supplying the password again.
+var errSecretReentry = errors.New("the SMTP host, port, username, or TLS mode changed — re-enter the password")
+
+// smtpTarget is the part of an SMTP config a stored password is bound to:
+// where it is sent and as whom. Defaults are normalised the way the sender
+// applies them, so "port omitted" and "587" compare equal.
+type smtpTarget struct {
+	Host     string      `json:"host"`
+	Port     json.Number `json:"port"`
+	Username string      `json:"username"`
+	TLS      string      `json:"tls"`
+}
+
+func parseSMTPTarget(raw json.RawMessage) (smtpTarget, bool) {
+	var t smtpTarget
+	if json.Unmarshal(raw, &t) != nil {
+		return t, false
 	}
+	t.Host = strings.ToLower(strings.TrimSpace(t.Host))
+	t.Username = strings.TrimSpace(t.Username)
+	if t.Port == "" || t.Port == "0" {
+		t.Port = "587"
+	}
+	if t.TLS == "" {
+		t.TLS = "starttls"
+	}
+	return t, true
+}
+
+// mergeSecrets carries a stored password forward when the incoming config
+// leaves it blank — provided the channel still talks to the same SMTP server
+// as the same user. Otherwise the stored password is discarded, and when the
+// new config needs one (a username is set) the edit is refused with
+// errSecretReentry rather than silently sending without the password.
+func mergeSecrets(existing, incoming store.Channel) (json.RawMessage, error) {
+	in := map[string]any{}
+	if len(incoming.Config) == 0 || json.Unmarshal(incoming.Config, &in) != nil {
+		return incoming.Config, nil
+	}
+	delete(in, "has_password") // never persist the read-only flag
 	if pw, ok := in["password"].(string); ok && pw == "" {
 		old := map[string]any{}
-		if json.Unmarshal(existing, &old) == nil {
-			if oldPw, ok := old["password"].(string); ok && oldPw != "" {
+		_ = json.Unmarshal(existing.Config, &old)
+		if oldPw, ok := old["password"].(string); ok && oldPw != "" {
+			oldT, okOld := parseSMTPTarget(existing.Config)
+			newT, okNew := parseSMTPTarget(incoming.Config)
+			switch {
+			case existing.Kind == incoming.Kind && okOld && okNew && oldT == newT:
 				in["password"] = oldPw
+			case incoming.Kind == "smtp" && newT.Username != "":
+				return nil, errSecretReentry
 			}
 		}
 	}
-	delete(in, "has_password") // never persist the read-only flag
 	out, err := json.Marshal(in)
 	if err != nil {
-		return incoming
+		return incoming.Config, nil
 	}
-	return out
+	return out, nil
 }
