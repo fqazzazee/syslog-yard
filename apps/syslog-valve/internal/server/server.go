@@ -40,11 +40,13 @@ type Server struct {
 	mu        sync.Mutex // serializes graph writes and applies
 }
 
-// Request body caps for the JSON endpoints.
-const (
-	maxGraphBody = 1 << 20
-	maxSmallBody = 1 << 16
-)
+// maxGraphBody caps a graph save. Every other mutating route takes
+// secure.DefaultBodyLimit (64 KiB); bodyLimits applies both.
+const maxGraphBody = 1 << 20
+
+var bodyLimits = secure.BodyLimit{Routes: map[string]int64{
+	"PUT /api/graph": maxGraphBody,
+}}
 
 // New builds the handler; guard enforces yard auth when YARD_AUTH_URL is
 // set (nil = open, standalone mode).
@@ -89,7 +91,7 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 		guard = yardauth.New("", false)
 	}
 	guard.Routes(s.mux)
-	s.handler = secure.Headers(guard.Middleware(s.mux))
+	s.handler = secure.Headers(guard.Middleware(bodyLimits.Wrap(s.mux)))
 	return s
 }
 
@@ -121,24 +123,11 @@ func (s *Server) SetHTTPPort(port int) {
 	s.mu.Unlock()
 }
 
-// readBody reads a request body of at most limit bytes.
-func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, int, error) {
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
-	if err != nil {
-		var tooBig *http.MaxBytesError
-		if errors.As(err, &tooBig) {
-			return nil, http.StatusRequestEntityTooLarge, fmt.Errorf("request body larger than %d bytes", limit)
-		}
-		return nil, http.StatusBadRequest, err
-	}
-	return data, 0, nil
-}
-
 // putGraph validates and saves the draft graph without applying it.
 func (s *Server) putGraph(w http.ResponseWriter, r *http.Request) {
-	data, code, err := readBody(w, r, maxGraphBody)
+	data, err := io.ReadAll(r.Body) // capped by bodyLimits
 	if err != nil {
-		httpError(w, code, err)
+		secure.WriteBodyError(w, err)
 		return
 	}
 	g, err := graph.Parse(data)
@@ -563,9 +552,9 @@ func (s *Server) notifyTest(w http.ResponseWriter, r *http.Request) {
 		Kind string `json:"kind"`
 		URL  string `json:"url"`
 	}
-	data, code, err := readBody(w, r, maxSmallBody)
+	data, err := io.ReadAll(r.Body) // capped by bodyLimits
 	if err != nil {
-		httpError(w, code, err)
+		secure.WriteBodyError(w, err)
 		return
 	}
 	if err := json.Unmarshal(data, &body); err != nil {

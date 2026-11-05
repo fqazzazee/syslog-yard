@@ -241,7 +241,7 @@ func (g *Guard) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<16))
 	if err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
+		secure.WriteBodyError(w, err)
 		return
 	}
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
@@ -321,7 +321,7 @@ func (g *Guard) proxy(w http.ResponseWriter, r *http.Request, path string) {
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
+		secure.WriteBodyError(w, err)
 		return
 	}
 	req, err := http.NewRequestWithContext(r.Context(), r.Method,

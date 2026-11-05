@@ -245,6 +245,28 @@ func TestPutGraphRejectsHostileInput(t *testing.T) {
 	}
 }
 
+// #63: every mutating route answers an oversized body with 413 and a JSON
+// error, whether or not it reads a body, and whatever its declared length.
+func TestBodyLimitsOnEveryMutatingRoute(t *testing.T) {
+	e := newEnv(t)
+	small := bytes.Repeat([]byte(" "), 64<<10+1)
+	for _, path := range []string{"/api/notify/test", "/api/apply", "/api/rotate", "/api/certs/selfsigned", "/api/rollback/1"} {
+		rec := e.do("POST", path, small)
+		if rec.Code != http.StatusRequestEntityTooLarge || !strings.Contains(rec.Body.String(), `"error"`) {
+			t.Errorf("POST %s: %d %s", path, rec.Code, rec.Body)
+		}
+	}
+	// a body of unknown length is cut off while it is read
+	req := httptest.NewRequest("PUT", "/api/graph", bytes.NewReader(bytes.Repeat([]byte(" "), maxGraphBody+1)))
+	req.ContentLength = -1
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge || !strings.Contains(rec.Body.String(), `"error"`) {
+		t.Fatalf("chunked oversized graph: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestStartupResyncsFromActiveGraph(t *testing.T) {
 	e := newEnv(t)
 	e.mustOK("PUT", "/api/graph", flow("one", true, 6514))
