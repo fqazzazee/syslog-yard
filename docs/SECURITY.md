@@ -113,8 +113,11 @@ never back into config or commands.
    verified forwarding; mount your CA bundle for peer verification.
 6. Restrict who can reach the control-plane ports (firewall/VPN); the data
    plane (syslog) and control plane (UIs) usually want different exposure.
-7. Keep base images current (`scripts/yardctl` rebuilds; the Dockerfiles
-   pin `golang:1.25` / `node:22` / `postgres:17`).
+7. Keep base images current: `scripts/yardctl up` rebuilds with
+   `--pull`, so each run picks up the latest `golang:1.26-alpine`,
+   `node:22-alpine`, `alpine:3.22` and distroless base layers, and
+   re-pulls `postgres:17-alpine` and `balabit/syslog-ng`. Under quadlet,
+   rebuild with `podman build --pull …` (see deploy/quadlet/README.md).
 
 ## Reporting
 

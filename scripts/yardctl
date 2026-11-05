@@ -2,7 +2,7 @@
 # yardctl — operate the syslog-yard suite on a Linux host.
 #
 #   yardctl prereqs    install a container runtime + compose (dnf or apt)
-#   yardctl up         build images and start the suite
+#   yardctl up         build images (pulling fresh base images) and start the suite
 #   yardctl down       stop the suite (volumes are kept)
 #   yardctl restart    restart all suite services
 #   yardctl status     container status + UI health checks
@@ -15,6 +15,8 @@
 #   yardctl reset-admin   set a fresh random syslog-bucket admin password
 #
 # UI ports: 8080 (hose) 8081 (valve) 8082 (bucket); syslog entry: 6514 udp+tcp.
+# status, smoke and reset-admin also work for the podman quadlet units
+# (deploy/quadlet); the other commands drive compose only.
 set -euo pipefail
 
 YARD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -35,6 +37,40 @@ compose() {
     else
         die "no compose runtime found — run: yardctl prereqs"
     fi
+}
+
+# quadlet reports whether the suite runs as podman quadlet units rather
+# than under compose: quadlet names the containers after their units
+# (compose prefixes the project name) and labels them with the unit.
+quadlet() {
+    command -v podman >/dev/null || return 1
+    local unit
+    unit=$(podman inspect --format '{{index .Config.Labels "PODMAN_SYSTEMD_UNIT"}}' syslog-bucket 2>/dev/null) || return 1
+    [ "$unit" = syslog-bucket.service ]
+}
+
+# yard_exec runs a command inside one of the suite's containers, under
+# compose or quadlet alike.
+yard_exec() {
+    local svc="$1"; shift
+    if quadlet; then
+        podman exec -i "$svc" "$@"
+    else
+        compose exec -T "$svc" "$@"
+    fi
+}
+
+# up builds the images with fresh base images, refreshes the pulled
+# images, and starts the suite. An offline host falls back to whatever
+# base images are cached rather than failing.
+up() {
+    if ! compose build --pull; then
+        info "could not pull fresh base images (offline?) — building from the local cache"
+        compose build
+    fi
+    compose pull bucket-db bucket-syslog \
+        || info "could not refresh postgres/syslog-ng images — using the local ones"
+    compose up -d
 }
 
 prereqs() {
@@ -155,7 +191,12 @@ service_remove() {
 }
 
 status() {
-    compose ps
+    if quadlet; then
+        podman ps --all --filter label=PODMAN_SYSTEMD_UNIT \
+            --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+    else
+        compose ps
+    fi
     echo
     for p in "${UI_PORTS[@]}"; do
         if curl -fsS -m 2 -o /dev/null "http://localhost:$p/"; then
@@ -172,7 +213,7 @@ status() {
 # most direct "did it actually get stored" check anyway. Needs the suite up.
 bucket_stored() {
     local needle="$1" n
-    n=$(compose exec -T bucket-db psql -U syslog_bucket -tAc \
+    n=$(yard_exec bucket-db psql -U syslog_bucket -tAc \
         "select count(*) from entries where msg like '%${needle}%'" 2>/dev/null | tr -d '[:space:]')
     [ "${n:-0}" -gt 0 ] 2>/dev/null
 }
@@ -204,14 +245,14 @@ reset_admin() {
     # on a forgotten password or to rotate the generated one. Runs inside
     # the live container so it reuses its database connection.
     info "resetting the syslog-bucket admin password"
-    compose exec -T syslog-bucket syslog-bucket reset-admin \
+    yard_exec syslog-bucket syslog-bucket reset-admin \
         || die "could not reach the syslog-bucket container — is the suite up? (yardctl up)"
     info "other admin sessions were signed out; sign in at http://localhost:8082"
 }
 
 case "${1:-}" in
     prereqs)          prereqs ;;
-    up|start)         compose up -d --build && status ;;
+    up|start)         up && status ;;
     down|stop)        compose down ;;
     restart)          compose restart && status ;;
     status)           status ;;
