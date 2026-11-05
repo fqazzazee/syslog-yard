@@ -77,6 +77,7 @@ func TestMiddlewareGating(t *testing.T) {
 	}
 	for _, c := range cases {
 		r := httptest.NewRequest(c.method, c.path, nil)
+		r.Header.Set("Content-Type", "application/json")
 		if c.user != nil {
 			r = r.WithContext(context.WithValue(r.Context(), ctxKey{}, c.user))
 		}
@@ -84,6 +85,42 @@ func TestMiddlewareGating(t *testing.T) {
 		h.ServeHTTP(w, r)
 		if w.Code != c.want {
 			t.Errorf("%s %s (user=%v): got %d, want %d", c.method, c.path, c.user, w.Code, c.want)
+		}
+	}
+}
+
+// A same-site page (another port on the same host) can send a cookie-bearing
+// POST without a preflight only with a "simple" content type; those are
+// refused.
+func TestMiddlewareRejectsSimplePosts(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := New(nil, false).Middleware(next)
+	analyst := &store.User{Role: store.RoleAnalyst}
+
+	cases := []struct {
+		method, path, ctype string
+		want                int
+	}{
+		{"POST", "/api/rules/1/apply", "text/plain", http.StatusUnsupportedMediaType},
+		{"POST", "/api/channels/1/test", "application/x-www-form-urlencoded", http.StatusUnsupportedMediaType},
+		{"POST", "/api/users", "multipart/form-data; boundary=x", http.StatusUnsupportedMediaType},
+		{"POST", "/api/buckets", "", http.StatusUnsupportedMediaType},
+		{"POST", "/api/auth/login", "text/plain", http.StatusUnsupportedMediaType},
+		{"POST", "/api/buckets", "application/json; charset=utf-8", http.StatusOK},
+		{"POST", "/api/auth/logout", "", http.StatusOK},
+		{"DELETE", "/api/buckets/1", "", http.StatusOK}, // preflighted cross-origin anyway
+		{"GET", "/api/entries", "", http.StatusOK},
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest(c.method, c.path, nil)
+		if c.ctype != "" {
+			r.Header.Set("Content-Type", c.ctype)
+		}
+		r = r.WithContext(WithUser(r.Context(), analyst))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != c.want {
+			t.Errorf("%s %s (%q): got %d, want %d", c.method, c.path, c.ctype, w.Code, c.want)
 		}
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/netip"
 	"strconv"
@@ -302,8 +303,27 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 				return
 			}
 		}
+		if strings.HasPrefix(r.URL.Path, "/api/") && !csrfSafe(r) {
+			http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// csrfSafe rejects the one kind of state-changing request a foreign page can
+// send without a CORS preflight: a POST with a "simple" content type
+// (text/plain, form-encoded, multipart). SameSite=Lax doesn't cover it when
+// the page is same-site — any other port on the same host, e.g. another app
+// on localhost — so the cookie would ride along. PUT/PATCH/DELETE and JSON
+// POSTs are always preflighted cross-origin, which the API never answers.
+// Logout stays exempt: it has no body, and forcing one is harmless.
+func csrfSafe(r *http.Request) bool {
+	if r.Method != http.MethodPost || r.URL.Path == "/api/auth/logout" {
+		return true
+	}
+	mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return err == nil && mt == "application/json"
 }
 
 // SessionActive reports whether r's session cookie still belongs to a live

@@ -149,6 +149,7 @@ func TestRouteAuthz(t *testing.T) {
 		method, pattern, _ := strings.Cut(route, " ")
 		for name, u := range users {
 			r := httptest.NewRequest(method, pathParam.Replace(pattern), strings.NewReader("{}"))
+			r.Header.Set("Content-Type", "application/json")
 			if u != nil {
 				r = r.WithContext(auth.WithUser(r.Context(), u))
 			}
