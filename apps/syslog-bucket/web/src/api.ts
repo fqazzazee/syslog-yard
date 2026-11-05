@@ -109,9 +109,9 @@ export const fetchFrameworks = () =>
 export const createFramework = (f: Omit<Framework, "id">) =>
   send<Framework>("POST", "/api/frameworks", f);
 export const updateFramework = (f: Framework) =>
-  send<Framework>("PUT", `/api/frameworks/${f.id}`, f);
+  send<Framework>("PUT", `/api/frameworks/${encodeURIComponent(f.id)}`, f);
 export const deleteFramework = (id: string) =>
-  request<void>(`/api/frameworks/${id}`, { method: "DELETE" });
+  request<void>(`/api/frameworks/${encodeURIComponent(id)}`, { method: "DELETE" });
 
 // Per-alert-type counts under the current filters (drives the OT view).
 export const fetchOtSummary = (f: Filters, sel: Selection) =>
