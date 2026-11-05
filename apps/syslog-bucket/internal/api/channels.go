@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -84,6 +85,10 @@ func (s *server) deleteChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.DeleteChannel(r.Context(), id); err != nil {
+		if errors.Is(err, store.ErrInUse) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		s.internalError(w, "delete channel", err)
 		return
 	}

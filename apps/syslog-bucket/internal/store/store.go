@@ -6,11 +6,15 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/syslog-yard/syslog-bucket/internal/rules"
@@ -138,9 +142,49 @@ func (e *Entry) FieldValue(name string) (any, bool) {
 			return nil, false
 		}
 		// Structured values compare as text, matching the ->> SQL operator.
-		return fmt.Sprint(v), true
+		return structuredText(v)
 	}
 	return nil, false
+}
+
+// structuredText renders a decoded JSON value the way Postgres's ->> does:
+// numbers without exponent notation, JSON null as SQL NULL, nested values as
+// JSON text.
+func structuredText(v any) (any, bool) {
+	switch t := v.(type) {
+	case nil:
+		return nil, false
+	case string:
+		return t, true
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64), true
+	case bool:
+		return strconv.FormatBool(t), true
+	default:
+		b, err := json.Marshal(t)
+		if err != nil {
+			return nil, false
+		}
+		return string(b), true
+	}
+}
+
+// Normalize replaces nil slices and empty structured data with empty values
+// so every JSON surface (REST, live tail, webhooks) serializes [] and {}
+// rather than null.
+func (e *Entry) Normalize() {
+	if e.Mitre == nil {
+		e.Mitre = []string{}
+	}
+	if e.OT == nil {
+		e.OT = []string{}
+	}
+	if e.TagIDs == nil {
+		e.TagIDs = []int64{}
+	}
+	if len(e.Structured) == 0 || string(e.Structured) == "null" {
+		e.Structured = json.RawMessage(`{}`)
+	}
 }
 
 func (e *Entry) HasTag(id int64) bool {
@@ -176,12 +220,41 @@ func (s *Store) UpsertSource(ctx context.Context, hostname, ip string) (int64, e
 }
 
 // InsertEntries bulk-inserts a batch, fills in the generated ids, and
-// attaches any rule-applied tags. Returning ids (rather than COPY) is what
-// lets the ingest path broadcast complete entries to live-tail clients.
-func (s *Store) InsertEntries(ctx context.Context, entries []Entry) error {
+// attaches any rule-applied tags, all in one transaction: either every entry
+// and its tags commit, or nothing does (and the ids are reset to zero).
+// Returning ids (rather than COPY) is what lets the ingest path broadcast
+// complete entries to live-tail clients.
+//
+// Rule tags whose tag (or rule) was deleted while the entry sat in the ingest
+// queue are skipped (rule attribution falls back to NULL) rather than failing
+// the batch on a foreign key; TagIDs is trimmed to the tags actually stored.
+func (s *Store) InsertEntries(ctx context.Context, entries []Entry) (err error) {
 	if len(entries) == 0 {
 		return nil
 	}
+	defer func() {
+		if err != nil {
+			for i := range entries {
+				entries[i].ID = 0
+			}
+		}
+	}()
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) // no-op once committed
+
+	if err := insertEntryRows(ctx, tx, entries); err != nil {
+		return err
+	}
+	if err := insertRuleTags(ctx, tx, entries); err != nil {
+		return fmt.Errorf("insert rule tags: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
+func insertEntryRows(ctx context.Context, tx pgx.Tx, entries []Entry) error {
 	const cols = 15
 	var sb strings.Builder
 	sb.WriteString(`INSERT INTO entries
@@ -218,41 +291,110 @@ func (s *Store) InsertEntries(ctx context.Context, entries []Entry) error {
 	// RETURNING rows come back in VALUES order for a plain INSERT.
 	sb.WriteString(" RETURNING id")
 
-	rows, err := s.Pool.Query(ctx, sb.String(), args...)
+	rows, err := tx.Query(ctx, sb.String(), args...)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	for i := 0; rows.Next(); i++ {
-		if err := rows.Scan(&entries[i].ID); err != nil {
+	n := 0
+	for ; rows.Next(); n++ {
+		if err := rows.Scan(&entries[n].ID); err != nil {
 			return err
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	return s.insertRuleTags(ctx, entries)
+	if n != len(entries) {
+		return fmt.Errorf("insert entries: %d ids returned for %d rows", n, len(entries))
+	}
+	return nil
 }
 
-func (s *Store) insertRuleTags(ctx context.Context, entries []Entry) error {
-	var sb strings.Builder
-	var args []any
+func insertRuleTags(ctx context.Context, tx pgx.Tx, entries []Entry) error {
+	var entryIDs, tagIDs, ruleIDs []int64
 	for _, e := range entries {
 		for _, rt := range e.RuleTags {
-			if len(args) > 0 {
-				sb.WriteByte(',')
-			}
-			fmt.Fprintf(&sb, "($%d,$%d,$%d)", len(args)+1, len(args)+2, len(args)+3)
-			args = append(args, e.ID, rt.TagID, rt.RuleID)
+			entryIDs = append(entryIDs, e.ID)
+			tagIDs = append(tagIDs, rt.TagID)
+			ruleIDs = append(ruleIDs, rt.RuleID)
 		}
 	}
-	if len(args) == 0 {
+	if len(entryIDs) == 0 {
 		return nil
 	}
-	_, err := s.Pool.Exec(ctx,
-		"INSERT INTO entry_tags (entry_id, tag_id, rule_id) VALUES "+sb.String()+" ON CONFLICT DO NOTHING",
-		args...)
-	return err
+	rows, err := tx.Query(ctx, `
+		INSERT INTO entry_tags (entry_id, tag_id, rule_id)
+		SELECT v.entry_id, v.tag_id, r.id
+		FROM unnest($1::bigint[], $2::bigint[], $3::bigint[]) AS v(entry_id, tag_id, rule_id)
+		JOIN tags t ON t.id = v.tag_id
+		LEFT JOIN rules r ON r.id = v.rule_id
+		ON CONFLICT DO NOTHING
+		RETURNING entry_id, tag_id`, entryIDs, tagIDs, ruleIDs)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type pair struct{ entry, tag int64 }
+	stored := map[pair]bool{}
+	for rows.Next() {
+		var p pair
+		if err := rows.Scan(&p.entry, &p.tag); err != nil {
+			return err
+		}
+		stored[p] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(stored) == len(entryIDs) {
+		return nil
+	}
+	// Some tags vanished: drop them from TagIDs so live tail and webhooks
+	// don't advertise a tag the entry doesn't carry.
+	for i := range entries {
+		e := &entries[i]
+		if len(e.RuleTags) == 0 {
+			continue
+		}
+		fromRule := map[int64]bool{}
+		for _, rt := range e.RuleTags {
+			fromRule[rt.TagID] = true
+		}
+		kept := e.TagIDs[:0]
+		for _, id := range e.TagIDs {
+			if !fromRule[id] || stored[pair{e.ID, id}] {
+				kept = append(kept, id)
+			}
+		}
+		e.TagIDs = kept
+	}
+	return nil
+}
+
+// IsTransient reports whether a database error looks like an availability
+// problem worth retrying (connection loss, server shutting down, resource
+// exhaustion, serialization failure) rather than the server rejecting the
+// statement or its data.
+func IsTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch {
+		case strings.HasPrefix(pgErr.Code, "08"), // connection exception
+			strings.HasPrefix(pgErr.Code, "40"), // transaction rollback
+			strings.HasPrefix(pgErr.Code, "53"), // insufficient resources
+			strings.HasPrefix(pgErr.Code, "57"), // operator intervention
+			strings.HasPrefix(pgErr.Code, "58"): // system error
+			return true
+		}
+		return false
+	}
+	// Anything else (network errors, pool closed, timeouts) never reached a
+	// verdict from the server.
+	return true
 }
 
 // EntryFilter selects entries via the shared condition AST plus pagination.
