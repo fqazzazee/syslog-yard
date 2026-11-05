@@ -43,7 +43,15 @@ type Manager struct {
 // NewManager loads persisted jobs from dataDir/jobs.json and autostarts
 // the ones marked for it.
 func NewManager(store *preset.Store, dataDir string) (*Manager, error) {
-	m := &Manager{jobs: map[string]*job{}, store: store, dataDir: dataDir}
+	m := &Manager{
+		jobs: map[string]*job{}, store: store, dataDir: dataDir,
+		// Seed tail sequence numbers from the clock so they keep increasing
+		// across restarts: the UI keys tail lines by seq and keeps lines
+		// from before a reconnect. Microseconds stay below 2^53 (exact in
+		// a JS number), and ids can only collide if the hose averaged more
+		// than 1M events/s for its whole previous lifetime.
+		tailSeq: time.Now().UnixMicro(),
+	}
 	path := m.jobsPath()
 	if raw, err := os.ReadFile(path); err == nil {
 		var cfgs []JobConfig
@@ -258,7 +266,7 @@ func (m *Manager) List() []JobStatus {
 func (m *Manager) recordEvent(jobID, jobName, msg string) {
 	m.tailMu.Lock()
 	m.tailSeq++
-	m.tail[int(m.tailSeq)%tailSize] = TailEvent{
+	m.tail[m.tailSeq%tailSize] = TailEvent{
 		Seq: m.tailSeq, JobID: jobID, JobName: jobName, Time: time.Now(), Message: msg,
 	}
 	if m.tailLen < tailSize {
@@ -277,7 +285,7 @@ func (m *Manager) TailSince(since int64) []TailEvent {
 		lo = since + 1
 	}
 	for s := lo; s <= m.tailSeq; s++ {
-		out = append(out, m.tail[int(s)%tailSize])
+		out = append(out, m.tail[s%tailSize])
 	}
 	return out
 }
