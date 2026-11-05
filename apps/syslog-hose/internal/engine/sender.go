@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -16,17 +17,19 @@ type Sender interface {
 
 // NewSender builds a sender for transport "udp", "tcp" or "tls".
 // TCP and TLS use RFC 6587 octet-counting framing and reconnect lazily.
-func NewSender(transport, host string, port int, tlsInsecure bool) (Sender, error) {
+// Cancelling ctx aborts in-progress dials (and, for streams, writes).
+func NewSender(ctx context.Context, transport, host string, port int, tlsInsecure bool) (Sender, error) {
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	switch transport {
 	case "udp":
-		conn, err := net.Dial("udp", addr)
+		var d net.Dialer
+		conn, err := d.DialContext(ctx, "udp", addr)
 		if err != nil {
 			return nil, err
 		}
 		return &udpSender{conn: conn}, nil
 	case "tcp", "tls":
-		return &streamSender{addr: addr, useTLS: transport == "tls", insecure: tlsInsecure}, nil
+		return &streamSender{ctx: ctx, addr: addr, useTLS: transport == "tls", insecure: tlsInsecure}, nil
 	default:
 		return nil, fmt.Errorf("unknown transport %q", transport)
 	}
@@ -43,6 +46,7 @@ func (u *udpSender) Close() error { return u.conn.Close() }
 // streamSender handles TCP/TLS with octet-counted framing (RFC 6587 §3.4.1)
 // and transparent reconnection with a small backoff.
 type streamSender struct {
+	ctx       context.Context
 	addr      string
 	useTLS    bool
 	insecure  bool
@@ -63,9 +67,10 @@ func (s *streamSender) dial() error {
 		err  error
 	)
 	if s.useTLS {
-		conn, err = tls.DialWithDialer(&d, "tcp", s.addr, &tls.Config{InsecureSkipVerify: s.insecure})
+		td := tls.Dialer{NetDialer: &d, Config: &tls.Config{InsecureSkipVerify: s.insecure}}
+		conn, err = td.DialContext(s.ctx, "tcp", s.addr)
 	} else {
-		conn, err = d.Dial("tcp", s.addr)
+		conn, err = d.DialContext(s.ctx, "tcp", s.addr)
 	}
 	if err != nil {
 		s.nextRetry = time.Now().Add(2 * time.Second)

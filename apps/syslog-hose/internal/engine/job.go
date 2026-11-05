@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -34,6 +36,10 @@ type JobConfig struct {
 	Autostart   bool    `json:"autostart"`
 }
 
+// maxRate is the ceiling for both the configured rate and the effective
+// rate after jitter/burst multipliers.
+const maxRate = 50000
+
 // Validate checks the parts that would otherwise fail at start time.
 func (c *JobConfig) Validate() error {
 	if c.Name == "" {
@@ -53,8 +59,8 @@ func (c *JobConfig) Validate() error {
 	if c.Rate <= 0 {
 		return fmt.Errorf("rate must be > 0 events/sec")
 	}
-	if c.Rate > 50000 {
-		return fmt.Errorf("rate capped at 50000 events/sec")
+	if c.Rate > maxRate {
+		return fmt.Errorf("rate capped at %d events/sec", maxRate)
 	}
 	switch c.RateMode {
 	case "", "steady", "jitter", "burst":
@@ -75,18 +81,43 @@ type JobStatus struct {
 	ActualEPS float64   `json:"actualEps"`
 }
 
+// jobState is the lifecycle of a job's generator goroutine:
+//
+//	idle --start--> running --halt--> stopping --run exits--> idle
+//	                running --run exits on its own (duration/maxEvents)--> idle
+//
+// All transitions happen under job.mu and only finish (run exit, or a
+// failed start) moves a job back to idle, so a second stop can never
+// double-close anything and a start can never overlap a run that is still
+// winding down.
+type jobState int
+
+const (
+	stateIdle jobState = iota
+	stateRunning
+	stateStopping
+)
+
+// stopTimeout bounds how long Stop/Delete wait for a run loop to exit. The
+// loop checks for cancellation between messages and the senders abort
+// in-flight dials/writes on cancel, so this is a safety net, not a pace.
+var stopTimeout = 10 * time.Second
+
+var errJobNotFound = errors.New("job not found")
+
 // job is the runtime state behind a JobConfig.
 type job struct {
-	cfg     JobConfig
-	mu      sync.Mutex
-	running bool
-	stop    chan struct{}
-	done    chan struct{}
+	mu        sync.Mutex
+	cfg       JobConfig // guarded by mu; a run works on its own copy
+	state     jobState
+	deleted   bool               // set by Manager.Delete: never start again
+	cancel    context.CancelFunc // non-nil while running/stopping
+	done      chan struct{}      // closed once the current run has exited
+	startedAt time.Time
 
 	sent      atomic.Int64
 	errors    atomic.Int64
 	lastError atomic.Value // string
-	startedAt time.Time
 
 	// sliding window for actual-EPS display
 	winStart atomic.Int64 // unix nano
@@ -97,38 +128,132 @@ type job struct {
 // onEvent receives every successfully sent message (for the live tail).
 type onEvent func(jobID, jobName, msg string)
 
-// onExit is called when the run loop ends on its own (duration/maxEvents).
-type onExit func(jobID string)
+// presetLookup resolves a preset by name.
+type presetLookup func(name string) (*preset.Preset, bool)
 
-func (j *job) start(p *preset.Preset, emit onEvent, exited onExit) error {
+// config returns a copy of the job's config.
+func (j *job) config() JobConfig {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if j.running {
-		return fmt.Errorf("job already running")
+	return j.cfg
+}
+
+// setConfig replaces the config; the job must be idle.
+func (j *job) setConfig(cfg JobConfig) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.state != stateIdle {
+		return fmt.Errorf("stop the job before editing it")
 	}
-	sender, err := NewSender(j.cfg.Transport, j.cfg.Host, j.cfg.Port, j.cfg.TLSInsecure)
-	if err != nil {
-		return err
-	}
-	r := p.NewRenderer(preset.RenderOpts{
-		Hostname: j.cfg.Hostname,
-		Appname:  j.cfg.Appname,
-		Facility: j.cfg.Facility,
-		Format:   j.cfg.Format,
-	})
-	j.running = true
-	j.stop = make(chan struct{})
-	j.done = make(chan struct{})
-	j.startedAt = time.Now()
-	j.sent.Store(0)
-	j.errors.Store(0)
-	j.lastError.Store("")
-	go j.run(sender, r, emit, exited)
+	j.cfg = cfg
 	return nil
 }
 
-func (j *job) run(sender Sender, r *preset.Renderer, emit onEvent, exited onExit) {
-	defer close(j.done)
+// markDeleted prevents any future start. A start that already got past
+// the check is stopped by the halt that follows in Manager.Delete.
+func (j *job) markDeleted() {
+	j.mu.Lock()
+	j.deleted = true
+	j.mu.Unlock()
+}
+
+func (j *job) start(lookup presetLookup, emit onEvent) error {
+	j.mu.Lock()
+	if j.deleted {
+		j.mu.Unlock()
+		return errJobNotFound
+	}
+	switch j.state {
+	case stateRunning:
+		j.mu.Unlock()
+		return fmt.Errorf("job already running")
+	case stateStopping:
+		j.mu.Unlock()
+		return fmt.Errorf("job is still stopping, try again")
+	}
+	cfg := j.cfg
+	p, ok := lookup(cfg.Preset)
+	if !ok {
+		j.mu.Unlock()
+		return fmt.Errorf("preset %q not found", cfg.Preset)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	j.state = stateRunning
+	j.cancel = cancel
+	j.done = done
+	j.startedAt = time.Now()
+	startedAt := j.startedAt
+	j.sent.Store(0)
+	j.errors.Store(0)
+	j.lastError.Store("")
+	j.winStart.Store(startedAt.UnixNano())
+	j.winSent.Store(0)
+	j.epsMilli.Store(0)
+	j.mu.Unlock()
+
+	// Dial outside the lock (DNS can be slow). A concurrent halt cancels ctx
+	// and waits on done, which finish closes on every path.
+	sender, err := NewSender(ctx, cfg.Transport, cfg.Host, cfg.Port, cfg.TLSInsecure)
+	if err != nil {
+		j.finish(done)
+		return err
+	}
+	r := p.NewRenderer(preset.RenderOpts{
+		Hostname: cfg.Hostname,
+		Appname:  cfg.Appname,
+		Facility: cfg.Facility,
+		Format:   cfg.Format,
+	})
+	activeRuns.Add(1)
+	go j.run(ctx, cfg, startedAt, sender, r, emit, done)
+	return nil
+}
+
+// finish moves the job back to idle and releases waiters. It runs exactly
+// once per successful state change to running: from the run goroutine, or
+// from start itself when setup fails.
+func (j *job) finish(done chan struct{}) {
+	j.mu.Lock()
+	if j.cancel != nil {
+		j.cancel()
+		j.cancel = nil
+	}
+	j.state = stateIdle
+	j.mu.Unlock()
+	close(done)
+}
+
+// halt cancels the current run (if any) and waits up to timeout for it to
+// exit. Safe to call any number of times, concurrently.
+func (j *job) halt(timeout time.Duration) error {
+	j.mu.Lock()
+	if j.state == stateIdle {
+		j.mu.Unlock()
+		return nil
+	}
+	j.cancel()
+	j.state = stateStopping
+	done := j.done
+	j.mu.Unlock()
+
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-t.C:
+		return fmt.Errorf("job did not stop within %s", timeout)
+	}
+}
+
+// activeRuns counts live run goroutines (tests use it to prove that no
+// generator outlives its job).
+var activeRuns atomic.Int64
+
+func (j *job) run(ctx context.Context, cfg JobConfig, startedAt time.Time, sender Sender, r *preset.Renderer, emit onEvent, done chan struct{}) {
+	defer j.finish(done)
+	defer activeRuns.Add(-1)
 	defer sender.Close()
 
 	const tick = 50 * time.Millisecond
@@ -138,42 +263,37 @@ func (j *job) run(sender Sender, r *preset.Renderer, emit onEvent, exited onExit
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	tokens := 1.0 // emit the first event immediately
 	deadline := time.Time{}
-	if j.cfg.DurationSec > 0 {
-		deadline = time.Now().Add(time.Duration(j.cfg.DurationSec) * time.Second)
+	if cfg.DurationSec > 0 {
+		deadline = startedAt.Add(time.Duration(cfg.DurationSec) * time.Second)
 	}
-	jitter := j.cfg.JitterPct
+	jitter := cfg.JitterPct
 	if jitter <= 0 {
 		jitter = 30
 	}
-	burstFactor := j.cfg.BurstFactor
+	burstFactor := cfg.BurstFactor
 	if burstFactor <= 1 {
 		burstFactor = 5
 	}
-	burstEvery := time.Duration(max(j.cfg.BurstEvery, 10)) * time.Second
-	burstLen := time.Duration(max(j.cfg.BurstLen, 1)) * time.Second
+	burstEvery := time.Duration(max(cfg.BurstEvery, 10)) * time.Second
+	burstLen := time.Duration(max(cfg.BurstLen, 1)) * time.Second
 
-	j.winStart.Store(time.Now().UnixNano())
-	j.winSent.Store(0)
-	stopped := false
-
-	for !stopped {
+	for {
 		select {
-		case <-j.stop:
-			stopped = true
-			continue
+		case <-ctx.Done():
+			return
 		case <-ticker.C:
 		}
 		if !deadline.IsZero() && time.Now().After(deadline) {
-			break
+			return
 		}
 
-		rate := j.cfg.Rate
-		switch j.cfg.RateMode {
+		rate := cfg.Rate
+		switch cfg.RateMode {
 		case "jitter":
 			f := 1 + (rng.Float64()*2-1)*jitter/100
 			rate *= f
 		case "burst":
-			if time.Since(j.startedAt)%burstEvery < burstLen {
+			if time.Since(startedAt)%burstEvery < burstLen {
 				rate *= burstFactor
 			}
 		}
@@ -185,6 +305,9 @@ func (j *job) run(sender Sender, r *preset.Renderer, emit onEvent, exited onExit
 		tokens -= float64(n)
 
 		for i := 0; i < n; i++ {
+			if ctx.Err() != nil {
+				return
+			}
 			msg, err := r.Render()
 			if err != nil {
 				j.errors.Add(1)
@@ -192,52 +315,42 @@ func (j *job) run(sender Sender, r *preset.Renderer, emit onEvent, exited onExit
 				continue
 			}
 			if err := sender.Send(msg); err != nil {
+				if ctx.Err() != nil {
+					return // aborted by a stop, not a delivery failure
+				}
 				j.errors.Add(1)
 				j.lastError.Store(err.Error())
 			} else {
 				j.sent.Add(1)
 				j.winSent.Add(1)
-				emit(j.cfg.ID, j.cfg.Name, msg)
+				emit(cfg.ID, cfg.Name, msg)
 			}
-			if j.cfg.MaxEvents > 0 && j.sent.Load() >= j.cfg.MaxEvents {
-				stopped = true
-				break
+			if cfg.MaxEvents > 0 && j.sent.Load() >= cfg.MaxEvents {
+				return
 			}
 		}
-		// roll the EPS window every ~5s, keeping the completed window's rate
-		if ws := j.winStart.Load(); time.Since(time.Unix(0, ws)) > 5*time.Second {
-			elapsed := time.Since(time.Unix(0, ws)).Seconds()
-			j.epsMilli.Store(int64(float64(j.winSent.Load()) / elapsed * 1000))
-			j.winStart.Store(time.Now().UnixNano())
-			j.winSent.Store(0)
-		}
+		j.rollWindow()
 	}
-
-	j.mu.Lock()
-	j.running = false
-	j.mu.Unlock()
-	exited(j.cfg.ID)
 }
 
-func (j *job) halt() {
-	j.mu.Lock()
-	if !j.running {
-		j.mu.Unlock()
-		return
+// rollWindow rolls the EPS window every ~5s, keeping the completed window's rate.
+func (j *job) rollWindow() {
+	if ws := j.winStart.Load(); time.Since(time.Unix(0, ws)) > 5*time.Second {
+		elapsed := time.Since(time.Unix(0, ws)).Seconds()
+		j.epsMilli.Store(int64(float64(j.winSent.Load()) / elapsed * 1000))
+		j.winStart.Store(time.Now().UnixNano())
+		j.winSent.Store(0)
 	}
-	close(j.stop)
-	done := j.done
-	j.mu.Unlock()
-	<-done
 }
 
 func (j *job) status() JobStatus {
 	j.mu.Lock()
-	running := j.running
+	cfg := j.cfg
+	running := j.state == stateRunning
 	started := j.startedAt
 	j.mu.Unlock()
 	st := JobStatus{
-		JobConfig: j.cfg,
+		JobConfig: cfg,
 		Running:   running,
 		Sent:      j.sent.Load(),
 		Errors:    j.errors.Load(),
@@ -255,11 +368,4 @@ func (j *job) status() JobStatus {
 		}
 	}
 	return st
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

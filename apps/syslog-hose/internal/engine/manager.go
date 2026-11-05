@@ -68,7 +68,7 @@ func (m *Manager) persist() {
 	m.mu.RLock()
 	cfgs := make([]JobConfig, 0, len(m.jobs))
 	for _, j := range m.jobs {
-		cfgs = append(cfgs, j.cfg)
+		cfgs = append(cfgs, j.config())
 	}
 	m.mu.RUnlock()
 	sort.Slice(cfgs, func(i, k int) bool { return cfgs[i].Name < cfgs[k].Name })
@@ -106,22 +106,20 @@ func (m *Manager) Update(id string, cfg JobConfig) (JobStatus, error) {
 	if _, ok := m.store.Get(cfg.Preset); !ok {
 		return JobStatus{}, fmt.Errorf("preset %q not found", cfg.Preset)
 	}
+	cfg.ID = id
 	m.mu.Lock()
 	j, ok := m.jobs[id]
 	if !ok {
 		m.mu.Unlock()
-		return JobStatus{}, fmt.Errorf("job not found")
+		return JobStatus{}, errJobNotFound
 	}
-	j.mu.Lock()
-	running := j.running
-	j.mu.Unlock()
-	if running {
-		m.mu.Unlock()
-		return JobStatus{}, fmt.Errorf("stop the job before editing it")
-	}
-	cfg.ID = id
-	j.cfg = cfg
+	// the state check and the write happen under j.mu, so a concurrent
+	// Start either sees the new config or makes this Update fail
+	err := j.setConfig(cfg)
 	m.mu.Unlock()
+	if err != nil {
+		return JobStatus{}, err
+	}
 	m.persist()
 	return j.status(), nil
 }
@@ -132,43 +130,49 @@ func (m *Manager) Delete(id string) error {
 	j, ok := m.jobs[id]
 	if !ok {
 		m.mu.Unlock()
-		return fmt.Errorf("job not found")
+		return errJobNotFound
 	}
 	delete(m.jobs, id)
 	m.mu.Unlock()
-	j.halt()
+	// mark first so a Start that already looked the job up can't revive
+	// it after the halt below
+	j.markDeleted()
+	if err := j.halt(stopTimeout); err != nil {
+		fmt.Fprintf(os.Stderr, "syslog-hose: delete %s: %v\n", id, err)
+	}
 	m.persist()
 	return nil
 }
 
+func (m *Manager) get(id string) (*job, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	j, ok := m.jobs[id]
+	return j, ok
+}
+
 // Start launches a job's generator goroutine.
 func (m *Manager) Start(id string) error {
-	m.mu.RLock()
-	j, ok := m.jobs[id]
-	m.mu.RUnlock()
+	j, ok := m.get(id)
 	if !ok {
-		return fmt.Errorf("job not found")
+		return errJobNotFound
 	}
-	p, ok := m.store.Get(j.cfg.Preset)
-	if !ok {
-		return fmt.Errorf("preset %q not found", j.cfg.Preset)
-	}
-	return j.start(p, m.recordEvent, func(string) {})
+	return j.start(m.store.Get, m.recordEvent)
 }
 
-// Stop halts a running job and waits for its goroutine to exit.
+// Stop halts a running job and waits for its goroutine to exit. Stopping
+// an idle (or already stopping) job is a no-op, so double clicks and
+// Stop + Stop-all races are harmless.
 func (m *Manager) Stop(id string) error {
-	m.mu.RLock()
-	j, ok := m.jobs[id]
-	m.mu.RUnlock()
+	j, ok := m.get(id)
 	if !ok {
-		return fmt.Errorf("job not found")
+		return errJobNotFound
 	}
-	j.halt()
-	return nil
+	return j.halt(stopTimeout)
 }
 
-// StopAll halts every running job (used on shutdown and by the UI).
+// StopAll halts every running job (used on shutdown and by the UI). Jobs
+// are stopped in parallel so the total wait is bounded by one timeout.
 func (m *Manager) StopAll() {
 	m.mu.RLock()
 	jobs := make([]*job, 0, len(m.jobs))
@@ -176,9 +180,15 @@ func (m *Manager) StopAll() {
 		jobs = append(jobs, j)
 	}
 	m.mu.RUnlock()
+	var wg sync.WaitGroup
 	for _, j := range jobs {
-		j.halt()
+		wg.Go(func() {
+			if err := j.halt(stopTimeout); err != nil {
+				fmt.Fprintf(os.Stderr, "syslog-hose: stop all: %v\n", err)
+			}
+		})
 	}
+	wg.Wait()
 }
 
 // List returns the live status of every job, sorted by name.
