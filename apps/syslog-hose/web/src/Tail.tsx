@@ -2,8 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { Job, TailEvent } from "./api";
 import { Icon } from "./Icon";
 
+// TailRow is a TailEvent plus a client-assigned key. The server's seq is not
+// unique across a server restart (the browser keeps its buffer), so it
+// can't be the React key on its own.
+export type TailRow = TailEvent & { uid: number };
+
 export function Tail(props: {
-  events: TailEvent[];
+  events: TailRow[];
   jobs: Job[];
   visible: boolean;
   onToggle: () => void;
@@ -58,7 +63,7 @@ export function Tail(props: {
       {props.visible && (
         <div className="tail-body">
           {shown.map((e) => (
-            <div key={e.seq} className="tail-line">
+            <div key={e.uid} className="tail-line">
               <span className="tail-job">{e.jobName}</span>
               <span className="tail-msg">{e.message}</span>
             </div>

@@ -6,7 +6,7 @@ import { Icon } from "./Icon";
 import { JobForm } from "./JobForm";
 import { Login } from "./Login";
 import { PresetsView } from "./PresetsView";
-import { Tail } from "./Tail";
+import { Tail, type TailRow } from "./Tail";
 import { getTheme, toggleTheme } from "./theme";
 import { YardNav } from "./YardNav";
 
@@ -52,7 +52,8 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   const [tab, setTab] = useState<TabName>("jobs");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [presets, setPresets] = useState<PresetSummary[]>([]);
-  const [events, setEvents] = useState<TailEvent[]>([]);
+  const [events, setEvents] = useState<TailRow[]>([]);
+  const nextUid = useRef(0);
   const [editing, setEditing] = useState<Partial<Job> | null>(null);
   const [error, setError] = useState("");
   const [showTail, setShowTail] = useState(true);
@@ -69,10 +70,17 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
     api.hints().then(setHints).catch(() => {});
     const es = new EventSource("/api/stream");
     es.onmessage = (m) => {
-      const data = JSON.parse(m.data) as { jobs: Job[]; events: TailEvent[] };
+      let data: { jobs?: Job[]; events?: TailEvent[] };
+      try {
+        data = JSON.parse(m.data) as typeof data;
+      } catch {
+        return; // a malformed frame must not kill the stream handler
+      }
       setJobs(data.jobs ?? []);
-      if (!paused.current && data.events?.length) {
-        setEvents((prev) => [...prev, ...data.events].slice(-300));
+      const incoming = data.events ?? [];
+      if (!paused.current && incoming.length) {
+        const rows = incoming.map((e) => ({ ...e, uid: ++nextUid.current }));
+        setEvents((prev) => [...prev, ...rows].slice(-300));
       }
     };
     es.onerror = () => {
@@ -196,7 +204,10 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
-            api.jobs().then(setJobs);
+            api
+              .jobs()
+              .then(setJobs)
+              .catch((e: Error) => setError(e.message));
           }}
         />
       )}
