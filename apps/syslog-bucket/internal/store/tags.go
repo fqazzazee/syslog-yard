@@ -49,17 +49,11 @@ func (s *Store) UpdateTag(ctx context.Context, t Tag) (bool, error) {
 
 // DeleteTag removes a tag (and, by cascade, its entry associations). It
 // refuses with an *InUseError while an enabled rule's tag action points at
-// the tag: deleting it would silently break that rule.
+// the tag: deleting it would silently break that rule. The refusal is the
+// rule_refs foreign key's, so a rule saved concurrently can't slip past it.
 func (s *Store) DeleteTag(ctx context.Context, id int64) error {
-	names, err := s.rulesReferencing(ctx, "tag", "tag_id", id)
-	if err != nil {
-		return err
-	}
-	if len(names) > 0 {
-		return &InUseError{What: "tag", Rules: names}
-	}
-	_, err = s.Pool.Exec(ctx, `DELETE FROM tags WHERE id = $1`, id)
-	return err
+	_, err := s.Pool.Exec(ctx, `DELETE FROM tags WHERE id = $1`, id)
+	return s.inUseError(ctx, err, "tag", "tag_id", id)
 }
 
 // ErrInUse is wrapped by *InUseError; match it with errors.Is.
@@ -79,15 +73,27 @@ func (e *InUseError) Error() string {
 
 func (e *InUseError) Unwrap() error { return ErrInUse }
 
-// rulesReferencing names the enabled rules with an action of actionType whose
-// idKey equals id.
-func (s *Store) rulesReferencing(ctx context.Context, actionType, idKey string, id int64) ([]string, error) {
+// inUseError turns a foreign-key violation from deleting a tag or channel
+// into an *InUseError naming the enabled rules that use it (col is
+// "tag_id" or "channel_id"). Other errors, and nil, pass through.
+func (s *Store) inUseError(ctx context.Context, err error, what, col string, id int64) error {
+	if !isFKViolation(err) {
+		return err
+	}
+	names, lerr := s.rulesUsing(ctx, col, id)
+	if lerr != nil || len(names) == 0 {
+		return err
+	}
+	return &InUseError{What: what, Rules: names}
+}
+
+// rulesUsing names the rules with a rule_refs row for the tag or channel id
+// (col is the constant "tag_id" or "channel_id").
+func (s *Store) rulesUsing(ctx context.Context, col string, id int64) ([]string, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT r.name FROM rules r
-		WHERE r.enabled AND EXISTS (
-			SELECT 1 FROM jsonb_array_elements(r.actions) a
-			WHERE a->>'type' = $1 AND a->$2 = to_jsonb($3::bigint))
-		ORDER BY r.position, r.id`, actionType, idKey, id)
+		SELECT r.name FROM rules r JOIN rule_refs rr ON rr.rule_id = r.id
+		WHERE rr.`+col+` = $1
+		ORDER BY r.position, r.id`, id)
 	if err != nil {
 		return nil, err
 	}

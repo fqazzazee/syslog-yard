@@ -384,5 +384,10 @@ func (s *server) writeError(w http.ResponseWriter, what string, err error) {
 		http.Error(w, "name already in use", http.StatusConflict)
 		return
 	}
+	// A rule's tag/channel vanished between the API's check and the write.
+	if errors.Is(err, store.ErrMissingRef) {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	s.internalError(w, what, err)
 }

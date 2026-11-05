@@ -78,17 +78,10 @@ func (s *Store) UpdateChannel(ctx context.Context, c Channel) (bool, error) {
 }
 
 // DeleteChannel removes a channel. It refuses with an *InUseError while an
-// enabled rule's notify action targets the channel.
+// enabled rule's notify action targets the channel (see DeleteTag).
 func (s *Store) DeleteChannel(ctx context.Context, id int64) error {
-	names, err := s.rulesReferencing(ctx, "notify", "channel_id", id)
-	if err != nil {
-		return err
-	}
-	if len(names) > 0 {
-		return &InUseError{What: "channel", Rules: names}
-	}
-	_, err = s.Pool.Exec(ctx, `DELETE FROM notification_channels WHERE id = $1`, id)
-	return err
+	_, err := s.Pool.Exec(ctx, `DELETE FROM notification_channels WHERE id = $1`, id)
+	return s.inUseError(ctx, err, "channel", "channel_id", id)
 }
 
 // Delivery is one row of the notification_log.

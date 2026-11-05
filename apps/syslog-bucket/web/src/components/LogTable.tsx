@@ -11,6 +11,10 @@
 // While the reader is scrolled away from the top of the newest-first
 // order, live arrivals don't move the view; a "N new" pill counts them and
 // scrolls back up.
+//
+// Compact mode keeps every row to one line (long messages are cut with an
+// ellipsis, full text on hover and in the detail pane); otherwise messages
+// wrap. Rows are re-measured on every render, so switching keeps the place.
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Button, EmptyState } from "../../../../shared/web/src/ui";
 import { useVirtualRows } from "../../../../shared/web/src/virtual";
@@ -31,6 +35,7 @@ interface Props {
   onSelectTechnique: (id: string) => void;
   olderState: "idle" | "loading" | "end";
   onLoadOlder: () => void;
+  compact: boolean;
 }
 
 const PAGE_ROWS = 10;
@@ -74,6 +79,7 @@ function Rows({
   onSelectTechnique,
   olderState,
   onLoadOlder,
+  compact,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
@@ -222,7 +228,7 @@ function Rows({
 
   return (
     <div className="logpane">
-      <div className="logtable" ref={scrollRef} tabIndex={-1} onKeyDown={onKey}>
+      <div className={compact ? "logtable compact" : "logtable"} ref={scrollRef} tabIndex={-1} onKeyDown={onKey}>
         <table className="data-table" aria-rowcount={entries.length + 1}>
           <caption className="sr-only">
             Log entries. Arrow keys or j and k move between rows, Enter opens one, Escape closes the details.
@@ -261,6 +267,7 @@ function Rows({
                 tagsById={tagsById}
                 selected={e.id === selectedId}
                 tabbable={e.id === tabbable}
+                compact={compact}
                 onSelect={select}
                 onSelectTechnique={selectTechnique}
               />
@@ -309,6 +316,7 @@ const Row = memo(function Row({
   tagsById,
   selected,
   tabbable,
+  compact,
   onSelect,
   onSelectTechnique,
 }: {
@@ -317,6 +325,7 @@ const Row = memo(function Row({
   tagsById: Map<number, Tag>;
   selected: boolean;
   tabbable: boolean;
+  compact: boolean;
   onSelect: (e: Entry) => void;
   onSelectTechnique: (id: string) => void;
 }) {
@@ -337,7 +346,7 @@ const Row = memo(function Row({
       <td className="col-host">{e.host}</td>
       <td className="col-app">{e.app_name}</td>
       <td className="col-class">{e.device_class || ""}</td>
-      <td className="col-msg">
+      <td className="col-msg" title={compact ? e.msg : undefined}>
         {(e.tag_ids ?? []).map((id) => {
           const tag = tagsById.get(id);
           return tag ? <TagChip key={id} tag={tag} /> : null;
