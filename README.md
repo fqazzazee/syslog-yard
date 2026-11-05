@@ -9,8 +9,6 @@ tools that run as containers under a single compose file:
   logrotate-managed retention.
 - **syslog-bucket** is a multi-user syslog server with a triage UI modeled on an email client.
 
-![syslog-yard-diagram-01](docs/img/syslog-yard-diagram-01.png)
-
 Each tool works on its own. Run all three and you get a full loop (generate,
 then route and filter, then store) on one internal bridge network, with web UIs
 on ports 8080, 8081, and 8082.
