@@ -129,13 +129,16 @@ async function check(res: Response): Promise<Response> {
     if (res.status === 401 && !res.url.includes("/api/auth/")) {
       window.dispatchEvent(new Event("auth-expired"));
     }
-    let msg = `${res.status} ${res.statusText}`;
+    // Prefer a JSON {"error": "..."} body, then the plain-text body, then
+    // the status line.
     const raw = (await res.text().catch(() => "")).trim();
+    let msg = raw || `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""}`;
     try {
-      const body = JSON.parse(raw);
-      if (body.error) msg = body.error;
+      const body: unknown = JSON.parse(raw);
+      const err = body && typeof body === "object" ? (body as { error?: unknown }).error : undefined;
+      if (typeof err === "string" && err.trim()) msg = err.trim();
     } catch {
-      msg = raw || msg;
+      // not JSON: keep the raw text
     }
     throw new Error(msg);
   }
@@ -150,7 +153,7 @@ export const api = {
   apply: (): Promise<{ ok: boolean; config: string }> =>
     fetch("/api/apply", { method: "POST" }).then(check).then((r) => r.json()),
   rollback: (id: string) =>
-    fetch(`/api/rollback/${id}`, { method: "POST" }).then(check),
+    fetch(`/api/rollback/${encodeURIComponent(id)}`, { method: "POST" }).then(check),
   history: (): Promise<HistoryEntry[]> =>
     fetch("/api/history").then(check).then((r) => r.json()),
   status: (): Promise<Status> =>
@@ -168,7 +171,7 @@ export const api = {
       .then(check)
       .then((r) => r.json()),
   historyConfig: (id: string): Promise<string> =>
-    fetch(`/api/history/${id}/config`).then(check).then((r) => r.text()),
+    fetch(`/api/history/${encodeURIComponent(id)}/config`).then(check).then((r) => r.text()),
   certs: (): Promise<CertStatus> =>
     fetch("/api/certs").then(check).then((r) => r.json()),
   generateCert: (): Promise<CertStatus> =>
