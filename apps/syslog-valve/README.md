@@ -18,7 +18,7 @@ and graph import/export.
 ## Run (standalone)
 
 ```sh
-make image
+make image   # builds with -f Dockerfile .. (context is apps/, for apps/shared)
 docker run -d --name syslog-valve -p 8081:8081 -p 5514:514/udp \
   -v valve-data:/data syslog-valve:latest
 ```

@@ -37,11 +37,12 @@ docker run -d --name syslog-hose \
   syslog-hose:latest
 ```
 
-Or with compose (builds from source):
+Or with compose (builds from source; the build context is the parent `apps/`
+dir because the image also copies `apps/shared`):
 
 ```bash
-git clone <repo-url> && cd syslog-hose
-docker compose up -d
+git clone <repo-url> && cd syslog-yard/apps/syslog-hose
+docker compose up -d --build
 ```
 
 Open **http://localhost:8080**, create a job, point it at your collector's IP:port, hit ▶.
@@ -53,6 +54,7 @@ binds privileged ports:
 
 ```bash
 # context is the parent apps/ dir: the image also copies apps/shared
+# (same as `make image`)
 podman build -t syslog-hose -f Dockerfile ..
 podman run -d --name syslog-hose \
   -p 8080:8080 \

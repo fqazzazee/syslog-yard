@@ -12,5 +12,6 @@ test:
 run: build
 	HOSE_DATA=./data ./syslog-hose
 
+# The build context is the parent apps/ dir: the image also copies apps/shared.
 image:
-	podman build -t syslog-hose:latest . 2>/dev/null || docker build -t syslog-hose:latest .
+	podman build -t syslog-hose:latest -f Dockerfile .. 2>/dev/null || docker build -t syslog-hose:latest -f Dockerfile ..
