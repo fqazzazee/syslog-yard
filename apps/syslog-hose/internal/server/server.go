@@ -63,6 +63,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/preview", s.preview)
 	s.mux.HandleFunc("GET /api/stream", s.stream)
 	s.mux.HandleFunc("GET /api/hints", s.getHints)
+	// liveness for container healthchecks; public in yardauth
+	s.mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, map[string]any{"ok": true, "status": "ok"})
+	})
 	if s.ui != nil {
 		s.mux.Handle("/", spaHandler(s.ui))
 	}
