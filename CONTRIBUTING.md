@@ -30,9 +30,28 @@ covering standalone use, env vars, and a UI dev server:
 - [apps/syslog-bucket](apps/syslog-bucket/README.md)
 
 Code every tool needs lives once in [apps/shared](apps/shared): the `yardauth`
-guard, the hardening headers, the ATT&CK catalog, and the shared web
-components (`Icon`, `YardNav`, `AccountMenu` — the per-app files of the same
-name are one-line re-export shims). Edit it there; the apps consume it via a
+guard, the hardening headers, the ATT&CK catalog, and the shared web UI in
+`apps/shared/web/src`:
+
+- styles: `tokens.css` (palette, spacing, type, the focus ring, and each
+  tool's accent, in both themes), `components.css`, and `shell.css`;
+- the frame: `AppShell` (top bar, tool switcher, side nav, skip link), with
+  the tool and section map and the cross-tool link helpers in `suite.ts`;
+- primitives: `ui.tsx` (`Button`, `IconButton`, `Field`, `Banner`,
+  `EmptyState`, `Loading`, `Badge`, `PageHeader`, `Tabs`), `Dialog`, `Menu`,
+  `Toast`, and `Icon`;
+- shared screens: `Login`, `About`, and `AccountMenu` (password change and
+  user management, backed by `yardAuthApi.ts`);
+- helpers: `http.ts` (the JSON request helper, `ApiError`, and session-expiry
+  handling), `hooks.ts` (`useVisibleInterval`, `useMediaQuery`,
+  `useStoredState`, `useHashRoute`), and `theme.ts`.
+
+Each app imports these directly by relative path, along with the three
+stylesheets in its `main.tsx`. Only the bucket keeps local stand-ins:
+`components/Icon.tsx` and the `useVisibleInterval` export in `hooks.ts`
+re-export the shared code, and `components/Modal.tsx` wraps `Dialog`. Edit
+the shared code, not those. Text and background pairs must stay WCAG AA
+(4.5:1) in both themes, so check any new pair before adding it. The apps consume `apps/shared` via a
 `replace` directive (Go) and relative imports (web), wired together by the
 root `go.work`.
 

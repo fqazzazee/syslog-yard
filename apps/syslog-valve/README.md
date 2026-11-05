@@ -28,6 +28,30 @@ UI on http://localhost:8081. Listeners you define bind *inside* the
 container — publish the matching ports (e.g. `-p 5514:514/udp` for an IN port
 on 514/udp).
 
+## Web UI
+
+The valve uses the suite's shared app shell (see
+[Navigation and deep links](../../README.md#navigation-and-deep-links)). Its
+side nav starts as an icon rail so the canvas keeps its room, and it has three
+pages:
+
+- **Flow** (`#/flow`): the canvas. The page header holds an **Add node** menu
+  (Internal IN, External IN, Filter, OUT port, Cache, Notify), **Export**,
+  **Import** and **Apply**, plus an *unsaved changes* badge while the canvas
+  differs from the saved graph. Selecting a node opens its panel; below
+  900 px the panel becomes a bottom sheet. A notify node's panel shows its
+  sent / failed / dropped counts and the rate limit in effect. The live tail
+  folds out from the footer.
+- **History** (`#/history`): the applied configs as a table with **View**
+  and **Roll back**, and the active syslog-ng config on a second tab.
+- **Live tail** (`#/tail`): everything entering the valve, by IN port.
+
+Apply and rollback results show as a banner at the top of the page: an error
+when the valve refuses, or a warning when the config was installed but
+syslog-ng didn't confirm it (for example, because it isn't running). When a
+422 names nodes, the canvas outlines them, selects the first, and repeats the
+error in its panel.
+
 ## Applying a graph
 
 - **Apply confirms the reload.** After the syntax check and the swap, the
