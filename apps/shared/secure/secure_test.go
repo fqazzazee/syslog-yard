@@ -138,6 +138,29 @@ func TestHeadersSetsHardeningAndGuards(t *testing.T) {
 	}
 }
 
+func TestClientIP(t *testing.T) {
+	pol := &Policy{TrustedProxies: parsePrefixes([]string{"10.0.0.0/8"})}
+	cases := []struct{ remote, xff, want string }{
+		{"192.0.2.1:4000", "", "192.0.2.1"},
+		{"192.0.2.1:4000", "203.0.113.9", "192.0.2.1"}, // untrusted peer: XFF ignored
+		{"10.0.0.2:4000", "", "10.0.0.2"},
+		{"10.0.0.2:4000", "203.0.113.9", "203.0.113.9"},
+		{"10.0.0.2:4000", "6.6.6.6, 203.0.113.9, 10.0.0.7", "203.0.113.9"}, // spoofed left hop skipped
+		{"10.0.0.2:4000", "junk, 10.0.0.7", "10.0.0.7"},
+		{"[::ffff:10.0.0.2]:4000", "203.0.113.9", "203.0.113.9"},
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = c.remote
+		if c.xff != "" {
+			r.Header.Set("X-Forwarded-For", c.xff)
+		}
+		if got := pol.ClientIP(r); got != c.want {
+			t.Errorf("remote=%s xff=%q: got %s, want %s", c.remote, c.xff, got, c.want)
+		}
+	}
+}
+
 func TestParsePrefixes(t *testing.T) {
 	got := parsePrefixes(fields("10.0.0.0/8, 192.0.2.7 ::1,bogus"))
 	if len(got) != 3 {

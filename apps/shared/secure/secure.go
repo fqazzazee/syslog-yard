@@ -233,12 +233,16 @@ func hostEqual(u *url.URL, host string) bool {
 }
 
 func (p *Policy) fromTrustedProxy(r *http.Request) bool {
-	if len(p.TrustedProxies) == 0 {
-		return false
-	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
+	}
+	return p.trusted(host)
+}
+
+func (p *Policy) trusted(host string) bool {
+	if len(p.TrustedProxies) == 0 {
+		return false
 	}
 	a, err := netip.ParseAddr(host)
 	if err != nil {
@@ -251,4 +255,32 @@ func (p *Policy) fromTrustedProxy(r *http.Request) bool {
 		}
 	}
 	return false
+}
+
+// ClientIP answers the address of the client behind r: the TCP peer, or —
+// when the peer is one of YARD_TRUSTED_PROXIES — the right-most
+// X-Forwarded-For hop that is not itself a trusted proxy. A client cannot
+// spoof it by sending its own X-Forwarded-For to an untrusted listener.
+func ClientIP(r *http.Request) string { return envPolicy().ClientIP(r) }
+
+// ClientIP is the Policy-scoped form of the package-level ClientIP.
+func (p *Policy) ClientIP(r *http.Request) string {
+	peer, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		peer = r.RemoteAddr
+	}
+	if !p.trusted(peer) {
+		return peer
+	}
+	hops := fields(strings.Join(r.Header.Values("X-Forwarded-For"), ","))
+	for i := len(hops) - 1; i >= 0; i-- {
+		if _, err := netip.ParseAddr(hops[i]); err != nil {
+			break // garbage: stop at the last address we could vouch for
+		}
+		peer = hops[i]
+		if !p.trusted(peer) {
+			break
+		}
+	}
+	return peer
 }
