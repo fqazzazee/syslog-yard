@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { api, SEVERITIES, type CertStatus, type GraphNode, type MitreCatalog } from "./api";
-import { Icon } from "./Icon";
+import { useVisibleInterval } from "../../../shared/web/src/hooks";
+import { errorText } from "../../../shared/web/src/http";
+import { Banner, Button } from "../../../shared/web/src/ui";
+import { api, SEVERITIES, type CertStatus, type GraphNode, type MitreCatalog, type NotifyStats } from "./api";
 
 const TITLES: Record<GraphNode["type"], string> = {
   source: "IN port",
@@ -14,12 +16,14 @@ export function NodePanel({
   node,
   shares,
   readOnly,
+  error,
   onChange,
   onDelete,
 }: {
   node: GraphNode;
   shares: string[];
   readOnly?: boolean; // viewer role: every field (and test/cert action) disabled
+  error?: string; // the last save/apply rejection, when it names this node
   onChange: (g: GraphNode) => void;
   onDelete?: () => void;
 }) {
@@ -28,9 +32,10 @@ export function NodePanel({
 
   return (
     <div className="panel">
-      <h3>{TITLES[node.type]}</h3>
+      <h2 className="panel-title">{TITLES[node.type]}</h2>
+      {error && <Banner kind="error">{error}</Banner>}
       {/* A disabled fieldset disables every control inside it at once. */}
-      <fieldset disabled={readOnly} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+      <fieldset disabled={readOnly} className="panel-fields">
         <label>
           Name
           <input
@@ -178,15 +183,21 @@ export function NodePanel({
               />
             </label>
             <label>
-              Max notifications/min (0 = unlimited)
+              Max notifications/min
               <input
                 type="number"
                 min={0}
-                value={node.config.ratePerMin ?? 30}
-                onChange={(e) => set({ ratePerMin: Number(e.target.value) })}
+                placeholder="60"
+                aria-describedby={`rate-help-${node.id}`}
+                value={node.config.ratePerMin || ""}
+                onChange={(e) => set({ ratePerMin: e.target.value === "" ? 0 : Number(e.target.value) })}
               />
             </label>
+            <p className="muted field-help" id={`rate-help-${node.id}`}>
+              Empty or 0 uses the default of 60 per minute; extra matches are dropped (counted below).
+            </p>
             <NotifyTest kind={node.config.notifyKind ?? "slack"} url={node.config.url ?? ""} />
+            <NotifyCounters nodeId={node.id} />
             <p className="muted">
               Matched messages are delivered in real time, before storage. For email, use a
               syslog-bucket channel. Changes take effect on Apply.
@@ -259,9 +270,14 @@ export function NodePanel({
 
       <p className="muted">Changes take effect on Apply.</p>
       {onDelete && (
-        <button className="danger" onClick={onDelete} title="Remove this node and its wires (takes effect on Apply)">
-          <Icon name="delete" size={15} /> Delete node
-        </button>
+        <Button
+          variant="danger"
+          icon="delete"
+          onClick={onDelete}
+          title="Remove this node and its wires (takes effect on Apply)"
+        >
+          Delete node
+        </Button>
       )}
     </div>
   );
@@ -311,15 +327,19 @@ function NotifyTest({ kind, url }: { kind: string; url: string }) {
     api
       .notifyTest(kind, url)
       .then(() => setStatus("✓ test delivered"))
-      .catch((e) => setStatus("✗ " + String(e)))
+      .catch((e) => setStatus("✗ " + errorText(e)))
       .finally(() => setBusy(false));
   };
   return (
     <div className="cond-row">
-      <button type="button" disabled={busy || !url} onClick={test}>
+      <Button size="sm" disabled={busy || !url} onClick={test}>
         Send test
-      </button>
-      {status && <span className="muted">{status}</span>}
+      </Button>
+      {status && (
+        <span className="muted" role="status">
+          {status}
+        </span>
+      )}
     </div>
   );
 }
@@ -332,7 +352,7 @@ function CertPanel() {
   const [err, setErr] = useState("");
 
   useEffect(() => {
-    api.certs().then(setCert).catch((e) => setErr(String(e)));
+    api.certs().then(setCert).catch((e) => setErr(errorText(e)));
   }, []);
 
   const generate = () => {
@@ -342,7 +362,7 @@ function CertPanel() {
     api
       .generateCert()
       .then(setCert)
-      .catch((e) => setErr(String(e)))
+      .catch((e) => setErr(errorText(e)))
       .finally(() => setBusy(false));
   };
 
@@ -359,10 +379,37 @@ function CertPanel() {
           No certificate yet — TLS IN ports need one (served from /data/certs).
         </p>
       )}
-      <button onClick={generate} disabled={busy}>
+      <Button size="sm" onClick={generate} disabled={busy}>
         {cert?.exists ? "Regenerate self-signed cert" : "Generate self-signed cert"}
-      </button>
-      {err && <p className="err">{err}</p>}
+      </Button>
+      {err && <Banner kind="error">{err}</Banner>}
     </div>
+  );
+}
+
+// NotifyCounters shows the node's delivery counters since the valve started
+// (only once the node has been applied).
+function NotifyCounters({ nodeId }: { nodeId: string }) {
+  const [stats, setStats] = useState<NotifyStats | null>(null);
+  useVisibleInterval(() => {
+    api
+      .notifyStats()
+      .then((all) => setStats(all?.[nodeId] ?? null))
+      .catch(() => setStats(null));
+  }, 5000, [nodeId]);
+  if (!stats) return null;
+  return (
+    <p className="notify-counters" aria-label="Delivery counters since start">
+      <span>
+        <b>{stats.sent}</b> sent
+      </span>
+      <span className={stats.failed ? "err" : undefined}>
+        <b>{stats.failed}</b> failed
+      </span>
+      <span className={stats.dropped ? "warn" : undefined}>
+        <b>{stats.dropped}</b> dropped
+      </span>
+      <span className="muted">limit {stats.ratePerMin || 60}/min</span>
+    </p>
   );
 }

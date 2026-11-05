@@ -7,6 +7,8 @@ export default defineConfig({
   // tree; dedupe pins those imports to this app's copy.
   resolve: { dedupe: ["react", "react-dom"] },
   server: {
+    // The shared components live in apps/shared/web, outside this root.
+    fs: { allow: [".", "../../shared/web"] },
     proxy: {
       "/api": { target: "http://localhost:8081", changeOrigin: true },
     },
