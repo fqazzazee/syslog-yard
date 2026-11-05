@@ -71,7 +71,9 @@ exercise it through the UI too (`scripts/yardctl up`), not just the tests.
 
 ## Reporting security issues
 
-See the [Reporting section of docs/SECURITY.md](docs/SECURITY.md#reporting).
+Don't open a public issue. Report vulnerabilities privately as described in
+the [security policy](SECURITY.md) (GitHub private vulnerability reporting is
+enabled for this repository).
 
 ## License
 
