@@ -5,9 +5,12 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
 
@@ -25,8 +28,9 @@ func (s *server) listChannels(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "list channels", err)
 		return
 	}
+	editor := canEditChannels(auth.UserFrom(r.Context()))
 	for i := range channels {
-		channels[i].Config = redactConfig(channels[i].Config)
+		channels[i].Config = redactConfig(channels[i].Config, editor)
 	}
 	writeJSON(w, map[string]any{"channels": channels})
 }
@@ -42,7 +46,7 @@ func (s *server) createChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.reloadNotifier(r)
-	created.Config = redactConfig(created.Config)
+	created.Config = redactConfig(created.Config, true)
 	writeJSON(w, created)
 }
 
@@ -82,7 +86,7 @@ func (s *server) updateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.reloadNotifier(r)
-	c.Config = redactConfig(c.Config)
+	c.Config = redactConfig(c.Config, true)
 	writeJSON(w, c)
 }
 
@@ -142,6 +146,13 @@ func (s *server) notificationLog(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "notification log", err)
 		return
 	}
+	// Delivery errors can quote the channel URL; viewers get it masked like
+	// the channel list does.
+	if !canEditChannels(auth.UserFrom(r.Context())) {
+		for i := range log {
+			log[i].Detail = scrubURLs(log[i].Detail)
+		}
+	}
 	writeJSON(w, map[string]any{"deliveries": log})
 }
 
@@ -172,22 +183,62 @@ func validChannel(w http.ResponseWriter, c store.Channel) bool {
 	return true
 }
 
+// canEditChannels reports whether u may see channel configs in full. Viewers
+// can list channels (to read the delivery log) but never edit them, so they
+// have no need for the webhook/Slack URLs — which are bearer secrets.
+func canEditChannels(u *store.User) bool {
+	return u != nil && u.Role != store.RoleViewer
+}
+
 // redactConfig blanks the SMTP password on read and flags whether one is set,
 // so the UI can show "leave blank to keep" without ever shipping the secret.
-func redactConfig(raw json.RawMessage) json.RawMessage {
+// For non-editors (viewers) it also cuts webhook/Slack URLs down to scheme and
+// host, flagging has_url, since anyone holding the full URL can post to it.
+func redactConfig(raw json.RawMessage, editor bool) json.RawMessage {
 	m := map[string]any{}
 	if len(raw) == 0 || json.Unmarshal(raw, &m) != nil {
-		return raw
+		if editor {
+			return raw
+		}
+		return json.RawMessage(`{}`)
 	}
 	if pw, ok := m["password"]; ok {
 		m["has_password"] = pw != nil && pw != ""
 		m["password"] = ""
 	}
+	if u, ok := m["url"]; ok && !editor {
+		s, _ := u.(string)
+		m["has_url"] = s != ""
+		m["url"] = maskURL(s)
+	}
 	out, err := json.Marshal(m)
 	if err != nil {
-		return raw
+		if editor {
+			return raw
+		}
+		return json.RawMessage(`{}`)
 	}
 	return out
+}
+
+// maskURL keeps only the scheme and host of a URL — enough to tell a Slack
+// hook from a generic webhook, nothing that would let the reader use it.
+func maskURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + "/…"
+}
+
+// urlInText matches URLs embedded in free text such as delivery errors (Go's
+// HTTP client quotes the full request URL in its errors): scheme, optional
+// userinfo, host, then the rest up to a delimiter.
+var urlInText = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.\-]*://)(?:[^@/\s"'<>]*@)?([^/\s"'<>?#]+)[^\s"'<>]*`)
+
+// scrubURLs masks every URL in s to scheme://host/… .
+func scrubURLs(s string) string {
+	return urlInText.ReplaceAllString(s, "${1}${2}/…")
 }
 
 // errSecretReentry answers an edit that moves an SMTP channel to a different

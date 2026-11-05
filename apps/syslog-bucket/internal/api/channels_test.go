@@ -81,3 +81,64 @@ func TestMergeSecretsDiscardsPasswordWhenTargetChanges(t *testing.T) {
 		t.Errorf("kind change kept password %v", got)
 	}
 }
+
+func TestRedactConfigMasksURLsForViewers(t *testing.T) {
+	raw := json.RawMessage(`{"url":"https://hooks.slack.com/services/T000/B000/XXXXSECRET"}`)
+
+	viewer := map[string]any{}
+	if err := json.Unmarshal(redactConfig(raw, false), &viewer); err != nil {
+		t.Fatal(err)
+	}
+	if viewer["url"] != "https://hooks.slack.com/…" || viewer["has_url"] != true {
+		t.Errorf("viewer config = %v, want masked url + has_url", viewer)
+	}
+
+	editor := map[string]any{}
+	if err := json.Unmarshal(redactConfig(raw, true), &editor); err != nil {
+		t.Fatal(err)
+	}
+	if editor["url"] != "https://hooks.slack.com/services/T000/B000/XXXXSECRET" {
+		t.Errorf("editor should see the full url, got %v", editor["url"])
+	}
+	if _, ok := editor["has_url"]; ok {
+		t.Errorf("editor config should be unchanged, got %v", editor)
+	}
+
+	// Passwords are blanked for everyone.
+	for _, ed := range []bool{true, false} {
+		m := map[string]any{}
+		if err := json.Unmarshal(redactConfig(json.RawMessage(`{"host":"m","password":"pw"}`), ed), &m); err != nil {
+			t.Fatal(err)
+		}
+		if m["password"] != "" || m["has_password"] != true {
+			t.Errorf("editor=%v: password not redacted: %v", ed, m)
+		}
+	}
+
+	// Garbage never reaches a viewer verbatim.
+	if got := string(redactConfig(json.RawMessage(`"https://x/secret"`), false)); got != "{}" {
+		t.Errorf("unparseable config for viewer = %s, want {}", got)
+	}
+}
+
+func TestScrubURLs(t *testing.T) {
+	in := `Post "https://user:pw@hooks.slack.com/services/T/B/SECRET?x=1": dial tcp: lookup failed`
+	want := `Post "https://hooks.slack.com/…": dial tcp: lookup failed`
+	if got := scrubURLs(in); got != want {
+		t.Errorf("scrubURLs = %q, want %q", got, want)
+	}
+	if got := scrubURLs("rate limited"); got != "rate limited" {
+		t.Errorf("plain text changed: %q", got)
+	}
+}
+
+func TestCanEditChannels(t *testing.T) {
+	for role, want := range map[string]bool{store.RoleAdmin: true, store.RoleAnalyst: true, store.RoleViewer: false} {
+		if got := canEditChannels(&store.User{Role: role}); got != want {
+			t.Errorf("%s: got %v want %v", role, got, want)
+		}
+	}
+	if canEditChannels(nil) {
+		t.Error("nil user must not be an editor")
+	}
+}
