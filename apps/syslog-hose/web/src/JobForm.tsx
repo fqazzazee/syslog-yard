@@ -58,8 +58,10 @@ export function JobForm(props: {
   };
 
   return (
-    <div className="modal-backdrop" onClick={props.onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    // mousedown (not click) on the backdrop itself: a text selection that
+    // starts in a field and ends outside the form must not discard the edit.
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
+      <div className="modal">
         <h2>{editingId ? "Edit job" : "New job"}</h2>
 
         <div className="grid2">

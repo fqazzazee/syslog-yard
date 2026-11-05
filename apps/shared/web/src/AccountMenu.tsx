@@ -83,8 +83,10 @@ function AccountModal({ user, onClose }: { user: AuthUser; onClose: () => void }
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal acct-modal" onClick={(e) => e.stopPropagation()}>
+    // mousedown (not click) on the backdrop itself: a text selection that
+    // starts in a field and ends outside the dialog must not close it.
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal acct-modal">
         <div className="acct-head">
           <h2>Account — {user.username}</h2>
           <button className="acct-close" onClick={onClose}>
@@ -173,8 +175,10 @@ function UsersModal({ me, onClose }: { me: AuthUser; onClose: () => void }) {
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal acct-modal" onClick={(e) => e.stopPropagation()}>
+    // mousedown (not click) on the backdrop itself: a text selection that
+    // starts in a field and ends outside the dialog must not close it.
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal acct-modal">
         <div className="acct-head">
           <h2>Users</h2>
           <button className="acct-close" onClick={onClose}>
