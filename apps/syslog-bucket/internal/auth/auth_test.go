@@ -6,8 +6,48 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
+
+func TestCheckPassword(t *testing.T) {
+	hash, err := HashPassword("correct horse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		u    *store.User
+		pw   string
+		want bool
+	}{
+		{"unknown user", nil, "correct horse", false},
+		{"right password", &store.User{PasswordHash: hash}, "correct horse", true},
+		{"wrong password", &store.User{PasswordHash: hash}, "nope", false},
+		{"disabled account", &store.User{PasswordHash: hash, Disabled: true}, "correct horse", false},
+		{"oidc-only account", &store.User{}, "", false},
+	}
+	for _, c := range cases {
+		if got := checkPassword(c.u, c.pw); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+	if cost, err := bcrypt.Cost(dummyHash()); err != nil || cost != bcrypt.DefaultCost {
+		t.Errorf("dummy hash cost = %d (%v), want %d so unknown users take as long as real ones",
+			cost, err, bcrypt.DefaultCost)
+	}
+}
+
+func TestGeneratePassword(t *testing.T) {
+	a, b := generatePassword(), generatePassword()
+	if len(a) < 32 {
+		t.Errorf("generated password %q has under 128 bits", a)
+	}
+	if a == b {
+		t.Error("generated passwords repeat")
+	}
+}
 
 // The middleware's allow/deny decisions for anonymous requests and for the
 // viewer role need no database — no cookie means no session lookup.
@@ -37,6 +77,7 @@ func TestMiddlewareGating(t *testing.T) {
 	}
 	for _, c := range cases {
 		r := httptest.NewRequest(c.method, c.path, nil)
+		r.Header.Set("Content-Type", "application/json")
 		if c.user != nil {
 			r = r.WithContext(context.WithValue(r.Context(), ctxKey{}, c.user))
 		}
@@ -44,6 +85,42 @@ func TestMiddlewareGating(t *testing.T) {
 		h.ServeHTTP(w, r)
 		if w.Code != c.want {
 			t.Errorf("%s %s (user=%v): got %d, want %d", c.method, c.path, c.user, w.Code, c.want)
+		}
+	}
+}
+
+// A same-site page (another port on the same host) can send a cookie-bearing
+// POST without a preflight only with a "simple" content type; those are
+// refused.
+func TestMiddlewareRejectsSimplePosts(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := New(nil, false).Middleware(next)
+	analyst := &store.User{Role: store.RoleAnalyst}
+
+	cases := []struct {
+		method, path, ctype string
+		want                int
+	}{
+		{"POST", "/api/rules/1/apply", "text/plain", http.StatusUnsupportedMediaType},
+		{"POST", "/api/channels/1/test", "application/x-www-form-urlencoded", http.StatusUnsupportedMediaType},
+		{"POST", "/api/users", "multipart/form-data; boundary=x", http.StatusUnsupportedMediaType},
+		{"POST", "/api/buckets", "", http.StatusUnsupportedMediaType},
+		{"POST", "/api/auth/login", "text/plain", http.StatusUnsupportedMediaType},
+		{"POST", "/api/buckets", "application/json; charset=utf-8", http.StatusOK},
+		{"POST", "/api/auth/logout", "", http.StatusOK},
+		{"DELETE", "/api/buckets/1", "", http.StatusOK}, // preflighted cross-origin anyway
+		{"GET", "/api/entries", "", http.StatusOK},
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest(c.method, c.path, nil)
+		if c.ctype != "" {
+			r.Header.Set("Content-Type", c.ctype)
+		}
+		r = r.WithContext(WithUser(r.Context(), analyst))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != c.want {
+			t.Errorf("%s %s (%q): got %d, want %d", c.method, c.path, c.ctype, w.Code, c.want)
 		}
 	}
 }

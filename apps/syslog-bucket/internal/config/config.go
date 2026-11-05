@@ -1,7 +1,10 @@
 // Package config reads runtime configuration from environment variables.
 package config
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 type Config struct {
 	// DatabaseURL is a pgx/libpq connection string.
@@ -27,6 +30,17 @@ type Config struct {
 	OIDCRedirectURL  string
 	OIDCName         string // login-button label
 	OIDCDefaultRole  string // role for auto-provisioned users
+
+	// WSOrigins lists extra Origin host patterns (path.Match syntax, e.g.
+	// "localhost:5173") allowed to open the live-tail WebSocket. Same-origin
+	// is always allowed; leave empty outside development.
+	WSOrigins []string
+
+	// TrustedProxies is a comma-separated list of IPs/CIDRs of proxies (the
+	// hose/valve auth proxy, a reverse proxy) whose X-Forwarded-For the login
+	// throttle believes. Shared with the other yard tools as
+	// YARD_TRUSTED_PROXIES. Empty means the TCP peer is always the client.
+	TrustedProxies string
 }
 
 func FromEnv() Config {
@@ -43,8 +57,22 @@ func FromEnv() Config {
 		OIDCClientSecret: os.Getenv("BUCKET_OIDC_CLIENT_SECRET"),
 		OIDCRedirectURL:  os.Getenv("BUCKET_OIDC_REDIRECT_URL"),
 		OIDCName:         getenv("BUCKET_OIDC_NAME", "SSO"),
-		OIDCDefaultRole:  getenv("BUCKET_OIDC_DEFAULT_ROLE", "analyst"),
+		OIDCDefaultRole:  getenv("BUCKET_OIDC_DEFAULT_ROLE", "viewer"), // read-only until promoted
+
+		WSOrigins:      splitList(os.Getenv("BUCKET_WS_ORIGINS")),
+		TrustedProxies: os.Getenv("YARD_TRUSTED_PROXIES"),
 	}
+}
+
+// splitList parses a comma-separated env value, dropping blanks.
+func splitList(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func getenv(key, def string) string {
