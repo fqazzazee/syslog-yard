@@ -93,26 +93,37 @@ func (s *Store) GetBucket(ctx context.Context, id int64, u *User) (*Bucket, erro
 	return nil, nil
 }
 
+// bucketsSeededKey marks (in app_settings) that the default buckets were
+// installed once, so deleting every bucket doesn't bring them back on the
+// next restart.
+const bucketsSeededKey = "buckets.seeded"
+
 // SeedDefaultBuckets installs a curated set of saved searches reflecting a
-// realistic SOC triage workload — but only when no buckets exist yet, so it
-// never clobbers a deployment's own. They are ownerless "yard buckets",
-// visible to everyone. Returns how many were created.
+// realistic SOC triage workload — once per database: on first start, or on an
+// install that predates the seeded marker and has no buckets. They are
+// ownerless "yard buckets", visible to everyone. Returns how many were
+// created.
 func (s *Store) SeedDefaultBuckets(ctx context.Context) (int, error) {
+	if _, seeded, err := s.GetSetting(ctx, bucketsSeededKey); err != nil || seeded {
+		return 0, err
+	}
 	var n int
 	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM buckets`).Scan(&n); err != nil {
 		return 0, err
 	}
-	if n > 0 {
-		return 0, nil
-	}
-	defs := defaultBuckets()
-	for i := range defs {
-		defs[i].Position = i + 1
-		if _, err := s.CreateBucket(ctx, defs[i]); err != nil {
-			return i, err
+	created := 0
+	if n == 0 {
+		defs := defaultBuckets()
+		for i := range defs {
+			defs[i].Position = i + 1
+			if _, err := s.CreateBucket(ctx, defs[i]); err != nil {
+				return i, err
+			}
 		}
+		created = len(defs)
 	}
-	return len(defs), nil
+	// Existing installs that already have buckets get the marker too.
+	return created, s.PutSetting(ctx, bucketsSeededKey, map[string]any{"at": time.Now().UTC()})
 }
 
 // defaultBuckets is the shipped SOC workload. Conditions ride the same
