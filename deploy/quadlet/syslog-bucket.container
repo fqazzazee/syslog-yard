@@ -27,6 +27,11 @@ Environment=YARD_LINK_BUCKET=8082
 # Environment=BUCKET_OIDC_CLIENT_ID=syslog-bucket
 # Environment=BUCKET_OIDC_CLIENT_SECRET=…
 # Environment=BUCKET_OIDC_REDIRECT_URL=http://localhost:8082/api/auth/oidc/callback
+# Believe X-Forwarded-For from the hose/valve (they proxy logins), so the
+# login throttle sees each browser's address instead of one shared budget
+# per tool. Use the yard network's subnet (podman network inspect yard |
+# grep -i subnet); see docs/SECURITY.md.
+# Environment=YARD_TRUSTED_PROXIES=10.89.0.0/24
 # Non-root image on unprivileged ports: no capabilities needed.
 DropCapability=all
 NoNewPrivileges=true
@@ -38,6 +43,10 @@ HealthTimeout=5s
 HealthRetries=3
 HealthStartPeriod=20s
 Notify=healthy
+# Shutdown drains the ingest queue into Postgres (up to 6 s) and then
+# queued notifications (up to 3 s more); podman's 10 s default would cut
+# that close. (PodmanArgs rather than StopTimeout= keeps podman 4.6 happy.)
+PodmanArgs=--stop-timeout=30
 
 [Service]
 Restart=always

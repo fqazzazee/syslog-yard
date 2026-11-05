@@ -201,8 +201,20 @@ services:
       # BUCKET_OIDC_CLIENT_SECRET: "…"
       # BUCKET_OIDC_REDIRECT_URL: "http://localhost:8082/api/auth/oidc/callback"
       # BUCKET_OIDC_NAME: "Company SSO"      # login-button label
-      # BUCKET_OIDC_DEFAULT_ROLE: "analyst"  # first-time OIDC users' role (default: viewer)
+      # BUCKET_OIDC_DEFAULT_ROLE: "viewer"   # first-time OIDC users' role: viewer (default), analyst or admin
       # BUCKET_COOKIE_SECURE: "true"         # set when serving over HTTPS
+      # Logins made through the hose/valve UIs reach the bucket from those
+      # containers, which pass the browser's address in X-Forwarded-For. The
+      # bucket only believes that header from the peers listed here, so
+      # without it every proxied login shares one throttle budget per tool.
+      # List the yardnet subnet (find it with
+      # `docker network inspect syslog-yard_yardnet | grep -i subnet`, or
+      # podman's equivalent) — see docs/SECURITY.md:
+      # YARD_TRUSTED_PROXIES: "10.89.0.0/24"
+      # Behind a reverse proxy that rewrites Host, accept its public origin
+      # (set this on the hose and valve too) and allow live-tail WebSockets:
+      # YARD_TRUSTED_ORIGINS: "https://yard.example.com"
+      # BUCKET_WS_ORIGINS: "yard.example.com"
     depends_on:
       bucket-db:
         condition: service_healthy
@@ -216,6 +228,10 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    # Shutdown drains the ingest queue into Postgres (up to 6 s) and then
+    # queued notifications (up to 3 s more); the 10 s default would cut
+    # that close.
+    stop_grace_period: 30s
     restart: unless-stopped
 
   bucket-syslog:
