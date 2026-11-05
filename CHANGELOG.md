@@ -22,6 +22,13 @@ All notable changes to syslog-yard are recorded here. The format follows
   `key=value` line gets its first pair back instead of losing it to App.
   Already-stored entries keep their old values. [#26]
 
+### Changed
+
+- bucket: a suppressed entry never notifies. When any matching rule
+  suppresses an entry, the notifications queued for it by `notify` actions
+  are dropped, whatever the rule and action order. Before, suppressed
+  entries still alerted. [#28]
+
 ## [0.1.1] - 2026-11-05
 
 ### Security

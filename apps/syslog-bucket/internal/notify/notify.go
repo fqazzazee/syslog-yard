@@ -159,6 +159,11 @@ func (d *Dispatcher) Dispatch(entries []store.Entry) {
 	d.closeMu.RLock()
 	defer d.closeMu.RUnlock()
 	for _, e := range entries {
+		if e.Suppressed {
+			// The engine already drops a suppressed entry's notifications
+			// (suppress beats notify); this keeps the rule in one more place.
+			continue
+		}
 		for _, n := range e.Notifies {
 			if d.closed {
 				d.countDrop(n.ChannelID, n.RuleID)

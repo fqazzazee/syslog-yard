@@ -60,7 +60,15 @@ Add a **Notify** action to a rule and pick the channel. Notifications fire
 **at ingest only**, when a new entry matches and has been stored — so editing
 a rule and running it over history (the retroactive apply) never triggers a
 backlog of alerts. The apply-to-history response lists `notify` under
-`skipped` to make that explicit. The delivered text is a one-line summary:
+`skipped` to make that explicit.
+
+**Suppress beats notify.** If any matching rule suppresses the entry, no
+notification goes out for it, whichever rule (or action within a rule) comes
+first. Suppress means "this is noise", and noise shouldn't page anyone. To
+alert on something another rule suppresses, narrow the suppress rule's
+condition instead.
+
+The delivered text is a one-line summary:
 
 ```
 [crit] fw1 fortigate: applications3: Log4j attack detected … · MITRE T1190
