@@ -25,7 +25,7 @@ interface Props {
   me: User;
   readOnly: boolean; // viewer role: no create/edit affordances
   onEditBucket: (b: Bucket | null) => void; // null = new
-  onEditRule: (r: Rule | null) => void;
+  onEditRule: (r: Rule | null) => void; // a read-only view for viewers
   onEditFramework: (f: Framework | null) => void; // null = new custom framework
   onManageTags: () => void;
   onManageChannels: () => void;
@@ -213,12 +213,14 @@ export default function Sidebar({
           key={r.id}
           type="button"
           className={`nav-link nav-button${r.enabled ? "" : " disabled"}`}
-          disabled={readOnly}
-          title={r.enabled ? `Edit rule ${r.name}` : `${r.name} (disabled)`}
-          onClick={() => !readOnly && onEditRule(r)}
+          title={`${readOnly ? "View" : "Edit"} rule ${r.name}${r.enabled ? "" : " (disabled)"}`}
+          onClick={() => onEditRule(r)}
         >
           <Icon name="rule" size={16} />
-          <span className="nav-text">{r.name}</span>
+          <span className="nav-text">
+            {r.name}
+            {!r.enabled && <span className="sr-only"> (disabled)</span>}
+          </span>
         </button>
       ))}
 

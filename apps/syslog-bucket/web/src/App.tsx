@@ -682,6 +682,7 @@ function Workspace({
           channels={channels}
           mitreCatalog={mitreCatalog}
           otCatalog={otCatalog}
+          readOnly={readOnly}
           onClose={closeModal}
         />
       )}
