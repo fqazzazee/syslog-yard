@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strconv"
@@ -26,6 +27,10 @@ const (
 	netTopIPs         = 50  // malicious IPs listed in the summary
 	netDrillLimit     = 200 // entries returned per drill-down
 	netSampleIDs      = 5   // sample entry ids per flagged IP
+
+	// netRefreshWait is how long a refresh/save request waits for the
+	// background feed fetch before answering 202 (the fetch carries on).
+	netRefreshWait = 3 * time.Second
 )
 
 // netSummaryCache memoizes the latest summary per window so a polling UI
@@ -104,25 +109,34 @@ func (s *server) getNetSummary(w http.ResponseWriter, r *http.Request) {
 		for _, sc := range res.Scopes {
 			scopes[sc]++
 		}
+		// Collect this row's malicious IPs (with every set that flagged
+		// them) first, so an address in two feeds — or repeated in one row —
+		// counts the row once and lists its id once.
+		rowIPs := map[string][]string{}
 		for setID, addrs := range res.Hits {
 			setCounts[setID]++
 			if infos[setID].Category != netfeeds.CatMalicious {
 				continue
 			}
 			for _, ip := range addrs {
-				agg := malicious[ip]
-				if agg == nil {
-					agg = &ipAgg{feeds: map[string]bool{}}
-					malicious[ip] = agg
-				}
+				rowIPs[ip] = append(rowIPs[ip], setID)
+			}
+		}
+		for ip, sets := range rowIPs {
+			agg := malicious[ip]
+			if agg == nil {
+				agg = &ipAgg{feeds: map[string]bool{}}
+				malicious[ip] = agg
+			}
+			for _, setID := range sets {
 				agg.feeds[setID] = true
-				agg.count++
-				if row.ReceivedAt.After(agg.last) {
-					agg.last = row.ReceivedAt
-				}
-				if len(agg.ids) < netSampleIDs {
-					agg.ids = append(agg.ids, row.ID) // rows arrive newest first
-				}
+			}
+			agg.count++
+			if row.ReceivedAt.After(agg.last) {
+				agg.last = row.ReceivedAt
+			}
+			if len(agg.ids) < netSampleIDs {
+				agg.ids = append(agg.ids, row.ID) // rows arrive newest first
 			}
 		}
 	})
@@ -265,22 +279,36 @@ func (s *server) putNetConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	s.dropNetSummary() // sets just changed
 	// Newly enabled feeds have stale (or no) snapshots — fetch them now so
 	// the save gives immediate feedback.
-	s.netMgr.RefreshStale(r.Context())
-	s.netSum.mu.Lock()
-	s.netSum.key = "" // drop the cached summary; sets just changed
-	s.netSum.mu.Unlock()
-	writeJSON(w, map[string]any{"ok": true, "feeds": s.netMgr.Statuses()})
+	s.answerNetRefresh(w, s.netMgr.RefreshInBackground(false, s.dropNetSummary))
 }
 
 func (s *server) refreshNetFeeds(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return
 	}
-	s.netMgr.RefreshAll(r.Context())
+	s.answerNetRefresh(w, s.netMgr.RefreshInBackground(true, s.dropNetSummary))
+}
+
+// answerNetRefresh replies once a background feed refresh finishes, or with
+// 202 {"pending": true} after netRefreshWait while it continues. The fetch
+// runs detached from the request, so closing the tab neither blocks on it nor
+// records "context canceled" as a feed error.
+func (s *server) answerNetRefresh(w http.ResponseWriter, done <-chan struct{}) {
+	select {
+	case <-done:
+		writeJSON(w, map[string]any{"ok": true, "feeds": s.netMgr.Statuses()})
+	case <-time.After(netRefreshWait):
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "pending": true, "feeds": s.netMgr.Statuses()})
+	}
+}
+
+func (s *server) dropNetSummary() {
 	s.netSum.mu.Lock()
 	s.netSum.key = ""
 	s.netSum.mu.Unlock()
-	writeJSON(w, map[string]any{"ok": true, "feeds": s.netMgr.Statuses()})
 }
