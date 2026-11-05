@@ -43,6 +43,14 @@ All notable changes to syslog-yard are recorded here. The format follows
   gathered. `/api/stats` now also uses the live-row counter, and counts
   tables under 10,000 rows exactly (`total_exact: true` in the response).
   [#64]
+- bucket web: viewers saw rule entries in the nav as disabled buttons titled
+  "Edit rule". They now open a read-only **View rule** dialog, also from the
+  Rules page ([#64]).
+- web: the narrow-screen nav drawer traps Tab and is announced as a modal
+  dialog, sharing Dialog's keyboard handling ([#64]).
+- web: the bucket served no favicon, and hose and valve only answered
+  `/favicon.ico` with their index page. All three ship an SVG favicon in
+  their tool color ([#64]).
 
 ### Changed
 
@@ -61,6 +69,18 @@ All notable changes to syslog-yard are recorded here. The format follows
   link-local SMTP host now fails with "destination address not allowed".
   `HTTP_PROXY`/`HTTPS_PROXY` are no longer used for notifications unless
   `YARD_NOTIFY_PROXY=true`. [#61]
+- bucket web: the log table is virtualized, so thousands of entries scroll
+  and update smoothly (only the rows near the viewport are rendered). Keyboard
+  triage and sortable headers work as before. While scrolled away from the
+  top, live arrivals no longer move the view; a **N new** pill counts them
+  and scrolls back up ([#57]).
+- bucket web: in the collapsed icon rail, tags (as a flyout with **Manage
+  tags…**), notification channels and, for admins, the audit log are
+  reachable again ([#64]). The header count drops the "~" when the total is
+  exact.
+- bucket web: the rule editor says next to a notify action that
+  notifications fire only as entries arrive, never on **Save + run on
+  history**, and that a suppressed entry never notifies ([#28]).
 
 ### Added
 
@@ -270,6 +290,8 @@ Released under the MIT License; see the commit history for its contents.
 [#23]: https://github.com/fqazzazee/syslog-yard/issues/23
 [#24]: https://github.com/fqazzazee/syslog-yard/issues/24
 [#25]: https://github.com/fqazzazee/syslog-yard/issues/25
+[#26]: https://github.com/fqazzazee/syslog-yard/issues/26
+[#27]: https://github.com/fqazzazee/syslog-yard/issues/27
 [#28]: https://github.com/fqazzazee/syslog-yard/issues/28
 [#29]: https://github.com/fqazzazee/syslog-yard/issues/29
 [#30]: https://github.com/fqazzazee/syslog-yard/issues/30
@@ -301,3 +323,7 @@ Released under the MIT License; see the commit history for its contents.
 [#57]: https://github.com/fqazzazee/syslog-yard/issues/57
 [#58]: https://github.com/fqazzazee/syslog-yard/issues/58
 [#59]: https://github.com/fqazzazee/syslog-yard/issues/59
+[#61]: https://github.com/fqazzazee/syslog-yard/issues/61
+[#62]: https://github.com/fqazzazee/syslog-yard/issues/62
+[#63]: https://github.com/fqazzazee/syslog-yard/issues/63
+[#64]: https://github.com/fqazzazee/syslog-yard/issues/64
