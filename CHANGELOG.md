@@ -8,6 +8,9 @@ All notable changes to syslog-yard are recorded here. The format follows
 
 ### Fixed
 
+- bucket: Barracuda CloudGen entries (`box_Firewall_Activity`,
+  `box_Event_eventS`, …) are classified as firewall. The `barracuda` hint
+  never matched them, so their device class came out empty.
 - hose and valve: every state-changing route caps its request body and
   answers an oversized one with 413 and a JSON error. Hose preset saves over
   1 MiB used to get 400, and the valve capped only graph saves and notify
