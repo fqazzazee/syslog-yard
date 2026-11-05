@@ -70,6 +70,9 @@ services:
       HOSE_DATA: /data
       # Neighbor hint: new jobs default to this destination (editable).
       HOSE_SUGGESTED_DEST: "syslog-valve:514"
+      # "Trust valve's certificate" in the job form fetches the valve's
+      # public TLS certificate from here (server-side).
+      HOSE_VALVE_URL: "http://syslog-valve:8081"
       # Cross-tool nav links. A bare port resolves against whatever host
       # the browser used to reach this UI; set full URLs instead when the
       # tools live behind a reverse proxy or on different hosts.

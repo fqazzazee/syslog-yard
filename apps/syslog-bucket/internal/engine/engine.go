@@ -80,7 +80,17 @@ func appendUnique(dst, codes []string) []string {
 }
 
 // Apply runs every matching rule's actions against the entry in place,
-// before it is inserted. Later rules win on priority; tags accumulate.
+// before it is inserted.
+//
+// Order: rules run in position order (then id), and each rule's actions
+// in the order listed. Later rules win on priority; tags, MITRE and OT codes
+// accumulate; suppress is sticky (nothing un-suppresses).
+//
+// Suppress beats notify, whatever their order: once every rule has run, a
+// suppressed entry drops all its queued notifications, including ones a
+// rule earlier in the list queued. Suppress marks an entry as noise, and
+// noise must not page anyone. (Notify is ingest-only in any case, see
+// below, so this decides the only path a notification can take.)
 func (g *Engine) Apply(e *store.Entry) {
 	g.mu.RLock()
 	rules := g.rules
@@ -112,5 +122,8 @@ func (g *Engine) Apply(e *store.Entry) {
 				e.OT = appendUnique(e.OT, a.OT)
 			}
 		}
+	}
+	if e.Suppressed {
+		e.Notifies = nil
 	}
 }

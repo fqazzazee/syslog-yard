@@ -105,7 +105,7 @@ func TestStreamSenderSurvivesPeerClose(t *testing.T) {
 				cfg = selfSignedTLS(t)
 			}
 			port, got, accepts := closingServer(t, 4, cfg)
-			s, err := NewSender(context.Background(), transport, "127.0.0.1", port, true)
+			s, err := NewSender(context.Background(), transport, "127.0.0.1", port, &tls.Config{InsecureSkipVerify: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -140,7 +140,7 @@ func TestStreamSenderSurvivesPeerClose(t *testing.T) {
 // hang-up: one connection carries everything.
 func TestTLSSenderNoSpuriousReconnect(t *testing.T) {
 	port, got, accepts := closingServer(t, 1000, selfSignedTLS(t))
-	s, err := NewSender(context.Background(), "tls", "127.0.0.1", port, true)
+	s, err := NewSender(context.Background(), "tls", "127.0.0.1", port, &tls.Config{InsecureSkipVerify: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestTLSSenderNoSpuriousReconnect(t *testing.T) {
 // A failed write is retried once on a fresh connection with the same frame.
 func TestStreamSenderResendsAfterWriteError(t *testing.T) {
 	port, got, _ := closingServer(t, 100, nil)
-	snd, err := NewSender(context.Background(), "tcp", "127.0.0.1", port, false)
+	snd, err := NewSender(context.Background(), "tcp", "127.0.0.1", port, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestStreamSenderBacksOffWhenDown(t *testing.T) {
 	port := l.Addr().(*net.TCPAddr).Port
 	l.Close() // nothing listens here now
 
-	snd, _ := NewSender(context.Background(), "tcp", "127.0.0.1", port, false)
+	snd, _ := NewSender(context.Background(), "tcp", "127.0.0.1", port, nil)
 	s := snd.(*streamSender)
 	if err := s.Send("x"); err == nil {
 		t.Fatal("send to a closed port succeeded")
@@ -240,7 +240,7 @@ func TestStreamSenderCancelAbortsBlockedWrite(t *testing.T) {
 		}
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
-	s, _ := NewSender(ctx, "tcp", "127.0.0.1", l.Addr().(*net.TCPAddr).Port, false)
+	s, _ := NewSender(ctx, "tcp", "127.0.0.1", l.Addr().(*net.TCPAddr).Port, nil)
 	defer s.Close()
 	big := strings.Repeat("x", 1<<20)
 	done := make(chan struct{})

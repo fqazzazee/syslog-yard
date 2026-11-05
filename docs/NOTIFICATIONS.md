@@ -60,7 +60,15 @@ Add a **Notify** action to a rule and pick the channel. Notifications fire
 **at ingest only**, when a new entry matches and has been stored — so editing
 a rule and running it over history (the retroactive apply) never triggers a
 backlog of alerts. The apply-to-history response lists `notify` under
-`skipped` to make that explicit. The delivered text is a one-line summary:
+`skipped` to make that explicit.
+
+**Suppress beats notify.** If any matching rule suppresses the entry, no
+notification goes out for it, whichever rule (or action within a rule) comes
+first. Suppress means "this is noise", and noise shouldn't page anyone. To
+alert on something another rule suppresses, narrow the suppress rule's
+condition instead.
+
+The delivered text is a one-line summary:
 
 ```
 [crit] fw1 fortigate: applications3: Log4j attack detected … · MITRE T1190
@@ -111,12 +119,15 @@ to the bucket and use a bucket SMTP channel, where the password is write-only.
   written as one summary row per channel and rule every 10 seconds.
 - **Shutdown:** the bucket stops ingest first, then gives queued
   deliveries up to 3 seconds; whatever is left is counted as dropped.
-- **Outbound safety:** neither tool follows redirects, and both refuse to
-  connect to loopback, link-local (including `169.254.169.254`), unspecified
-  and multicast addresses, checked after DNS resolution. Private RFC 1918
-  addresses are allowed, since that's where on-prem webhook sinks live. An
-  `HTTP_PROXY`/`HTTPS_PROXY` in the container's environment would bypass
-  that check (only the proxy's address is checked). See
+- **Outbound safety:** both tools use the same guard for every channel
+  kind, SMTP included. Redirects are not followed, and connections to
+  loopback, unspecified (`0.0.0.0/8`), link-local (including
+  `169.254.169.254`), multicast and other cloud-metadata addresses are
+  refused, checked after DNS resolution. Private RFC 1918 addresses are
+  allowed, since that's where on-prem webhook sinks and mail relays live.
+  `HTTP_PROXY`/`HTTPS_PROXY` is ignored for notifications unless the tool
+  runs with `YARD_NOTIFY_PROXY=true`; then each target is resolved and
+  checked before the request goes to the proxy. See
   [SECURITY.md](SECURITY.md).
 - The **delivery log** is pruned to the last 7 days automatically.
 - Channels reach their endpoints from inside the bucket container — a webhook

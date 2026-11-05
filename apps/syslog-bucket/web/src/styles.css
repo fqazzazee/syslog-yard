@@ -1060,3 +1060,77 @@ label.grow {
   gap: 6px;
   font-size: var(--text-md);
 }
+
+/* ---------- audit log page (#/audit) ---------- */
+.audit-filters {
+  align-items: center;
+}
+.audit-filters input[type="search"] {
+  flex: 1 1 180px;
+  width: auto;
+  min-width: 0;
+}
+.audit-filters select {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.audit-when {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+}
+.filterbar .audit-when input {
+  width: auto;
+}
+.audit-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.audit-table td {
+  vertical-align: top;
+}
+.audit-time {
+  white-space: nowrap;
+}
+.audit-time time {
+  display: block;
+}
+.audit-abs,
+.audit-ip {
+  display: block;
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+}
+.audit-action {
+  white-space: nowrap;
+}
+.audit-details {
+  min-width: 220px;
+  overflow-wrap: anywhere;
+  color: var(--fg-muted);
+}
+.audit-failed .audit-action {
+  color: var(--danger);
+}
+button.audit-filter-link {
+  min-height: 0;
+  padding: 0;
+  font-weight: var(--weight-bold);
+  text-align: left;
+}
+.audit-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+}
+@media (max-width: 759px) {
+  .audit-filters > * {
+    flex: 1 1 140px;
+  }
+}

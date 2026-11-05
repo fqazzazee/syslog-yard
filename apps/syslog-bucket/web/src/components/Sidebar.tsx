@@ -245,6 +245,16 @@ export default function Sidebar({
           {channels.length === 0 && <p className="nav-empty">Webhook / Slack / email destinations.</p>}
         </>
       )}
+
+      {/* Admin-only pages. */}
+      {isAdmin && (
+        <>
+          <SubHead label="Admin" />
+          <NavLink href={hrefFor("audit")} icon="history" active={page === "audit"}>
+            Audit log
+          </NavLink>
+        </>
+      )}
     </div>
   );
 }

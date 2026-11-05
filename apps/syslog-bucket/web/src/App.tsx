@@ -38,7 +38,7 @@ import { AppShell } from "../../../shared/web/src/AppShell";
 import { useHashRoute } from "../../../shared/web/src/hooks";
 import { ApiError } from "../../../shared/web/src/http";
 import { Login } from "../../../shared/web/src/Login";
-import { Badge, Banner, Button, Loading, PageHeader } from "../../../shared/web/src/ui";
+import { Badge, Banner, Button, EmptyState, Loading, PageHeader } from "../../../shared/web/src/ui";
 import type { IconName } from "../../../shared/web/src/Icon";
 import BucketModal from "./components/BucketModal";
 import ChannelsModal from "./components/ChannelsModal";
@@ -46,6 +46,7 @@ import EntryDetail from "./components/EntryDetail";
 import FilterBar from "./components/FilterBar";
 import FrameworkEditor from "./components/FrameworkEditor";
 import FrameworkView from "./components/FrameworkView";
+import AuditPage from "./components/AuditPage";
 import { BucketsPage, FrameworksPage, RulesPage } from "./components/ListPages";
 import LogTable from "./components/LogTable";
 import MitreView from "./components/MitreView";
@@ -523,7 +524,15 @@ function Workspace({
                       ? "Network security"
                       : `Tag: ${tagsById.get(selection.id)?.name ?? selection.id}`;
   const title =
-    page === "buckets" ? "Buckets" : page === "rules" ? "Rules" : page === "frameworks" ? "Frameworks" : viewTitle;
+    page === "audit"
+      ? "Audit log"
+      : page === "buckets"
+        ? "Buckets"
+        : page === "rules"
+          ? "Rules"
+          : page === "frameworks"
+            ? "Frameworks"
+            : viewTitle;
 
   const statsMeta = stats && (
     <>
@@ -576,7 +585,15 @@ function Workspace({
         />
       }
     >
-      {page === "buckets" ? (
+      {page === "audit" ? (
+        me.role === "admin" ? (
+          <AuditPage />
+        ) : (
+          <EmptyState icon="history" title="Admins only">
+            The audit log is visible to administrators.
+          </EmptyState>
+        )
+      ) : page === "buckets" ? (
         <BucketsPage buckets={buckets} me={me} readOnly={readOnly} onEdit={(bucket) => setModal({ kind: "bucket", bucket })} />
       ) : page === "rules" ? (
         <RulesPage rules={rules} tagsById={tagsById} readOnly={readOnly} onEdit={(rule) => setModal({ kind: "rule", rule })} />

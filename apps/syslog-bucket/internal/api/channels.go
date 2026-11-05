@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/syslog-yard/syslog-bucket/internal/audit"
 	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
@@ -45,6 +46,7 @@ func (s *server) createChannel(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, "create channel", err)
 		return
 	}
+	s.record(r, audit.ChannelCreate, "channel", created.ID, channelSummary(created))
 	s.reloadNotifier(r)
 	created.Config = redactConfig(created.Config, true)
 	writeJSON(w, created)
@@ -85,6 +87,11 @@ func (s *server) updateChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	sum := channelSummary(c)
+	if string(existing.Config) != string(c.Config) {
+		sum["config_changed"] = true // which part is not recorded: it holds URLs and passwords
+	}
+	s.record(r, audit.ChannelUpdate, "channel", id, sum)
 	s.reloadNotifier(r)
 	c.Config = redactConfig(c.Config, true)
 	writeJSON(w, c)
@@ -95,6 +102,11 @@ func (s *server) deleteChannel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	gone, err := s.store.GetChannel(r.Context(), id)
+	if err != nil {
+		s.internalError(w, "get channel", err)
+		return
+	}
 	if err := s.store.DeleteChannel(r.Context(), id); err != nil {
 		if errors.Is(err, store.ErrInUse) {
 			http.Error(w, err.Error(), http.StatusConflict)
@@ -102,6 +114,9 @@ func (s *server) deleteChannel(w http.ResponseWriter, r *http.Request) {
 		}
 		s.internalError(w, "delete channel", err)
 		return
+	}
+	if gone != nil {
+		s.record(r, audit.ChannelDelete, "channel", id, map[string]any{"name": gone.Name, "kind": gone.Kind})
 	}
 	s.reloadNotifier(r)
 	w.WriteHeader(http.StatusNoContent)
@@ -167,6 +182,13 @@ func (s *server) reloadNotifier(r *http.Request) {
 	if err := s.notifier.Reload(r.Context()); err != nil {
 		slog.Error("api: reload notifier", "error", err)
 	}
+}
+
+// channelSummary describes a channel for the audit log by name, kind and
+// state only. Its config never goes in: webhook and Slack URLs are bearer
+// secrets and SMTP configs carry a password.
+func channelSummary(c store.Channel) map[string]any {
+	return map[string]any{"name": c.Name, "kind": c.Kind, "enabled": c.Enabled, "rate_per_min": c.RatePerMin}
 }
 
 func validChannel(w http.ResponseWriter, c store.Channel) bool {

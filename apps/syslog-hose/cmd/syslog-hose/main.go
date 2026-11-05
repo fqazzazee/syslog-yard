@@ -113,12 +113,17 @@ func main() {
 		fmt.Printf("syslog-hose: auth enforced via %s\n", os.Getenv("YARD_AUTH_URL"))
 	}
 
+	handler := server.New(mgr, store, ui, hints, guard)
+	// "Trust valve's certificate" in the job form fetches the valve's public
+	// certificate from here (server-side; unset = action hidden).
+	handler.SetValveURL(os.Getenv("HOSE_VALVE_URL"))
+
 	// No ReadTimeout/WriteTimeout: /api/stream is a long-lived SSE response.
 	// Bodies are size-capped per handler; headers and idle keep-alives are
 	// bounded here so slow or parked clients can't pin connections.
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           server.New(mgr, store, ui, hints, guard),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}

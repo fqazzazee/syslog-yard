@@ -53,6 +53,8 @@ type Guard struct {
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
+
+	anonymous map[string]bool // tool-specific additions to public
 }
 
 // New returns a guard talking to the bucket at authURL; an empty authURL
@@ -67,6 +69,19 @@ func New(authURL string, cookieSecure bool) *Guard {
 }
 
 func (g *Guard) Enabled() bool { return g.authURL != "" }
+
+// AllowAnonymous makes exact /api/ paths reachable without a session, on
+// top of the suite-wide public list. Only for data that is public anyway
+// (e.g. a TLS certificate every client sees in the handshake). Call it
+// before the handler serves.
+func (g *Guard) AllowAnonymous(paths ...string) {
+	if g.anonymous == nil {
+		g.anonymous = map[string]bool{}
+	}
+	for _, p := range paths {
+		g.anonymous[p] = true
+	}
+}
 
 // Routes mounts the tool-local auth endpoints. They exist even when the
 // guard is disabled so the SPA can always ask /api/auth/info. Account
@@ -121,7 +136,7 @@ func (g *Guard) Middleware(next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if !strings.HasPrefix(p, "/api/") || public[p] {
+		if !strings.HasPrefix(p, "/api/") || public[p] || g.anonymous[p] {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -241,7 +256,7 @@ func (g *Guard) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<16))
 	if err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
+		secure.WriteBodyError(w, err)
 		return
 	}
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
@@ -321,7 +336,7 @@ func (g *Guard) proxy(w http.ResponseWriter, r *http.Request, path string) {
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
+		secure.WriteBodyError(w, err)
 		return
 	}
 	req, err := http.NewRequestWithContext(r.Context(), r.Method,

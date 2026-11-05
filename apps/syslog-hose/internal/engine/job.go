@@ -2,9 +2,11 @@ package engine
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,26 +16,32 @@ import (
 
 // JobConfig is the persisted definition of a generator stream.
 type JobConfig struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Preset      string  `json:"preset"`
-	Host        string  `json:"host"`
-	Port        int     `json:"port"`
-	Transport   string  `json:"transport"`   // udp | tcp | tls
-	TLSInsecure bool    `json:"tlsInsecure"` // skip cert verification (labs)
-	Format      string  `json:"format"`      // "" = preset default
-	Rate        float64 `json:"rate"`        // events per second, fractional ok
-	RateMode    string  `json:"rateMode"`    // steady | jitter | burst
-	JitterPct   float64 `json:"jitterPct"`   // jitter mode: ± percent (default 30)
-	BurstFactor float64 `json:"burstFactor"` // burst mode: rate multiplier (default 5)
-	BurstEvery  int     `json:"burstEvery"`  // burst mode: seconds between bursts (default 30)
-	BurstLen    int     `json:"burstLen"`    // burst mode: burst length seconds (default 5)
-	DurationSec int     `json:"durationSec"` // 0 = run until stopped
-	MaxEvents   int64   `json:"maxEvents"`   // 0 = unlimited
-	Hostname    string  `json:"hostname"`    // override preset hostname
-	Appname     string  `json:"appname"`
-	Facility    int     `json:"facility"` // -1 = preset default
-	Autostart   bool    `json:"autostart"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Preset      string `json:"preset"`
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	Transport   string `json:"transport"`   // udp | tcp | tls
+	TLSInsecure bool   `json:"tlsInsecure"` // skip cert verification (labs)
+	// TLSCA is PEM: a CA bundle or the receiver's own certificate (pinned)
+	// to verify it against instead of the system roots.
+	TLSCA string `json:"tlsCA,omitempty"`
+	// TLSServerName overrides the name the receiver's certificate is
+	// checked against (default: Host).
+	TLSServerName string  `json:"tlsServerName,omitempty"`
+	Format        string  `json:"format"`      // "" = preset default
+	Rate          float64 `json:"rate"`        // events per second, fractional ok
+	RateMode      string  `json:"rateMode"`    // steady | jitter | burst
+	JitterPct     float64 `json:"jitterPct"`   // jitter mode: ± percent (default 30)
+	BurstFactor   float64 `json:"burstFactor"` // burst mode: rate multiplier (default 5)
+	BurstEvery    int     `json:"burstEvery"`  // burst mode: seconds between bursts (default 30)
+	BurstLen      int     `json:"burstLen"`    // burst mode: burst length seconds (default 5)
+	DurationSec   int     `json:"durationSec"` // 0 = run until stopped
+	MaxEvents     int64   `json:"maxEvents"`   // 0 = unlimited
+	Hostname      string  `json:"hostname"`    // override preset hostname
+	Appname       string  `json:"appname"`
+	Facility      int     `json:"facility"` // -1 = preset default
+	Autostart     bool    `json:"autostart"`
 }
 
 // maxRate is the ceiling for both the configured rate and the effective
@@ -55,6 +63,21 @@ func (c *JobConfig) Validate() error {
 	case "udp", "tcp", "tls":
 	default:
 		return fmt.Errorf("transport must be udp, tcp or tls")
+	}
+	// The TLS fields are checked even for udp/tcp, where they are kept but
+	// unused, so switching the transport back never surfaces a bad value.
+	c.TLSCA = strings.TrimSpace(c.TLSCA)
+	c.TLSServerName = strings.TrimSpace(c.TLSServerName)
+	if c.TLSCA != "" {
+		if c.Transport == "tls" && c.TLSInsecure {
+			return fmt.Errorf("a trusted CA/certificate and skipping verification exclude each other: clear one")
+		}
+		if _, err := ParseTrustedCerts(c.TLSCA); err != nil {
+			return err
+		}
+	}
+	if err := checkServerName(c.TLSServerName); err != nil {
+		return err
 	}
 	if c.Rate <= 0 {
 		return fmt.Errorf("rate must be > 0 events/sec")
@@ -194,7 +217,7 @@ func (j *job) start(lookup presetLookup, emit onEvent) error {
 
 	// Dial outside the lock (DNS can be slow). A concurrent halt cancels ctx
 	// and waits on done, which finish closes on every path.
-	sender, err := NewSender(ctx, cfg.Transport, cfg.Host, cfg.Port, cfg.TLSInsecure)
+	sender, err := newJobSender(ctx, cfg)
 	if err != nil {
 		j.finish(done)
 		return err
@@ -208,6 +231,18 @@ func (j *job) start(lookup presetLookup, emit onEvent) error {
 	activeRuns.Add(1)
 	go j.run(ctx, cfg, startedAt, sender, r, emit, done)
 	return nil
+}
+
+// newJobSender builds the sender for a job's destination and transport.
+func newJobSender(ctx context.Context, cfg JobConfig) (Sender, error) {
+	var tlsConf *tls.Config
+	if cfg.Transport == "tls" {
+		var err error
+		if tlsConf, err = TLSConfig(cfg.TLSInsecure, cfg.TLSCA, cfg.TLSServerName); err != nil {
+			return nil, err
+		}
+	}
+	return NewSender(ctx, cfg.Transport, cfg.Host, cfg.Port, tlsConf)
 }
 
 // finish moves the job back to idle and releases waiters. It runs exactly

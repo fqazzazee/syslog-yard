@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
+	"github.com/syslog-yard/syslog-bucket/internal/audit"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
 
@@ -161,7 +163,13 @@ func (s *Service) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	signIn := audit.Event{
+		Action: audit.SignIn, TargetType: "user", TargetID: strconv.FormatInt(u.ID, 10),
+		Summary: map[string]any{"method": "oidc"},
+	}.As(u)
 	if u.Disabled {
+		signIn.Summary["reason"] = "account disabled"
+		s.record(r, signIn)
 		http.Error(w, "account is disabled", http.StatusForbidden)
 		return
 	}
@@ -169,6 +177,8 @@ func (s *Service) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	signIn.Success = true
+	s.record(r, signIn)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

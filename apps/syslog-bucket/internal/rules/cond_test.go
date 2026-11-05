@@ -119,14 +119,59 @@ func TestCompileSQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "(e.host ILIKE $1 AND (e.severity <= $2 OR EXISTS (SELECT 1 FROM entry_tags ct WHERE ct.entry_id = e.id AND ct.tag_id = $3)) AND NOT (e.msg_tsv @@ websearch_to_tsquery('simple', $4)) AND lower((e.structured->>$5)) = lower($6) AND e.received_at > now() - make_interval(secs => $7))"
+	want := "(e.host ILIKE $1 AND (e.severity <= $2::bigint OR EXISTS (SELECT 1 FROM entry_tags ct WHERE ct.entry_id = e.id AND ct.tag_id = $3)) AND NOT COALESCE(e.msg_tsv @@ websearch_to_tsquery('simple', $4), FALSE) AND lower((e.structured->>$5)) = lower($6) AND e.received_at > now() - make_interval(secs => $7))"
 	if sql != want {
 		t.Errorf("sql:\n got %s\nwant %s", sql, want)
 	}
 	if args[0] != "%fw\\_1%" {
 		t.Errorf("LIKE escape: got %q", args[0])
 	}
+	if args[1] != int64(3) {
+		t.Errorf("numeric bound: got %#v, want int64(3)", args[1])
+	}
 	if len(args) != 7 {
 		t.Errorf("args: got %d, want 7", len(args))
+	}
+}
+
+// Numeric fields are integer columns: bounds are sent as bigint, and a
+// fractional one is rounded so the SQL keeps Match's answer.
+func TestCompileNumericBounds(t *testing.T) {
+	cases := []struct {
+		op    string
+		value any
+		sql   string
+		arg   any
+	}{
+		{"lt", 2.5, "e.severity < $1::bigint", int64(3)},
+		{"lte", 2.5, "e.severity <= $1::bigint", int64(2)},
+		{"gt", 2.5, "e.severity > $1::bigint", int64(2)},
+		{"gte", 2.5, "e.severity >= $1::bigint", int64(3)},
+		{"gte", -0.5, "e.severity >= $1::bigint", int64(0)},
+		{"eq", 2.5, "FALSE", nil},
+		{"ne", 2.5, "TRUE", nil},
+		{"eq", "4", "e.severity = $1::bigint", int64(4)},
+		{"ne", 40000.0, "e.severity IS DISTINCT FROM $1::bigint", int64(40000)},
+		{"lt", "1e300", "e.severity < $1::bigint", int64(1 << 62)},
+		{"eq", "NaN", "FALSE", nil},
+		{"ne", "NaN", "TRUE", nil},
+	}
+	for _, c := range cases {
+		var args []any
+		arg := func(v any) string {
+			args = append(args, v)
+			return fmt.Sprintf("$%d", len(args))
+		}
+		sql, err := Cond{Field: "severity", Op: c.op, Value: c.value}.CompileSQL(arg)
+		if err != nil {
+			t.Fatalf("%s %v: %v", c.op, c.value, err)
+		}
+		var got any
+		if len(args) > 0 {
+			got = args[0]
+		}
+		if sql != c.sql || got != c.arg {
+			t.Errorf("%s %v: got %q %#v, want %q %#v", c.op, c.value, sql, got, c.sql, c.arg)
+		}
 	}
 }

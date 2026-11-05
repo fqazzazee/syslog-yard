@@ -1,12 +1,19 @@
 package codegen
 
 import (
+	"bufio"
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/syslog-yard/syslog-valve/internal/graph"
 )
 
 // These tests run the generated configs through the real tools when they
@@ -102,5 +109,109 @@ func TestIntegrationLogrotateParses(t *testing.T) {
 	}
 	if strings.Contains(string(out), "postrotate") || strings.Contains(string(out), "running postrotate") {
 		t.Errorf("logrotate parsed a postrotate script:\n%s", out)
+	}
+}
+
+// TestIntegrationSourceAutoDetect runs a generated source → forward flow
+// through the real syslog-ng and checks what reaches the next hop: RFC 5424
+// keeps its host, app and structured data; RFC 3164 and bare "<PRI>k=v"
+// lines (FortiGate) pass as before.
+func TestIntegrationSourceAutoDetect(t *testing.T) {
+	bin, err := exec.LookPath("syslog-ng")
+	if err != nil {
+		t.Skip("syslog-ng not installed")
+	}
+	ver := syslogNGVersion(t, bin)
+
+	sink, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sink.Close()
+	free, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inPort := free.Addr().(*net.TCPAddr).Port
+	free.Close()
+
+	g := &graph.Graph{
+		Nodes: []graph.Node{
+			{ID: "src-1", Type: graph.TypeSource, Name: "in",
+				Config: graph.Config{Transport: "tcp", Port: inPort, Bind: "127.0.0.1"}},
+			{ID: "fwd-1", Type: graph.TypeForward, Name: "next",
+				Config: graph.Config{Transport: "tcp", Port: sink.Addr().(*net.TCPAddr).Port, Host: "127.0.0.1"}},
+		},
+		Edges: []graph.Edge{{From: "src-1", To: "fwd-1"}},
+	}
+	conf, err := Generate(g, ver, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	conf = strings.ReplaceAll(conf, TapSocket, filepath.Join(dir, "tap.sock"))
+	path := filepath.Join(dir, "syslog-ng.conf")
+	if err := os.WriteFile(path, []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bin, "-F", "--no-caps", "-f", path,
+		"--persist-file", filepath.Join(dir, "persist"),
+		"--pidfile", filepath.Join(dir, "pid"),
+		"--control", filepath.Join(dir, "ctl"))
+	var stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stderr, &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cmd.Process.Kill(); cmd.Wait() }()
+
+	var in net.Conn
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		in, err = net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(inPort)))
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("syslog-ng never listened: %v\n%s", err, stderr.String())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// Real hose preset lines: juniper-srx, linux-host, fortinet-fortigate.
+	lines := []string{
+		`<150>1 2026-11-05T10:06:28.699Z juniper-45 RT_FLOW - RT_FLOW_SESSION_CLOSE [junos@2636.1.1.1.2.129 reason="idle Timeout" source-address="172.17.165.245"] session closed`,
+		`<37>Nov  5 10:06:28 linux-45 sudo[15987]: jsmith : TTY=pts/3 ; USER=root`,
+		`<188>date=2026-11-05 time=10:06:28 devname="fw-01" devid="FGT60FTK2009012345" logid="0000000013" type="traffic"`,
+	}
+	for _, l := range lines {
+		fmt.Fprintln(in, l)
+	}
+	in.Close()
+
+	sink.(*net.TCPListener).SetDeadline(time.Now().Add(5 * time.Second))
+	c, err := sink.Accept()
+	if err != nil {
+		t.Fatalf("nothing forwarded: %v\n%s", err, stderr.String())
+	}
+	defer c.Close()
+	c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	sc := bufio.NewScanner(c)
+	var got []string
+	for len(got) < len(lines) && sc.Scan() {
+		got = append(got, sc.Text())
+	}
+	if len(got) != len(lines) {
+		t.Fatalf("forwarded %d of %d lines: %q\n%s", len(got), len(lines), got, stderr.String())
+	}
+	for i, want := range []string{
+		` juniper-45 RT_FLOW: [junos@2636.1.1.1.2.129 reason="idle Timeout" source-address="172.17.165.245"] session closed`,
+		` linux-45 sudo[15987]: jsmith : TTY=pts/3 ; USER=root`,
+		`devname="fw-01" devid="FGT60FTK2009012345"`,
+	} {
+		if !strings.Contains(got[i], want) {
+			t.Errorf("line %d: got %q, want it to contain %q", i, got[i], want)
+		}
+	}
+	if !strings.HasPrefix(got[0], "<150>") || !strings.HasPrefix(got[2], "<188>") {
+		t.Errorf("priority not kept: %q", got)
 	}
 }

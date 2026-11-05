@@ -72,8 +72,12 @@ error in its panel.
   and the notify targets from that graph and records the result as a new
   history entry. Graphs archived by older versions are sanitized on load
   (control characters become spaces).
-- **Request limits:** graph saves are capped at 1 MiB and notify tests at
-  64 KiB; larger bodies get **413**.
+- **Request limits:** graph saves are capped at 1 MiB and every other
+  state-changing request at 64 KiB, including the ones that take no body;
+  larger bodies get **413** with `{"error": "..."}`.
+- **Public certificate:** `GET /api/certs/pem` serves the certificate of the
+  TLS IN ports as PEM (never the key) and needs no session, so senders can
+  pin it. syslog-hose's **Trust valve's certificate** uses it.
 - **Notify nodes** default to 60 deliveries/min (0 or empty means the
   default; there's no unlimited setting), with a 32-message queue per node.
   Per-node counters are at `GET /api/notify/stats`. See
@@ -95,6 +99,7 @@ error in its panel.
 | `YARD_COOKIE_SECURE`      | `false`     | Mark session cookies `Secure` (HTTPS) |
 | `YARD_SHARES`             | _(unset)_   | Comma-separated share names mounted at `/shares/<name>`, offered as cache locations ([docs/SHARES.md](../../docs/SHARES.md)) |
 | `YARD_TRUSTED_ORIGINS`    | _(unset)_   | Extra Origins accepted on state-changing requests, for a reverse proxy that rewrites `Host` |
+| `YARD_NOTIFY_PROXY`       | _(unset)_   | `true` sends notifications through `HTTP_PROXY`/`HTTPS_PROXY`, checking each target before it goes to the proxy; otherwise the proxy variables are ignored for notifications ([docs/SECURITY.md](../../docs/SECURITY.md)) |
 | `YARD_TRUSTED_PROXIES`    | _(unset)_   | IPs/CIDRs of a reverse proxy in front of the valve: its `X-Forwarded-Host` and `X-Forwarded-For` are believed ([docs/SECURITY.md](../../docs/SECURITY.md)) |
 | `YARD_LINK_HOSE` / `_VALVE` / `_BUCKET` | _(unset)_ | Cross-tool nav links: a full URL, or a bare port resolved against the host the browser used |
 

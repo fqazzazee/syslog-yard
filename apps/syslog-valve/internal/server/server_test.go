@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/syslog-yard/shared/yardauth"
 	"github.com/syslog-yard/syslog-valve/internal/codegen"
 	"github.com/syslog-yard/syslog-valve/internal/graph"
 	"github.com/syslog-yard/syslog-valve/internal/notify"
@@ -242,6 +244,48 @@ func TestPutGraphRejectsHostileInput(t *testing.T) {
 	big := bytes.Repeat([]byte(" "), maxGraphBody+1)
 	if rec := e.do("PUT", "/api/graph", big); rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized body: %d", rec.Code)
+	}
+}
+
+// The public certificate is reachable without a session (syslog-hose
+// fetches it server-side); the rest of /api/certs is not.
+func TestCertPEMIsPublic(t *testing.T) {
+	e := newEnv(t)
+	srv := New(e.sup, e.dataDir, nil, nil, nil, e.rotator, nil, e.nd, yardauth.New("http://127.0.0.1:1", false))
+	for path, guarded := range map[string]bool{"/api/certs/pem": false, "/api/certs": true} {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if isAuthErr := rec.Code == http.StatusUnauthorized; isAuthErr != guarded {
+			t.Errorf("GET %s without a session: %d %s", path, rec.Code, rec.Body)
+		}
+	}
+	if _, err := os.Stat(codegen.CertFile); errors.Is(err, os.ErrNotExist) {
+		rec := e.do("GET", "/api/certs/pem", nil)
+		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "no TLS certificate") {
+			t.Fatalf("no certificate yet: %d %s", rec.Code, rec.Body)
+		}
+	}
+}
+
+// #63: every mutating route answers an oversized body with 413 and a JSON
+// error, whether or not it reads a body, and whatever its declared length.
+func TestBodyLimitsOnEveryMutatingRoute(t *testing.T) {
+	e := newEnv(t)
+	small := bytes.Repeat([]byte(" "), 64<<10+1)
+	for _, path := range []string{"/api/notify/test", "/api/apply", "/api/rotate", "/api/certs/selfsigned", "/api/rollback/1"} {
+		rec := e.do("POST", path, small)
+		if rec.Code != http.StatusRequestEntityTooLarge || !strings.Contains(rec.Body.String(), `"error"`) {
+			t.Errorf("POST %s: %d %s", path, rec.Code, rec.Body)
+		}
+	}
+	// a body of unknown length is cut off while it is read
+	req := httptest.NewRequest("PUT", "/api/graph", bytes.NewReader(bytes.Repeat([]byte(" "), maxGraphBody+1)))
+	req.ContentLength = -1
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge || !strings.Contains(rec.Body.String(), `"error"`) {
+		t.Fatalf("chunked oversized graph: %d %s", rec.Code, rec.Body)
 	}
 }
 

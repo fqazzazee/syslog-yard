@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/syslog-yard/syslog-bucket/internal/audit"
 	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/store"
 )
@@ -64,6 +65,7 @@ func (s *server) createUser(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, "create user", err)
 		return
 	}
+	s.record(r, audit.UserCreate, "user", created.ID, map[string]any{"username": created.Username, "role": created.Role})
 	writeJSON(w, created)
 }
 
@@ -137,18 +139,50 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 	// for the bucket's REST API than for the hose and valve (which cache a
 	// session's user for up to 30 s) and for open live tails (which re-check
 	// their session every 30 s). Promotions keep the sessions.
-	if sessionsRevokedBy(before, req.Role, req.Disabled, req.Password != nil) {
+	revoked := sessionsRevokedBy(before, req.Role, req.Disabled, req.Password != nil)
+	if revoked {
 		if err := s.store.DeleteUserSessions(r.Context(), id); err != nil {
 			s.internalError(w, "revoke sessions", err)
 			return
 		}
 	}
+	s.recordUserUpdate(r, before, req.DisplayName, req.Email, req.Role, req.Disabled, req.Password != nil, revoked)
 	user, err := s.store.GetUser(r.Context(), id)
 	if err != nil || user == nil {
 		s.internalError(w, "get user after update", err)
 		return
 	}
 	writeJSON(w, user)
+}
+
+// recordUserUpdate audits an admin edit of an account: the fields that
+// changed (one user.update event) and, separately, a password reset (whose
+// value is never recorded).
+func (s *server) recordUserUpdate(r *http.Request, before *store.User, displayName, email, role string, disabled, passwordReset, revoked bool) {
+	changes := map[string]any{}
+	if role != before.Role {
+		changes["role"] = change(before.Role, role)
+	}
+	if disabled != before.Disabled {
+		changes["disabled"] = change(before.Disabled, disabled)
+	}
+	if displayName != before.DisplayName {
+		changes["display_name"] = change(before.DisplayName, displayName)
+	}
+	if email != before.Email {
+		changes["email"] = change(before.Email, email)
+	}
+	if len(changes) > 0 {
+		changes["username"] = before.Username
+		if revoked && !passwordReset {
+			changes["sessions_revoked"] = true
+		}
+		s.record(r, audit.UserUpdate, "user", before.ID, changes)
+	}
+	if passwordReset {
+		s.record(r, audit.UserPasswordReset, "user", before.ID,
+			map[string]any{"username": before.Username, "sessions_revoked": true})
+	}
 }
 
 // roleRank orders roles by privilege so demotions can be detected.
@@ -183,9 +217,18 @@ func (s *server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "you cannot delete your own account", http.StatusBadRequest)
 		return
 	}
+	// Snapshot the account for the audit row before it goes.
+	gone, err := s.store.GetUser(r.Context(), id)
+	if err != nil {
+		s.internalError(w, "get user", err)
+		return
+	}
 	if err := s.store.DeleteUser(r.Context(), id); err != nil {
 		s.internalError(w, "delete user", err)
 		return
+	}
+	if gone != nil {
+		s.record(r, audit.UserDelete, "user", id, map[string]any{"username": gone.Username, "role": gone.Role})
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -228,6 +271,11 @@ func (s *server) putBucketShares(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "replace bucket shares", err)
 		return
 	}
+	shared := make([]map[string]any, 0, len(req.Shares))
+	for _, sh := range req.Shares {
+		shared = append(shared, map[string]any{"user_id": sh.UserID, "can_edit": sh.CanEdit})
+	}
+	s.record(r, audit.BucketShare, "bucket", b.ID, map[string]any{"name": b.Name, "shares": shared})
 	shares, err := s.store.ListBucketShares(r.Context(), b.ID)
 	if err != nil {
 		s.internalError(w, "list bucket shares", err)

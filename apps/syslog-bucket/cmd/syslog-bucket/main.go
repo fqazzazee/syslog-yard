@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/syslog-yard/syslog-bucket/internal/api"
+	"github.com/syslog-yard/syslog-bucket/internal/audit"
 	"github.com/syslog-yard/syslog-bucket/internal/auth"
 	"github.com/syslog-yard/syslog-bucket/internal/config"
 	"github.com/syslog-yard/syslog-bucket/internal/engine"
@@ -75,6 +77,18 @@ func resetAdmin(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Recorded synchronously: this process exits right after. A failed write
+	// is logged, not fatal — the reset itself already happened.
+	summary := []byte(`{"username":"admin","sessions_revoked":true,"via":"reset-admin command"}`)
+	if u, err := st.GetUserByUsername(ctx, "admin"); err == nil && u != nil {
+		id := u.ID
+		if err := st.InsertAudit(ctx, []store.AuditEvent{{
+			ActorName: "reset-admin", Action: audit.UserPasswordReset, TargetType: "user",
+			TargetID: strconv.FormatInt(id, 10), Summary: summary, Success: true,
+		}}); err != nil {
+			slog.Error("audit: record reset-admin", "error", err)
+		}
+	}
 	fmt.Printf("admin password reset to: %s\n", password)
 	return nil
 }
@@ -105,6 +119,10 @@ func run() error {
 	// env) and applied inside api.New, so they can be reconfigured at runtime.
 	authSvc := auth.New(st, cfg.CookieSecure)
 
+	// Audit log: written off the request path, pruned hourly.
+	auditor := audit.New(st, time.Duration(cfg.AuditRetentionDays)*24*time.Hour)
+	go auditor.Run(ctx)
+
 	eng := engine.New(st)
 	if err := eng.Reload(ctx); err != nil {
 		return err
@@ -126,7 +144,7 @@ func run() error {
 	netMgr.Load(ctx)
 	go netMgr.Run(ctx)
 
-	registry := parsers.NewRegistry(parsers.Generic{})
+	registry := parsers.Default()
 	ing := ingest.New(st, registry, eng, hub, dispatcher, cfg.IngestAddr)
 
 	ingestErr := make(chan error, 1)
@@ -150,7 +168,7 @@ func run() error {
 	}
 	httpSrv := &http.Server{
 		Addr:    cfg.APIAddr,
-		Handler: api.New(st, eng, hub, dispatcher, dist, hints, authSvc, cfg, netMgr, ing),
+		Handler: api.New(st, eng, hub, dispatcher, dist, hints, authSvc, cfg, netMgr, ing, auditor),
 		// Same limits as hose and valve. No Read/WriteTimeout: they would
 		// cut long-lived WebSocket live tails.
 		ReadHeaderTimeout: 10 * time.Second,
@@ -180,7 +198,8 @@ func run() error {
 	//  2. ingest closes its connections, drains its queue into the database,
 	//     and returns once the batcher has exited (bounded by its drain
 	//     timeout);
-	//  3. the dispatcher gets a bounded window for deliveries already queued.
+	//  3. the dispatcher gets a bounded window for deliveries already queued;
+	//  4. once the API has stopped, queued audit events are written.
 	slog.Info("shutting down")
 	stop()
 	httpDone := make(chan struct{})
@@ -197,5 +216,6 @@ func run() error {
 	}
 	dispatcher.Shutdown(3 * time.Second)
 	<-httpDone
+	auditor.Shutdown(3 * time.Second)
 	return runErr
 }
