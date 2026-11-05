@@ -575,7 +575,8 @@ func (s *server) liveTail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.hub.Serve(w, r, cond, r.URL.Query().Get("include_suppressed") == "true")
+	alive := func(ctx context.Context) bool { return s.authSvc.SessionActive(ctx, r) }
+	s.hub.Serve(w, r, cond, r.URL.Query().Get("include_suppressed") == "true", alive)
 }
 
 // spa serves the built frontend, falling back to index.html for client-side

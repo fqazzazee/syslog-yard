@@ -34,6 +34,18 @@ type Hub struct {
 	mu      sync.RWMutex
 	clients map[*client]struct{}
 	origins []string // extra allowed Origin host patterns; same-origin always passes
+
+	recheckEvery time.Duration // session re-validation interval; 0 = default
+}
+
+// defaultRecheck bounds how long a revoked session keeps receiving entries.
+const defaultRecheck = 30 * time.Second
+
+func (h *Hub) recheck() time.Duration {
+	if h.recheckEvery > 0 {
+		return h.recheckEvery
+	}
+	return defaultRecheck
 }
 
 func NewHub() *Hub {
@@ -97,7 +109,11 @@ func (h *Hub) Broadcast(entries []store.Entry) {
 
 // Serve upgrades the request and streams matching entries until the client
 // disconnects. cond has already been validated by the API layer.
-func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, cond rules.Cond, includeSuppressed bool) {
+//
+// alive, when non-nil, is polled every recheckEvery: a stream outlives the
+// HTTP request that authorised it, so this is what ends it once the session
+// is revoked (logout, password change, the account disabled or demoted).
+func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, cond rules.Cond, includeSuppressed bool, alive func(context.Context) bool) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		// Same-origin only by default: the SPA (and the Vite dev proxy, which
 		// keeps the Host header) always connects to its own host. Cookies are
@@ -124,8 +140,19 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, cond rules.Cond, inc
 	// We never expect client messages; CloseRead surfaces disconnects (and
 	// handles pings) through ctx.
 	ctx := conn.CloseRead(r.Context())
+	var recheck <-chan time.Time
+	if alive != nil {
+		t := time.NewTicker(h.recheck())
+		defer t.Stop()
+		recheck = t.C
+	}
 	for {
 		select {
+		case <-recheck:
+			if !alive(ctx) {
+				conn.Close(websocket.StatusPolicyViolation, "session ended")
+				return
+			}
 		case frame := <-c.ch:
 			wctx, cancel := context.WithTimeout(ctx, writeTimeout)
 			err := conn.Write(wctx, websocket.MessageText, frame)

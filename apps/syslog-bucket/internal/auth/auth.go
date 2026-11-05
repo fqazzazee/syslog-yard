@@ -299,6 +299,19 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 	})
 }
 
+// SessionActive reports whether r's session cookie still belongs to a live
+// session of an enabled user. Long-lived streams (the live tail) poll it,
+// since the middleware only checks once at the start. Database errors count
+// as inactive; the client simply reconnects.
+func (s *Service) SessionActive(ctx context.Context, r *http.Request) bool {
+	c, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return false
+	}
+	u, err := s.store.GetSessionUser(ctx, hashToken(c.Value))
+	return err == nil && u != nil
+}
+
 // --- session plumbing ---
 
 func (s *Service) issueSession(ctx context.Context, w http.ResponseWriter, userID int64) error {

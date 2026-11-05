@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,7 +37,7 @@ func dial(t *testing.T, srv *httptest.Server, origin string) int {
 func TestServeOriginCheck(t *testing.T) {
 	hub := NewHub()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hub.Serve(w, r, rules.Cond{}, false)
+		hub.Serve(w, r, rules.Cond{}, false, nil)
 	}))
 	defer srv.Close()
 	self := srv.URL // http://127.0.0.1:<port>
@@ -59,5 +60,38 @@ func TestServeOriginCheck(t *testing.T) {
 	}
 	if got := dial(t, srv, "http://localhost:3000"); got != http.StatusForbidden {
 		t.Errorf("unlisted origin: got %d, want 403", got)
+	}
+}
+
+func TestServeEndsWhenSessionDies(t *testing.T) {
+	hub := NewHub()
+	hub.recheckEvery = 10 * time.Millisecond
+	var alive atomic.Bool
+	alive.Store(true)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.Serve(w, r, rules.Cond{}, false, func(context.Context) bool { return alive.Load() })
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+
+	time.Sleep(50 * time.Millisecond) // a few rechecks pass while alive
+	hub.mu.RLock()
+	n := len(hub.clients)
+	hub.mu.RUnlock()
+	if n != 1 {
+		t.Fatalf("clients = %d while session alive, want 1", n)
+	}
+
+	alive.Store(false)
+	_, _, err = conn.Read(ctx)
+	if got := websocket.CloseStatus(err); got != websocket.StatusPolicyViolation {
+		t.Fatalf("read after revocation: close status %v (err %v), want policy violation", got, err)
 	}
 }

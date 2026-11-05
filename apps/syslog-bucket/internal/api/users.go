@@ -134,9 +134,9 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	// Disables, demotions, and password resets revoke the user's sessions.
 	// The middleware re-reads the role on every request, so this matters less
-	// for the bucket itself than for the hose and valve, which cache a
-	// session's user briefly — and it makes a demotion end any live tail or
-	// open page the user still had. Promotions keep the sessions.
+	// for the bucket's REST API than for the hose and valve (which cache a
+	// session's user for up to 30 s) and for open live tails (which re-check
+	// their session every 30 s). Promotions keep the sessions.
 	if sessionsRevokedBy(before, req.Role, req.Disabled, req.Password != nil) {
 		if err := s.store.DeleteUserSessions(r.Context(), id); err != nil {
 			s.internalError(w, "revoke sessions", err)
