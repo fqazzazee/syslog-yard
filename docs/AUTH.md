@@ -210,8 +210,8 @@ succeeded.
   recorded, so a flood of guesses can't flood the log.
 - **Client address.** The same address the login throttle uses: the TCP
   peer, or the `X-Forwarded-For` client when the peer is listed in
-  `YARD_TRUSTED_PROXIES`. Sign-ins through the hose or valve show those
-  containers' address unless the bucket trusts them.
+  `YARD_TRUSTED_PROXIES`. The bucket trusts the hose and valve by name, so
+  sign-ins through them show the browser's address as they saw it.
 - **Never in the way.** Events are queued and written in the background; a
   full queue or a failed write logs the event to the bucket's container log
   and the request carries on.
@@ -248,10 +248,9 @@ succeeded.
   minutes. Password changes are throttled the same way, per user. Unknown
   usernames cost the same bcrypt comparison as real ones and get the same
   answer. Logins made through the hose or valve arrive from those
-  containers, so unless the bucket trusts them as proxies, all of them share
-  one per-address budget per tool — see
-  [SECURITY.md](SECURITY.md#client-addresses-behind-the-hose-valve-or-a-proxy)
-  for `YARD_TRUSTED_PROXIES`.
+  containers; the bucket trusts them by name (`YARD_TRUSTED_PROXIES`, set
+  in compose and quadlet) and counts the browser's address instead — see
+  [SECURITY.md](SECURITY.md#client-addresses-behind-the-hose-valve-or-a-proxy).
 - Serving over HTTPS (recommended outside a lab)? Set
   `BUCKET_COOKIE_SECURE=true` on the bucket and `YARD_COOKIE_SECURE=true`
   on the hose/valve so cookies are marked `Secure`.
@@ -272,6 +271,7 @@ succeeded.
   to be `application/json` (415 otherwise; logout is exempt). Behind a
   reverse proxy that rewrites `Host`, set
   `YARD_TRUSTED_ORIGINS=https://yard.example.com` (or
-  `YARD_TRUSTED_PROXIES=<proxy IP/CIDR>` to honour its `X-Forwarded-Host`)
+  `YARD_TRUSTED_PROXIES=<proxy IP or hostname>` to honour its
+  `X-Forwarded-Host`)
   on each tool, and `BUCKET_WS_ORIGINS` on the bucket for live tail. See
   [SECURITY.md](SECURITY.md).
