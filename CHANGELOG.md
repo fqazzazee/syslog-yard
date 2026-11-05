@@ -8,6 +8,9 @@ All notable changes to syslog-yard are recorded here. The format follows
 
 ### Fixed
 
+- hose: a job's last error clears once delivery recovers. A single
+  reconnect used to leave the card flagged red for the rest of the run; the
+  failures still count in `errors`.
 - bucket: Barracuda CloudGen entries (`box_Firewall_Activity`,
   `box_Event_eventS`, …) are classified as firewall. The `barracuda` hint
   never matched them, so their device class came out empty.

@@ -301,6 +301,7 @@ func (j *job) run(ctx context.Context, cfg JobConfig, startedAt time.Time, sende
 		deadline = startedAt.Add(time.Duration(cfg.DurationSec) * time.Second)
 	}
 
+	failing := false // the last send failed; cleared on the next success
 	for {
 		select {
 		case <-ctx.Done():
@@ -329,7 +330,14 @@ func (j *job) run(ctx context.Context, cfg JobConfig, startedAt time.Time, sende
 				}
 				j.errors.Add(1)
 				j.lastError.Store(err.Error())
+				failing = true
 			} else {
+				if failing {
+					// Delivery recovered: the error is history (it still
+					// counts in errors), not a current problem.
+					j.lastError.Store("")
+					failing = false
+				}
 				j.sent.Add(1)
 				j.winSent.Add(1)
 				emit(cfg.ID, cfg.Name, msg)
