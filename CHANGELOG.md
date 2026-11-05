@@ -28,6 +28,10 @@ All notable changes to syslog-yard are recorded here. The format follows
   suppresses an entry, the notifications queued for it by `notify` actions
   are dropped, whatever the rule and action order. Before, suppressed
   entries still alerted. [#28]
+- All tools parse `YARD_TRUSTED_PROXIES` with one shared parser: entries may
+  be separated by commas or spaces, and an invalid entry is logged and
+  skipped. Before, the bucket accepted commas only and ignored the whole
+  list if one entry was invalid. [#62]
 
 ## [0.1.1] - 2026-11-05
 
@@ -237,3 +241,4 @@ Released under the MIT License; see the commit history for its contents.
 [#57]: https://github.com/fqazzazee/syslog-yard/issues/57
 [#58]: https://github.com/fqazzazee/syslog-yard/issues/58
 [#59]: https://github.com/fqazzazee/syslog-yard/issues/59
+[#62]: https://github.com/fqazzazee/syslog-yard/issues/62

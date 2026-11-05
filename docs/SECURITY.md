@@ -249,8 +249,8 @@ never back into config or commands.
 
 The login throttle counts failures per (username, client IP). The bucket
 takes the client IP from the TCP connection, unless the connection comes
-from an address listed in `YARD_TRUSTED_PROXIES` (comma-separated IPs or
-CIDRs); then it walks `X-Forwarded-For` from the right, skipping trusted
+from an address listed in `YARD_TRUSTED_PROXIES` (IPs or CIDRs separated by
+commas and/or spaces); then it walks `X-Forwarded-For` from the right, skipping trusted
 hops, and uses the first address it doesn't trust. The same list
 decides whose `X-Forwarded-Host` the cross-origin guard believes.
 
@@ -276,8 +276,10 @@ quadlet the network is called `yard` (`podman network inspect yard`); add an
 `Environment=YARD_TRUSTED_PROXIES=...` line to `syslog-bucket.container`.
 With `compose.host-net.yaml` the valve reaches the bucket through its
 published port, so the peer the bucket sees is the runtime's port
-forwarder rather than the valve. A list that doesn't parse is logged
-(`YARD_TRUSTED_PROXIES ignored`) and nothing is trusted.
+forwarder rather than the valve. All three tools parse the list the same
+way: an entry that is neither an IP nor a CIDR is logged at startup
+(`YARD_TRUSTED_PROXIES: ignoring entry …`) and skipped, and the rest of the
+list still applies.
 
 Because the walk starts from the right, a reverse proxy in front of the
 bucket may append to the header (nginx's usual
