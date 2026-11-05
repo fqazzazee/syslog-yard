@@ -32,6 +32,8 @@ type Manager struct {
 	store   *preset.Store
 	dataDir string
 
+	persistMu sync.Mutex // serializes snapshot+write of jobs.json
+
 	tailMu  sync.Mutex
 	tail    [tailSize]TailEvent
 	tailLen int
@@ -64,7 +66,16 @@ func NewManager(store *preset.Store, dataDir string) (*Manager, error) {
 
 func (m *Manager) jobsPath() string { return filepath.Join(m.dataDir, "jobs.json") }
 
+// persist writes the current job set to jobs.json. persistMu spans the
+// snapshot and the write, so concurrent mutations land on disk in order
+// (an older snapshot can never overwrite a newer one and resurrect a
+// deleted job); the write is atomic and durable (unique temp file, fsync,
+// rename, fsync of the directory). Errors are logged: the in-memory state
+// stays authoritative until the next successful write.
 func (m *Manager) persist() {
+	m.persistMu.Lock()
+	defer m.persistMu.Unlock()
+
 	m.mu.RLock()
 	cfgs := make([]JobConfig, 0, len(m.jobs))
 	for _, j := range m.jobs {
@@ -72,11 +83,51 @@ func (m *Manager) persist() {
 	}
 	m.mu.RUnlock()
 	sort.Slice(cfgs, func(i, k int) bool { return cfgs[i].Name < cfgs[k].Name })
-	raw, _ := json.MarshalIndent(cfgs, "", "  ")
-	tmp := m.jobsPath() + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o644); err == nil {
-		os.Rename(tmp, m.jobsPath())
+	raw, err := json.MarshalIndent(cfgs, "", "  ")
+	if err == nil {
+		err = writeFileAtomic(m.jobsPath(), raw, 0o644)
 	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "syslog-hose: saving jobs: %v\n", err)
+	}
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	ok := false
+	defer func() {
+		if !ok {
+			f.Close()
+			os.Remove(tmp)
+		}
+	}()
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	if err := f.Chmod(perm); err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	ok = true
+	if d, err := os.Open(dir); err == nil {
+		err = d.Sync()
+		d.Close()
+		return err
+	}
+	return nil
 }
 
 // Create validates, stores and persists a new job config.
