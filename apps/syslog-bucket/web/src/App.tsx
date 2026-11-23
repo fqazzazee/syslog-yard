@@ -217,6 +217,7 @@ function Workspace({
   const [error, setError] = useState<string | null>(null);
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
+  const [frameworksState, setFrameworksState] = useState<"loading" | "ready" | "failed">("loading");
   const [mitreCatalog, setMitreCatalog] = useState<MitreCatalog | null>(null);
   const [otCatalog, setOtCatalog] = useState<OTCatalog | null>(null);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -242,6 +243,10 @@ function Workspace({
   // "Load older" hit the end: the oldest id at that moment. Derived rather
   // than a flag so trimming the list (live cap) re-enables the button.
   const [olderEndId, setOlderEndId] = useState<number | null>(null);
+  // The current query's load failed and has not recovered yet.
+  const [loadFailed, setLoadFailed] = useState(false);
+  // Which query the rows in entries belong to.
+  const shownQuery = useRef<string | null>(null);
 
   const readOnly = me.role === "viewer";
 
@@ -271,7 +276,12 @@ function Workspace({
   }, [reloadMeta]);
 
   const reloadFrameworks = useCallback(() => {
-    fetchFrameworks().then(setFrameworks).catch(() => {});
+    fetchFrameworks()
+      .then((f) => {
+        setFrameworks(f);
+        setFrameworksState("ready");
+      })
+      .catch(() => setFrameworksState("failed"));
   }, []);
 
   // Frameworks include site-defined ones, so reload after edits. The MITRE/OT
@@ -332,32 +342,61 @@ function Workspace({
     olderBusy.current = false;
     setOlderLoading(false);
     setOlderEndId(null);
-    fetchEntries(filters, selection, { limit: pageLimit })
-      .then((rows) => {
-        if (gen !== genRef.current) return;
-        // Merge (not replace) so live arrivals that beat this response stay.
-        const buffered = pendingLive.current;
-        pendingLive.current = [];
-        loadedRef.current = true;
-        const merged = mergeEntries(mergeEntries([], rows), buffered, MAX_ROWS);
-        setEntries(merged);
-        if (filters.sort === "time" && rows.length < pageLimit && merged.length > 0) {
-          setOlderEndId(merged[merged.length - 1].id);
-        }
-        setError(null);
-        if (backfillAfterLoad.current) {
-          backfillAfterLoad.current = false;
-          void backfillRef.current();
-        }
-      })
-      .catch((e) => gen === genRef.current && setError(String(e)));
+    setLoadFailed(false);
+    const query = JSON.stringify([filters, selection]);
+    let stopped = false;
+    let retryTimer: number | undefined;
+    let retryDelay = 2000;
+    const load = () => {
+      fetchEntries(filters, selection, { limit: pageLimit })
+        .then((rows) => {
+          if (gen !== genRef.current) return;
+          // Merge (not replace) so live arrivals that beat this response stay.
+          const buffered = pendingLive.current;
+          pendingLive.current = [];
+          loadedRef.current = true;
+          shownQuery.current = query;
+          setLoadFailed(false);
+          const merged = mergeEntries(mergeEntries([], rows), buffered, MAX_ROWS);
+          setEntries(merged);
+          if (filters.sort === "time" && rows.length < pageLimit && merged.length > 0) {
+            setOlderEndId(merged[merged.length - 1].id);
+          }
+          setError(null);
+          if (backfillAfterLoad.current) {
+            backfillAfterLoad.current = false;
+            void backfillRef.current();
+          }
+        })
+        .catch((e) => {
+          if (gen !== genRef.current) return;
+          setError(String(e));
+          setLoadFailed(true);
+          // Never leave another view's rows under this view's title.
+          if (shownQuery.current !== query) {
+            shownQuery.current = null;
+            setEntries([]);
+          }
+          // A rejected query fails the same way again; anything else
+          // (a restart, a 5xx, a dropped connection) can recover.
+          const permanent = e instanceof ApiError && e.status >= 400 && e.status < 500 && e.status !== 429;
+          if (stopped || permanent) return;
+          retryTimer = window.setTimeout(load, retryDelay);
+          retryDelay = Math.min(retryDelay * 2, 30_000);
+        });
+    };
+    load();
+    return () => {
+      stopped = true;
+      window.clearTimeout(retryTimer);
+    };
   }, [filters, selection, listPaused, pageLimit, reloadTick]);
 
   // Display order is computed client-side so live arrivals slot into the
   // chosen sort without a refetch (the server still decides which rows the
   // page contains). entries is kept newest-first, so time order is free.
   const sortedEntries = useMemo(() => {
-    if (filters.sort === "time") return filters.desc ? entries : [...entries].reverse();
+    if (filters.sort === "time") return entries;
     const dir = filters.desc ? -1 : 1;
     const tiebreak = (a: Entry, b: Entry) => b.id - a.id;
     const arr = [...entries];
@@ -381,9 +420,12 @@ function Workspace({
   }, [entries, filters.sort, filters.desc]);
 
   // Clicking a column header sorts by it; clicking the active column flips
-  // the direction.
+  // the direction. Time stays newest-first: the server pages it from the
+  // newest row, so reversing a page would not show the oldest matches.
   const onSort = (key: SortKey) =>
-    setFilters((f) => (f.sort === key ? { ...f, desc: !f.desc } : { ...f, sort: key, desc: true }));
+    setFilters((f) =>
+      f.sort !== key ? { ...f, sort: key, desc: true } : key === "time" ? f : { ...f, desc: !f.desc },
+    );
 
   const onSelectTechnique = (id: string) => select({ kind: "technique", id });
   const onSelectAlert = (id: string) => select({ kind: "otalert", id });
@@ -627,13 +669,13 @@ function Workspace({
                     {density === "compact" ? "Wrap" : "Compact"}
                   </Button>
                   <Button
-                    className={live && wsOpen ? "live on" : "live"}
+                    className={live && wsOpen && !loadFailed ? "live on" : "live"}
                     icon={live ? "sensors" : "pause"}
                     aria-pressed={live}
                     title={live ? "Pause the live tail" : "Resume the live tail"}
                     onClick={() => setLive(!live)}
                   >
-                    {live ? (wsOpen ? "Live" : "Connecting…") : "Paused"}
+                    {live ? (loadFailed ? "Load failed" : wsOpen ? "Live" : "Connecting…") : "Paused"}
                   </Button>
                 </>
               )
@@ -660,28 +702,41 @@ function Workspace({
                     selection={selection}
                     onSelectItem={onSelectFrameworkItem}
                   />
-                ) : (
+                ) : frameworksState === "loading" ? (
                   <Loading label="Loading framework…" />
+                ) : (
+                  <EmptyState
+                    icon="error"
+                    title={frameworksState === "failed" ? "Could not load frameworks" : "Framework not found"}
+                  >
+                    <a href="#/frameworks">Back to frameworks</a>
+                  </EmptyState>
                 );
               })()
             ) : isMatrix ? (
               <MitreView filters={filters} selection={selection} onSelectTechnique={onSelectTechnique} />
             ) : (
               <>
-                <LogTable
-                  entries={sortedEntries}
-                  tagsById={tagsById}
-                  selectedId={selected?.id ?? null}
-                  sort={filters.sort}
-                  desc={filters.desc}
-                  onSort={onSort}
-                  onSelect={setSelected}
-                  onDeselect={() => setSelected(null)}
-                  onSelectTechnique={onSelectTechnique}
-                  olderState={olderState}
-                  onLoadOlder={() => void loadOlder()}
-                  compact={density === "compact"}
-                />
+                {loadFailed && entries.length === 0 ? (
+                  <EmptyState icon="error" title="Could not load entries">
+                    This view has not loaded. Change the filters or reload the page if it does not recover.
+                  </EmptyState>
+                ) : (
+                  <LogTable
+                    entries={sortedEntries}
+                    tagsById={tagsById}
+                    selectedId={selected?.id ?? null}
+                    sort={filters.sort}
+                    desc={filters.desc}
+                    onSort={onSort}
+                    onSelect={setSelected}
+                    onDeselect={() => setSelected(null)}
+                    onSelectTechnique={onSelectTechnique}
+                    olderState={olderState}
+                    onLoadOlder={() => void loadOlder()}
+                    compact={density === "compact"}
+                  />
+                )}
                 {selected && (
                   <EntryDetail
                     key={selected.id}
