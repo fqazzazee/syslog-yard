@@ -127,6 +127,32 @@ up() {
     compose pull bucket-db bucket-syslog \
         || info "could not refresh postgres/syslog-ng images — using the local ones"
     compose up -d
+    sync_bucket_conf
+}
+
+# sync_bucket_conf recreates bucket-syslog when its config differs from the
+# checkout. bucket.conf is a single-file bind mount: git replaces the file on
+# pull, the container keeps the old inode, and compose does not notice. Best
+# effort: a check that cannot run warns and leaves the service alone. An
+# overlay that mounts its own config owns it, so there is nothing to compare.
+sync_bucket_conf() {
+    local conf=$YARD_DIR/deploy/syslog-ng/bucket.conf want got
+    load_overlays
+    if [ "${#OVERLAY_FILES[@]}" -gt 0 ] \
+        && grep -qsE '^[^#]*/etc/syslog-ng' "${OVERLAY_FILES[@]}"; then
+        return 0
+    fi
+    want=$(sha256sum <"$conf" 2>/dev/null) || want=""
+    want=${want%% *}
+    got=$(compose exec -T bucket-syslog sha256sum /etc/syslog-ng/syslog-ng.conf </dev/null 2>/dev/null) || got=""
+    got=$(printf '%s\n' "$got" | sed -n 's/^\([0-9a-f]\{64\}\)[[:space:]].*/\1/p' | head -n 1)
+    if [ -z "$want" ] || [ -z "$got" ]; then
+        info "warning: could not compare bucket-syslog's config — if bucket.conf changed, run: yardctl restart"
+    elif [ "$want" != "$got" ]; then
+        info "bucket.conf changed — recreating bucket-syslog"
+        compose up -d --force-recreate --no-deps bucket-syslog \
+            || info "warning: could not recreate bucket-syslog — it may still be on the old config"
+    fi
 }
 
 prereqs() {
