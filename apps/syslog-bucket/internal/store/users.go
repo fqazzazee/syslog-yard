@@ -95,12 +95,19 @@ func (s *Store) GetUserByOIDCIdentity(ctx context.Context, issuer, subject strin
 	return u, nil
 }
 
-// BindLegacyOIDCIssuer runs once per database: it assigns issuer to the SSO
-// accounts created before issuers were recorded. Later calls do nothing, so an
-// issuer configured afterwards can never inherit those accounts. With no
-// issuer configured they stay unbound (and can't sign in by SSO) until an
-// admin binds them. It returns how many accounts were bound and left unbound.
+// BindLegacyOIDCIssuer assigns the first non-blank issuer it is given to the
+// SSO accounts created before issuers were recorded, once per database. Later
+// calls do nothing, so a different issuer configured afterwards can never
+// inherit those accounts. A blank issuer binds nothing and doesn't use up the
+// bind: the accounts wait (and can't sign in by SSO) until an issuer is
+// configured. It returns how many accounts were bound and are still waiting.
 func (s *Store) BindLegacyOIDCIssuer(ctx context.Context, issuer string) (bound, unbound int64, err error) {
+	if issuer == "" {
+		err = s.Pool.QueryRow(ctx, `SELECT count(*) FROM users
+			WHERE oidc_subject IS NOT NULL AND oidc_issuer IS NULL
+			AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'oidc_issuer_backfill')`).Scan(&unbound)
+		return 0, unbound, err
+	}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return 0, 0, err
@@ -116,18 +123,12 @@ func (s *Store) BindLegacyOIDCIssuer(ctx context.Context, issuer string) (bound,
 	if tag.RowsAffected() == 0 {
 		return 0, 0, tx.Commit(ctx)
 	}
-	if issuer != "" {
-		tag, err = tx.Exec(ctx, `UPDATE users SET oidc_issuer = $1
-			WHERE oidc_subject IS NOT NULL AND oidc_issuer IS NULL`, issuer)
-		if err != nil {
-			return 0, 0, err
-		}
-		bound = tag.RowsAffected()
-	} else if err := tx.QueryRow(ctx, `SELECT count(*) FROM users
-		WHERE oidc_subject IS NOT NULL AND oidc_issuer IS NULL`).Scan(&unbound); err != nil {
+	tag, err = tx.Exec(ctx, `UPDATE users SET oidc_issuer = $1
+		WHERE oidc_subject IS NOT NULL AND oidc_issuer IS NULL`, issuer)
+	if err != nil {
 		return 0, 0, err
 	}
-	return bound, unbound, tx.Commit(ctx)
+	return tag.RowsAffected(), 0, tx.Commit(ctx)
 }
 
 func (s *Store) getUserWhere(ctx context.Context, where string, arg any) (*User, error) {
