@@ -490,6 +490,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
         ? `syslog-ng ${status.version} running (pid ${status.pid}, ${status.restarts} restarts)`
         : "syslog-ng not running"}
       {status?.lastError && <span className="err"> — {status.lastError}</span>}
+      {status?.rotateError && <span className="err"> — cache rotation failed: {status.rotateError}</span>}
     </span>
   );
 

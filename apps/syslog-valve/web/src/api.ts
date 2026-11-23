@@ -70,6 +70,8 @@ export interface Status {
   version: string;
   lastApply: string;
   lastError: string;
+  // Last cache rotation failure; retention is not running while set.
+  rotateError?: string;
   log: string[];
   // Cumulative "processed" message count per graph node id (sources + sinks),
   // from syslog-ng-ctl stats; the UI turns deltas into per-wire throughput.
