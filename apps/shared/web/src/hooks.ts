@@ -1,4 +1,71 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ensureOk } from "./http";
+
+const STREAM_RETRY_MIN_MS = 1000;
+const STREAM_RETRY_MAX_MS = 30000;
+
+// useEventStream keeps an EventSource open and returns true while it is down.
+// The browser retries a dropped connection itself but gives up for good on a
+// non-200 answer (401, 503), so a closed stream is reopened here with backoff.
+// EventSource can't read the status, so each retry first fetches probeUrl, a
+// guarded endpoint: a 401 there raises "auth-expired" through ensureOk.
+// onReopen runs when a later connection opens; the servers replay their tail
+// buffer on every connection.
+export function useEventStream(
+  url: string,
+  probeUrl: string,
+  onMessage: (m: MessageEvent<string>) => void,
+  onReopen?: () => void,
+): boolean {
+  const [down, setDown] = useState(false);
+  const handlers = useRef({ onMessage, onReopen });
+  handlers.current = { onMessage, onReopen };
+
+  useEffect(() => {
+    let es: EventSource;
+    let timer: number | undefined;
+    let stopped = false;
+    let opened = false;
+    let delay = STREAM_RETRY_MIN_MS;
+
+    const retry = async () => {
+      try {
+        await ensureOk(await fetch(probeUrl), probeUrl);
+      } catch {
+        /* still down; a 401 has already signalled auth-expired */
+      }
+      if (stopped) return;
+      timer = window.setTimeout(connect, delay);
+      delay = Math.min(delay * 2, STREAM_RETRY_MAX_MS);
+    };
+
+    const connect = () => {
+      es = new EventSource(url);
+      es.onopen = () => {
+        delay = STREAM_RETRY_MIN_MS;
+        setDown(false);
+        if (opened) handlers.current.onReopen?.();
+        opened = true;
+      };
+      es.onmessage = (m: MessageEvent<string>) => handlers.current.onMessage(m);
+      es.onerror = () => {
+        setDown(true);
+        if (es.readyState !== EventSource.CLOSED) return; // the browser is retrying
+        es.close();
+        void retry();
+      };
+    };
+
+    connect();
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      es.close();
+    };
+  }, [url, probeUrl]);
+
+  return down;
+}
 
 // useVisibleInterval calls fn every ms while the tab is visible (and, unless
 // immediate is false, once right away). A hidden tab stops polling; becoming
