@@ -220,6 +220,12 @@ func (s *Store) UpsertSource(ctx context.Context, hostname, ip string) (int64, e
 	return id, err
 }
 
+// TouchSources sets last_seen to now for the given source ids.
+func (s *Store) TouchSources(ctx context.Context, ids []int64) error {
+	_, err := s.Pool.Exec(ctx, `UPDATE sources SET last_seen = now() WHERE id = ANY($1)`, ids)
+	return err
+}
+
 // InsertEntries bulk-inserts a batch, fills in the generated ids, and
 // attaches any rule-applied tags, all in one transaction: either every entry
 // and its tags commit, or nothing does (and the ids are reset to zero).

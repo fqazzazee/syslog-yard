@@ -35,6 +35,11 @@ const (
 	flushInterval = 200 * time.Millisecond
 	queueDepth    = 10_000
 
+	// sourceTouchEvery is how often last_seen is written for sources served
+	// from the id cache; sourceTouchTimeout bounds each write.
+	sourceTouchEvery   = 30 * time.Second
+	sourceTouchTimeout = 5 * time.Second
+
 	// connDrainGrace lets a connection read what is already buffered when
 	// shutdown starts before it is cut.
 	connDrainGrace = time.Second
@@ -87,6 +92,11 @@ type Inserter interface {
 	InsertEntries(context.Context, []store.Entry) error
 }
 
+// SourceToucher refreshes last_seen for sources (implemented by *store.Store).
+type SourceToucher interface {
+	TouchSources(context.Context, []int64) error
+}
+
 // Stats are the ingest pipeline's counters since start.
 type Stats struct {
 	QueueDepth    int   `json:"queue_depth"`    // entries waiting for the batcher
@@ -113,7 +123,9 @@ type Server struct {
 	queue chan store.Entry
 
 	mu      sync.Mutex
-	sources map[string]int64 // "hostname|ip" -> source id
+	sources map[string]int64   // "hostname|ip" -> source id
+	seen    map[int64]struct{} // cached source ids awaiting a last_seen write
+	toucher SourceToucher
 
 	connMu sync.Mutex
 	conns  map[net.Conn]struct{}
@@ -133,10 +145,12 @@ func New(st *store.Store, reg *parsers.Registry, applier Applier, caster Broadca
 		addr:     addr,
 		queue:    make(chan store.Entry, queueDepth),
 		sources:  make(map[string]int64),
+		seen:     make(map[int64]struct{}),
 		conns:    make(map[net.Conn]struct{}),
 	}
 	if st != nil {
 		s.inserter = st
+		s.toucher = st
 	}
 	return s
 }
@@ -178,6 +192,13 @@ func (s *Server) serve(ctx context.Context, ln net.Listener) error {
 	go func() {
 		defer close(batcherDone)
 		s.batcher(dbCtx)
+	}()
+
+	// Separate from the batcher so a slow last_seen write never delays inserts.
+	touchStop, touchDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(touchDone)
+		s.sourceToucher(dbCtx, touchStop)
 	}()
 
 	acceptDone := make(chan struct{})
@@ -223,6 +244,8 @@ func (s *Server) serve(ctx context.Context, ln net.Listener) error {
 	s.connWG.Wait()
 	close(s.queue)
 	<-batcherDone
+	close(touchStop)
+	<-touchDone
 
 	st := s.Stats()
 	slog.Info("ingest: stopped", "inserted", st.Inserted, "dropped", st.Dropped)
@@ -341,6 +364,9 @@ func (s *Server) sourceID(ctx context.Context, hostname, ip string) (int64, erro
 	key := hostname + "|" + ip
 	s.mu.Lock()
 	id, ok := s.sources[key]
+	if ok {
+		s.seen[id] = struct{}{}
+	}
 	s.mu.Unlock()
 	if ok {
 		return id, nil
@@ -357,6 +383,50 @@ func (s *Server) sourceID(ctx context.Context, hostname, ip string) (int64, erro
 	s.sources[key] = id
 	s.mu.Unlock()
 	return id, nil
+}
+
+// sourceToucher writes last_seen for recently seen sources every
+// sourceTouchEvery, and once more when stop closes.
+func (s *Server) sourceToucher(ctx context.Context, stop <-chan struct{}) {
+	ticker := time.NewTicker(sourceTouchEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.touchSources(ctx)
+		case <-stop:
+			s.touchSources(ctx)
+			return
+		}
+	}
+}
+
+// touchSources is best-effort: on failure the ids stay pending for the next
+// attempt, and ingest carries on.
+func (s *Server) touchSources(ctx context.Context) {
+	if s.toucher == nil {
+		return
+	}
+	s.mu.Lock()
+	ids := make([]int64, 0, len(s.seen))
+	for id := range s.seen {
+		ids = append(ids, id)
+	}
+	clear(s.seen)
+	s.mu.Unlock()
+	if len(ids) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, sourceTouchTimeout)
+	defer cancel()
+	if err := s.toucher.TouchSources(ctx, ids); err != nil {
+		slog.Warn("ingest: update source last_seen", "count", len(ids), "error", err)
+		s.mu.Lock()
+		for _, id := range ids {
+			s.seen[id] = struct{}{}
+		}
+		s.mu.Unlock()
+	}
 }
 
 // retry runs op until it succeeds, fails permanently (see
