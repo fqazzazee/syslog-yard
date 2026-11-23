@@ -69,36 +69,53 @@ func TestOIDCIssuerMigrationKeepsExistingAccounts(t *testing.T) {
 	}
 }
 
-// A blank issuer leaves the one-time bind unspent; the first real issuer takes
-// the accounts and later ones get nothing.
-func TestBindLegacyOIDCIssuerWaitsForIssuer(t *testing.T) {
+// A blank first start spends the automatic bind, so a later issuer inherits
+// nothing. Only the explicit bind attaches the accounts.
+func TestBlankIssuerWaitsForExplicitBind(t *testing.T) {
 	st := storetest.New(t)
 	ctx := context.Background()
 	u, err := st.CreateUser(ctx, store.User{Username: "legacy", Role: store.RoleAdmin}, "sub-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for range 2 {
-		if bound, unbound, err := st.BindLegacyOIDCIssuer(ctx, ""); err != nil || bound != 0 || unbound != 1 {
-			t.Fatalf("blank bind: bound=%d unbound=%d err=%v", bound, unbound, err)
+	if bound, unbound, err := st.BindLegacyOIDCIssuer(ctx, ""); err != nil || bound != 0 || unbound != 1 {
+		t.Fatalf("blank bind: bound=%d unbound=%d err=%v", bound, unbound, err)
+	}
+	const issuer = "https://first.example"
+	if bound, unbound, err := st.BindLegacyOIDCIssuer(ctx, issuer); err != nil || bound != 0 || unbound != 1 {
+		t.Fatalf("later issuer: bound=%d unbound=%d err=%v", bound, unbound, err)
+	}
+	if got, err := st.GetUserByOIDCIdentity(ctx, issuer, "sub-1"); err != nil || got != nil {
+		t.Fatalf("later issuer inherited the account: %+v, %v", got, err)
+	}
+	if bound, skipped, err := st.BindUnboundOIDCAccounts(ctx, issuer); err != nil || bound != 1 || skipped != 0 {
+		t.Fatalf("explicit bind: bound=%d skipped=%d err=%v", bound, skipped, err)
+	}
+	if got, err := st.GetUserByOIDCIdentity(ctx, issuer, "sub-1"); err != nil || got == nil || got.ID != u.ID {
+		t.Fatalf("account after explicit bind: %+v, %v", got, err)
+	}
+}
+
+// An account already at the issuer with the same subject is not overwritten,
+// and the unbound one is reported instead of failing the whole bind.
+func TestExplicitBindSkipsExistingIdentity(t *testing.T) {
+	st := storetest.New(t)
+	ctx := context.Background()
+	const issuer = "https://idp.example"
+	for name, subject := range map[string]string{"clash": "sub-1", "free": "sub-2"} {
+		if _, err := st.CreateUser(ctx, store.User{Username: name, Role: store.RoleViewer}, subject); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if _, ok, err := st.GetSetting(ctx, "oidc_issuer_backfill"); err != nil || ok {
-		t.Fatalf("blank issuer consumed the marker: ok=%v err=%v", ok, err)
-	}
-	if bound, _, err := st.BindLegacyOIDCIssuer(ctx, "https://first.example"); err != nil || bound != 1 {
-		t.Fatalf("first issuer: bound=%d err=%v", bound, err)
-	}
-	if got, err := st.GetUserByOIDCIdentity(ctx, "https://first.example", "sub-1"); err != nil || got == nil || got.ID != u.ID {
-		t.Fatalf("account after bind: %+v, %v", got, err)
-	}
-	if _, err := st.CreateUser(ctx, store.User{Username: "late", Role: store.RoleViewer}, "sub-2"); err != nil {
+	existing, err := st.CreateOIDCUser(ctx, store.User{Username: "existing", Role: store.RoleViewer}, issuer, "sub-1")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if bound, unbound, err := st.BindLegacyOIDCIssuer(ctx, "https://second.example"); err != nil || bound != 0 || unbound != 0 {
-		t.Errorf("later issuer: bound=%d unbound=%d err=%v", bound, unbound, err)
+	bound, skipped, err := st.BindUnboundOIDCAccounts(ctx, issuer)
+	if err != nil || bound != 1 || skipped != 1 {
+		t.Fatalf("bound=%d skipped=%d err=%v", bound, skipped, err)
 	}
-	if bound, unbound, err := st.BindLegacyOIDCIssuer(ctx, ""); err != nil || bound != 0 || unbound != 0 {
-		t.Errorf("blank after consumption: bound=%d unbound=%d err=%v", bound, unbound, err)
+	if got, err := st.GetUserByOIDCIdentity(ctx, issuer, "sub-1"); err != nil || got == nil || got.ID != existing.ID {
+		t.Fatalf("existing identity changed: %+v, %v", got, err)
 	}
 }

@@ -90,6 +90,13 @@ You can configure it two ways:
   endpoint): saving an enabled config with a new issuer and a blank secret
   answers 400 and asks you to re-enter it. On save the bucket probes the issuer's discovery document and warns (non
   fatally) if it can't be reached yet.
+
+  SSO accounts belong to the issuer that created them, so changing the issuer
+  starts new accounts. Accounts from before v0.3.0 bind to the issuer in effect
+  at the first v0.3.0 start. If none was set, they can't sign in by SSO until
+  you attach them with `yardctl bind-sso-accounts <issuer-url>`. Use only the
+  provider they came from: a user there with a matching subject gets that
+  account and its role.
 - **By environment variable** (legacy / infrastructure-as-code): set the vars
   below. They seed the config when nothing has been saved in the UI; once you
   save in the UI, the stored config takes over (it wins over the env vars).

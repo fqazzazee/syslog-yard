@@ -13,6 +13,7 @@
 #   yardctl service-remove    stop starting at boot (suite keeps running)
 #   yardctl smoke      send a test message through valve -> bucket
 #   yardctl reset-admin   set a fresh random syslog-bucket admin password
+#   yardctl bind-sso-accounts <issuer>   attach older SSO accounts to their provider
 #
 # UI ports: 8080 (hose) 8081 (valve) 8082 (bucket); syslog entry: 6514 udp+tcp.
 # status, smoke and reset-admin also work for the podman quadlet units
@@ -354,6 +355,12 @@ reset_admin() {
     info "other admin sessions were signed out; sign in at http://localhost:8082"
 }
 
+bind_sso_accounts() {
+    [ -n "${1:-}" ] || die "usage: yardctl bind-sso-accounts <issuer-url>"
+    yard_exec syslog-bucket syslog-bucket bind-sso-accounts "$1" \
+        || die "could not bind the accounts — is the suite up? (yardctl up)"
+}
+
 case "${1:-}" in
     prereqs)          prereqs ;;
     up|start)         up && status ;;
@@ -368,5 +375,6 @@ case "${1:-}" in
     service-up)       guard_host_net; compose up -d ;; # systemd ExecStart hook (no build/curl)
     smoke)            smoke ;;
     reset-admin)      reset_admin ;;
+    bind-sso-accounts) shift; bind_sso_accounts "$@" ;;
     *)                grep '^#   yardctl' "$0" | sed 's/^# *//'; exit 1 ;;
 esac

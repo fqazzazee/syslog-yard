@@ -111,9 +111,10 @@ func (s *server) applyStoredSettings(ctx context.Context) {
 }
 
 // bindLegacyOIDC assigns SSO accounts from before issuers were recorded to the
-// configured issuer (stored or env, even if SSO is currently switched off).
-// It takes effect once per database, on the first non-blank issuer. The stored
-// row is read strictly first:
+// issuer in effect at the first start (stored or env, even if SSO is currently
+// switched off). It takes effect once per database; with no issuer then, the
+// accounts wait for the bind-sso-accounts command. The stored row is read
+// strictly first:
 // resolveOIDC treats a read error as "no row" and would fall back to env.
 func (s *server) bindLegacyOIDC(ctx context.Context) error {
 	if _, _, err := s.store.GetSetting(ctx, "oidc"); err != nil {
@@ -128,7 +129,7 @@ func (s *server) bindLegacyOIDC(ctx context.Context) error {
 		slog.Warn("bound existing SSO accounts to the configured issuer", "accounts", bound, "issuer", oc.Issuer)
 	}
 	if unbound > 0 {
-		slog.Warn("existing SSO accounts have no issuer because none is configured; they can't sign in by SSO until one is set, and will bind to the first one",
+		slog.Warn("existing SSO accounts have no issuer and can't sign in by SSO; if they belong to the configured provider, run: syslog-bucket bind-sso-accounts <issuer>",
 			"accounts", unbound)
 	}
 	return nil
@@ -201,8 +202,8 @@ func (s *server) putOIDCSettings(w http.ResponseWriter, r *http.Request) {
 	if in.DefaultRole == "" {
 		in.DefaultRole = auth.DefaultOIDCRole
 	}
-	// Existing accounts belong to the issuer in place before this save, if
-	// there is one; otherwise they bind to the saved issuer below.
+	// Existing accounts belong to the issuer in place before this save. The
+	// saved issuer never inherits them: it may be a different provider.
 	if err := s.bindLegacyOIDC(r.Context()); err != nil {
 		s.internalError(w, "bind sso accounts", err)
 		return
@@ -212,12 +213,6 @@ func (s *server) putOIDCSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.record(r, audit.SettingsOIDC, "settings", "oidc", oidcAuditSummary(prev, in, secretSent))
-	if err := s.bindLegacyOIDC(r.Context()); err != nil {
-		// Without the binding, existing SSO users would get new, empty accounts.
-		s.authSvc.SetOIDC(nil)
-		s.internalError(w, "bind sso accounts", err)
-		return
-	}
 	o := buildOIDC(in)
 	s.authSvc.SetOIDC(o)
 	// Discovery probe gives immediate feedback without blocking the save.
