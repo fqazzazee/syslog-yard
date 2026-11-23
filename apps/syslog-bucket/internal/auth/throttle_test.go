@@ -132,6 +132,86 @@ func TestClientIP(t *testing.T) {
 	}
 }
 
+func TestReserveCountsInFlightAttempts(t *testing.T) {
+	g := newGuard()
+	var held []*slot
+	for i := 0; i < loginMaxFails; i++ {
+		s, _ := g.reserve("admin", "203.0.113.9")
+		if s == nil {
+			t.Fatalf("attempt %d refused", i)
+		}
+		held = append(held, s)
+	}
+	if s, retry := g.reserve("admin", "203.0.113.9"); s != nil || retry <= 0 {
+		t.Fatal("attempt past the limit admitted while others are in flight")
+	}
+	// A release gives the budget back; a failure keeps it spent.
+	held[0].release()
+	held[0].release() // idempotent
+	if s, _ := g.reserve("admin", "203.0.113.9"); s == nil {
+		t.Fatal("released slot not reusable")
+	} else {
+		held[0] = s
+	}
+	for _, s := range held {
+		s.fail()
+	}
+	if ok, _ := g.allow("admin", "203.0.113.9"); ok {
+		t.Fatal("source should be locked after its failures settle")
+	}
+}
+
+func TestReservationLeavesNoEntryBehind(t *testing.T) {
+	g := newGuard()
+	s, _ := g.reserve("admin", "203.0.113.9")
+	s.succeed()
+	s2, _ := g.reserve("alice", "203.0.113.9")
+	s2.release()
+	if n := len(g.perSource.entries) + len(g.perAccount.entries); n != 0 {
+		t.Fatalf("%d entries retained after settled attempts", n)
+	}
+}
+
+func TestSuccessKeepsOtherReservations(t *testing.T) {
+	tr := newThrottle(2, time.Minute)
+	tr.reserve("k")
+	tr.reserve("k")
+	tr.release("k")
+	tr.reset("k") // the other attempt is still running
+	tr.reserve("k")
+	if ok, _ := tr.reserve("k"); ok {
+		t.Fatal("reset dropped an in-flight reservation")
+	}
+}
+
+func TestThrottleEntriesAreCapped(t *testing.T) {
+	tr := newThrottle(2, time.Minute)
+	tr.limit = 3
+	tr.fail("locked")
+	tr.fail("locked") // armed: must survive eviction
+	tr.reserve("running")
+	for i := range 20 {
+		tr.fail(fmt.Sprintf("flood-%d", i))
+	}
+	if len(tr.entries) > tr.limit {
+		t.Fatalf("%d entries, cap is %d", len(tr.entries), tr.limit)
+	}
+	if ok, _ := tr.allow("locked"); ok {
+		t.Error("a live lockout was evicted")
+	}
+	if a := tr.entries["running"]; a == nil || a.inflight != 1 {
+		t.Error("an in-flight reservation was evicted")
+	}
+
+	// Full of entries that can't be evicted: new keys are refused, not added.
+	tr = newThrottle(1, time.Minute)
+	tr.limit = 1
+	tr.fail("locked")
+	if ok, _ := tr.reserve("new"); ok || len(tr.entries) != 1 {
+		t.Errorf("reserve on a full table: ok=%v entries=%d", ok, len(tr.entries))
+	}
+}
+
 func TestThrottleIsolatesKeys(t *testing.T) {
 	tr := newThrottle(2, time.Minute)
 	tr.fail("victim")
