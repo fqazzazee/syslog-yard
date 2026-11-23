@@ -28,6 +28,8 @@ import (
 const (
 	cookieName = "bucket_session" // same cookie the bucket issues
 	cacheTTL   = 30 * time.Second // verification cache; bounds revocation lag
+	// sessionRecheck is how often an open stream re-verifies its session.
+	sessionRecheck = 30 * time.Second
 )
 
 // User is the subset of the bucket's user object the guard cares about.
@@ -53,9 +55,67 @@ type Guard struct {
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
+	// slid holds, per token, the new cookie expiry the bucket reported and
+	// the browser hasn't been told yet. The bucket refreshes at most once a
+	// minute, and that answer may land on a cached path or a stream recheck
+	// whose response can't carry a cookie, so it waits for the next request.
+	slid map[string]time.Time
+
+	recheck time.Duration // see SetSessionRecheck
 
 	anonymous map[string]bool // tool-specific additions to public
 }
+
+// session is what Middleware leaves in the request context.
+type session struct {
+	guard *Guard
+	token string
+	user  User
+}
+
+type sessionKey struct{}
+
+// UserFrom returns the user Middleware verified for this request, or nil
+// (guard disabled, or a public path).
+func UserFrom(ctx context.Context) *User {
+	if s, ok := ctx.Value(sessionKey{}).(*session); ok {
+		u := s.user
+		return &u
+	}
+	return nil
+}
+
+// WatchSession returns a context for a long-lived response: it is cancelled
+// when the request ends or the bucket definitely rejects the session (401).
+// Anything else, such as a bucket outage, keeps the stream open and is
+// retried at the next recheck. Call the returned function when done.
+func WatchSession(r *http.Request) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(r.Context())
+	s, ok := r.Context().Value(sessionKey{}).(*session)
+	if !ok {
+		return ctx, cancel
+	}
+	go func() {
+		tick := time.NewTicker(s.guard.recheck)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+			}
+			if u, err := s.guard.fetch(ctx, s.token); err == nil && u == nil {
+				cancel()
+				return
+			}
+		}
+	}()
+	return ctx, cancel
+}
+
+// SetSessionRecheck changes how often WatchSession re-verifies a session.
+// Call it before the handler serves; tests use it to avoid waiting.
+func (g *Guard) SetSessionRecheck(d time.Duration) { g.recheck = d }
 
 // New returns a guard talking to the bucket at authURL; an empty authURL
 // yields a disabled guard whose middleware passes everything through.
@@ -65,6 +125,8 @@ func New(authURL string, cookieSecure bool) *Guard {
 		cookieSecure: cookieSecure,
 		client:       &http.Client{Timeout: 5 * time.Second},
 		cache:        map[string]cacheEntry{},
+		slid:         map[string]time.Time{},
+		recheck:      sessionRecheck,
 	}
 }
 
@@ -140,7 +202,7 @@ func (g *Guard) Middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		u, code := g.currentUser(r)
+		u, code := g.currentUser(w, r)
 		if u == nil {
 			http.Error(w, statusMessage(code), code)
 			return
@@ -151,7 +213,13 @@ func (g *Guard) Middleware(next http.Handler) http.Handler {
 			http.Error(w, "read-only role", http.StatusForbidden)
 			return
 		}
-		next.ServeHTTP(w, r)
+		c, err := r.Cookie(cookieName)
+		if err != nil { // currentUser just read it
+			http.Error(w, statusMessage(http.StatusUnauthorized), http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), sessionKey{}, &session{guard: g, token: c.Value, user: *u})
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -163,8 +231,9 @@ func statusMessage(code int) string {
 }
 
 // currentUser resolves the request's session cookie, answering the HTTP
-// status to use when there is no user (401 or 503).
-func (g *Guard) currentUser(r *http.Request) (*User, int) {
+// status to use when there is no user (401 or 503). A session expiry the
+// bucket moved forward is passed on to the browser through w.
+func (g *Guard) currentUser(w http.ResponseWriter, r *http.Request) (*User, int) {
 	c, err := r.Cookie(cookieName)
 	if err != nil || c.Value == "" {
 		return nil, http.StatusUnauthorized
@@ -176,21 +245,49 @@ func (g *Guard) currentUser(r *http.Request) (*User, int) {
 	if u == nil {
 		return nil, http.StatusUnauthorized
 	}
+	g.sendSlidCookie(w, c.Value)
 	return u, http.StatusOK
+}
+
+// sendSlidCookie re-issues the session cookie if the bucket has moved its
+// expiry since the browser last heard, with the time already elapsed taken
+// off Max-Age.
+func (g *Guard) sendSlidCookie(w http.ResponseWriter, token string) {
+	g.mu.Lock()
+	expires, ok := g.slid[token]
+	delete(g.slid, token)
+	g.mu.Unlock()
+	if !ok {
+		return
+	}
+	maxAge := int(time.Until(expires).Seconds())
+	if maxAge <= 0 {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: cookieName, Value: token, Path: "/",
+		MaxAge: maxAge, HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, Secure: g.cookieSecure,
+	})
 }
 
 // verify asks the bucket who the token belongs to, with a short positive
 // cache so live tails and busy UIs don't hammer the bucket.
 func (g *Guard) verify(ctx context.Context, token string) (*User, error) {
-	now := time.Now()
 	g.mu.Lock()
-	if e, ok := g.cache[token]; ok && now.Before(e.expires) {
+	if e, ok := g.cache[token]; ok && time.Now().Before(e.expires) {
 		u := e.user
 		g.mu.Unlock()
 		return &u, nil
 	}
 	g.mu.Unlock()
+	return g.fetch(ctx, token)
+}
 
+// fetch asks the bucket directly, refreshing the cache. It answers (nil,
+// nil) only for a definite 401; every other failure is an error.
+func (g *Guard) fetch(ctx context.Context, token string) (*User, error) {
+	now := time.Now()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.authURL+"/api/auth/me", nil)
 	if err != nil {
 		return nil, err
@@ -204,6 +301,10 @@ func (g *Guard) verify(ctx context.Context, token string) (*User, error) {
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusUnauthorized:
+		g.mu.Lock()
+		delete(g.cache, token)
+		delete(g.slid, token)
+		g.mu.Unlock()
 		return nil, nil
 	default:
 		return nil, errors.New("auth service answered " + resp.Status)
@@ -219,7 +320,17 @@ func (g *Guard) verify(ctx context.Context, token string) (*User, error) {
 			delete(g.cache, k)
 		}
 	}
+	for k, expires := range g.slid {
+		if now.After(expires) {
+			delete(g.slid, k)
+		}
+	}
 	g.cache[token] = cacheEntry{user: u, expires: now.Add(cacheTTL)}
+	for _, c := range resp.Cookies() {
+		if c.Name == cookieName && c.Value == token && c.MaxAge > 0 {
+			g.slid[token] = now.Add(time.Duration(c.MaxAge) * time.Second)
+		}
+	}
 	g.mu.Unlock()
 	return &u, nil
 }
@@ -235,7 +346,7 @@ func (g *Guard) handleMe(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authentication disabled", http.StatusNotFound)
 		return
 	}
-	u, code := g.currentUser(r)
+	u, code := g.currentUser(w, r)
 	if u == nil {
 		http.Error(w, statusMessage(code), code)
 		return
@@ -308,6 +419,7 @@ func (g *Guard) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(cookieName); err == nil && c.Value != "" {
 		g.mu.Lock()
 		delete(g.cache, c.Value)
+		delete(g.slid, c.Value)
 		g.mu.Unlock()
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
 			g.authURL+"/api/auth/logout", nil)
@@ -362,6 +474,7 @@ func (g *Guard) proxy(w http.ResponseWriter, r *http.Request, path string) {
 		if c.Name == cookieName && c.Value != "" {
 			g.mu.Lock()
 			delete(g.cache, oldToken) // the old session was just revoked
+			delete(g.slid, oldToken)
 			g.mu.Unlock()
 			http.SetCookie(w, &http.Cookie{
 				Name: cookieName, Value: c.Value, Path: "/",
