@@ -297,6 +297,42 @@ func parseSMTPTarget(raw json.RawMessage) (smtpTarget, bool) {
 	return t, true
 }
 
+// canonicalSMTPKeys rewrites in so each SMTP field appears once, under its
+// exact name, holding the value a case-insensitive JSON decode of raw settles
+// on. Spelling variants are dropped: left in place, they could decode
+// differently once jsonb has reordered the keys.
+func canonicalSMTPKeys(raw json.RawMessage, in map[string]any) {
+	var view struct {
+		Host     json.RawMessage `json:"host"`
+		Port     json.RawMessage `json:"port"`
+		Username json.RawMessage `json:"username"`
+		Password json.RawMessage `json:"password"`
+		From     json.RawMessage `json:"from"`
+		To       json.RawMessage `json:"to"`
+		TLS      json.RawMessage `json:"tls"`
+	}
+	if json.Unmarshal(raw, &view) != nil {
+		return
+	}
+	fields := map[string]json.RawMessage{
+		"host": view.Host, "port": view.Port, "username": view.Username, "password": view.Password,
+		"from": view.From, "to": view.To, "tls": view.TLS,
+	}
+	for k := range in {
+		for f := range fields {
+			if strings.EqualFold(k, f) {
+				delete(in, k)
+			}
+		}
+	}
+	for f, v := range fields {
+		var val any
+		if v != nil && json.Unmarshal(v, &val) == nil {
+			in[f] = val
+		}
+	}
+}
+
 // mergeSecrets carries a stored password forward when the incoming config
 // leaves it blank — provided the channel still talks to the same SMTP server
 // as the same user. Otherwise the stored password is discarded, and when the
@@ -308,12 +344,20 @@ func mergeSecrets(existing, incoming store.Channel) (json.RawMessage, error) {
 		return incoming.Config, nil
 	}
 	delete(in, "has_password") // never persist the read-only flag
+	// The target is compared on exactly what will be stored and sent.
+	target := incoming.Config
+	if incoming.Kind == "smtp" {
+		canonicalSMTPKeys(incoming.Config, in)
+		if b, err := json.Marshal(in); err == nil {
+			target = b
+		}
+	}
 	if pw, ok := in["password"].(string); ok && pw == "" {
 		old := map[string]any{}
 		_ = json.Unmarshal(existing.Config, &old)
 		if oldPw, ok := old["password"].(string); ok && oldPw != "" {
 			oldT, okOld := parseSMTPTarget(existing.Config)
-			newT, okNew := parseSMTPTarget(incoming.Config)
+			newT, okNew := parseSMTPTarget(target)
 			switch {
 			case existing.Kind == incoming.Kind && okOld && okNew && oldT == newT:
 				in["password"] = oldPw

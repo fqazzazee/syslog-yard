@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/syslog-yard/syslog-bucket/internal/store"
@@ -79,6 +80,47 @@ func TestMergeSecretsDiscardsPasswordWhenTargetChanges(t *testing.T) {
 	}
 	if got := passwordOf(t, out); got != "" {
 		t.Errorf("kind change kept password %v", got)
+	}
+}
+
+// A stored password stays with the target the sender will actually use, even
+// when the config spells a field in several ways (the JSON decoder matches
+// keys case-insensitively, and jsonb may reorder them).
+func TestMergeSecretsCaseVariantKeys(t *testing.T) {
+	existing := smtpChannel(`{"host":"mail.example.com","port":587,"username":"bot","password":"s3cret","tls":"starttls"}`)
+	rest := `"port":587,"username":"bot","password":"","tls":"starttls"`
+	cases := map[string]string{
+		"upper last":   `{"host":"evil.example.net","HOST":"mail.example.com",` + rest + `}`,
+		"upper first":  `{"HOST":"mail.example.com","host":"evil.example.net",` + rest + `}`,
+		"mixed":        `{"Host":"evil.example.net","hOST":"mail.example.com",` + rest + `}`,
+		"unicode fold": `{"host":"evil.example.net","hoſt":"mail.example.com",` + rest + `}`,
+		"username":     `{"host":"mail.example.com","port":587,"username":"other","USERNAME":"bot","password":"","tls":"starttls"}`,
+		"port":         `{"host":"mail.example.com","port":2525,"PORT":587,"username":"bot","password":"","tls":"starttls"}`,
+		"tls":          `{"host":"mail.example.com","port":587,"username":"bot","password":"","tls":"none","TLS":"starttls"}`,
+	}
+	for name, cfg := range cases {
+		out, err := mergeSecrets(existing, smtpChannel(cfg))
+		if errors.Is(err, errSecretReentry) {
+			continue // refusing is always safe
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		m := map[string]any{}
+		if err := json.Unmarshal(out, &m); err != nil {
+			t.Fatal(err)
+		}
+		for k := range m {
+			for _, field := range []string{"host", "port", "username", "password", "from", "to", "tls"} {
+				if k != field && strings.EqualFold(k, field) {
+					t.Errorf("%s: variant key %q stored: %s", name, k, out)
+				}
+			}
+		}
+		if m["password"] == "s3cret" && (m["host"] != "mail.example.com" || m["username"] != "bot" ||
+			m["port"] != float64(587) || m["tls"] != "starttls") {
+			t.Errorf("%s: stored password kept for a different target: %s", name, out)
+		}
 	}
 }
 
