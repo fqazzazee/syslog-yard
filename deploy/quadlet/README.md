@@ -95,12 +95,35 @@ reuse them.)
 
 ## Updating
 
-Rebuild the image(s) from updated source, then restart:
+Rebuild the image(s) from updated source:
 
 ```sh
 podman build --pull -t localhost/syslog-hose:latest -f apps/syslog-hose/Dockerfile apps   # etc.
+```
+
+The units and `bucket.conf` are installed as copies, so a release that
+changes them does not reach a running install until you update those too.
+Compare each unit with your copy and carry the changes over by hand, keeping
+local edits such as passwords, `PublishPort=` prefixes or `Network=host`:
+
+```sh
+for f in deploy/quadlet/*.container deploy/quadlet/*.network deploy/quadlet/*.volume; do
+  diff -uN ~/.config/containers/systemd/"${f##*/}" "$f"
+done
+```
+
+Then copy the syslog-ng config (back up your copy first if you edited it),
+reload systemd and restart:
+
+```sh
+cp deploy/syslog-ng/bucket.conf ~/.config/syslog-yard/bucket.conf
+systemctl --user daemon-reload
 systemctl --user restart syslog-hose syslog-valve syslog-bucket bucket-syslog
 ```
+
+If your `syslog-bucket.container` lists the `yard` subnet in
+`YARD_TRUSTED_PROXIES`, replace it with `syslog-hose,syslog-valve` (see
+[Hardening defaults](#hardening-defaults)).
 
 Volumes (`hose-data`, `valve-data`, `bucket-dbdata`) survive restarts and
 image updates; remove them with `podman volume rm` if you want a clean slate.
