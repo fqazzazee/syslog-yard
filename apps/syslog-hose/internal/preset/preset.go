@@ -3,6 +3,7 @@ package preset
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"text/template"
@@ -38,6 +39,7 @@ type Preset struct {
 	Builtin     bool `yaml:"-" json:"builtin"`
 	totalWeight int
 	compiled    []*template.Template
+	file        string // backing file of a custom preset
 }
 
 // Parse unmarshals and validates a preset from YAML, compiling its templates.
@@ -79,6 +81,9 @@ func (p *Preset) compile() error {
 		if ev.Severity < 0 || ev.Severity > 7 {
 			return fmt.Errorf("preset %q event %d: severity must be 0-7", p.Name, i)
 		}
+		if ev.Weight > math.MaxInt-p.totalWeight {
+			return fmt.Errorf("preset %q: event weights are too large", p.Name)
+		}
 		p.totalWeight += ev.Weight
 		// FuncMap names must exist at parse time; bind no-op context, the
 		// real one is attached per render via Funcs.
@@ -86,6 +91,9 @@ func (p *Preset) compile() error {
 			Funcs(newRenderContext(p, "", rand.New(rand.NewSource(0)), nil).funcs()).
 			Parse(ev.Template)
 		if err != nil {
+			return fmt.Errorf("preset %q event %d: %w", p.Name, i, err)
+		}
+		if err := boundTemplate(t); err != nil {
 			return fmt.Errorf("preset %q event %d: %w", p.Name, i, err)
 		}
 		p.compiled[i] = t
