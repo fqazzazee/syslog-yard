@@ -81,6 +81,55 @@ func TestSetContains(t *testing.T) {
 	}
 }
 
+// A narrower range inside a wider one must not hide the rest of the wider one.
+func TestSetContainsNestedPrefixes(t *testing.T) {
+	set := NewSet("nested", []netip.Prefix{
+		netip.MustParsePrefix("203.0.113.0/24"),
+		netip.MustParsePrefix("203.0.113.5/32"),
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("10.1.0.0/16"),
+		netip.MustParsePrefix("10.1.2.0/24"),
+		netip.MustParsePrefix("198.51.100.0/25"),
+		netip.MustParsePrefix("198.51.100.0/24"), // same start, wider
+		netip.MustParsePrefix("2001:db8::/32"),
+		netip.MustParsePrefix("2001:db8:1::/48"),
+	})
+	for _, in := range []string{
+		"203.0.113.0", "203.0.113.4", "203.0.113.5", "203.0.113.6", "203.0.113.255",
+		"10.0.0.1", "10.1.2.3", "10.1.3.0", "10.2.0.0", "10.255.255.255",
+		"198.51.100.1", "198.51.100.200",
+		"2001:db8:1::1", "2001:db8:2::1",
+	} {
+		if !set.Contains(netip.MustParseAddr(in)) {
+			t.Errorf("%s should match", in)
+		}
+	}
+	for _, out := range []string{"203.0.114.0", "11.0.0.0", "9.255.255.255", "198.51.101.0", "2001:db9::1", "::1"} {
+		if set.Contains(netip.MustParseAddr(out)) {
+			t.Errorf("%s should not match", out)
+		}
+	}
+}
+
+// An invalid prefix matches nothing and does not disturb its neighbours.
+func TestSetIgnoresInvalidPrefix(t *testing.T) {
+	set := NewSet("mixed", []netip.Prefix{
+		{},
+		netip.MustParsePrefix("198.51.100.0/24"),
+		netip.MustParsePrefix("2001:db8::/32"),
+	})
+	for _, in := range []string{"198.51.100.7", "2001:db8::1"} {
+		if !set.Contains(netip.MustParseAddr(in)) {
+			t.Errorf("%s should match", in)
+		}
+	}
+	for _, out := range []string{"8.8.8.8", "::1", "2001:db9::1"} {
+		if set.Contains(netip.MustParseAddr(out)) {
+			t.Errorf("%s should not match", out)
+		}
+	}
+}
+
 func TestClassifyDirection(t *testing.T) {
 	cases := []struct {
 		msg  string
