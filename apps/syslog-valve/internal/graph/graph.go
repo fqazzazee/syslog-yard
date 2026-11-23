@@ -39,6 +39,7 @@ type Config struct {
 	Transport string `json:"transport,omitempty"` // source/forward: udp | tcp | tls
 	Port      int    `json:"port,omitempty"`
 	Bind      string `json:"bind,omitempty"`      // source: listen address
+	Framing   string `json:"framing,omitempty"`   // source stream listeners: "" or newline | auto
 	Host      string `json:"host,omitempty"`      // forward: destination host
 	TLSVerify bool   `json:"tlsVerify,omitempty"` // forward+tls: verify peer against system CAs
 
@@ -178,6 +179,9 @@ func validateNode(n Node) error {
 	switch n.Type {
 	case TypeSource:
 		if err := checkTransport(n); err != nil {
+			return err
+		}
+		if err := checkFraming(n); err != nil {
 			return err
 		}
 		return checkPort(n)
@@ -363,6 +367,15 @@ func checkTransport(n Node) error {
 		return fmt.Errorf("node %q: udp+tcp only works on sources; pick one transport for a forward", label(n))
 	default:
 		return fmt.Errorf("node %q: transport must be udp, tcp or tls, got %q", label(n), n.Config.Transport)
+	}
+}
+
+func checkFraming(n Node) error {
+	switch n.Config.Framing {
+	case "", "newline", "auto":
+		return nil
+	default:
+		return fmt.Errorf("node %q: framing must be newline or auto, got %q", label(n), n.Config.Framing)
 	}
 }
 
