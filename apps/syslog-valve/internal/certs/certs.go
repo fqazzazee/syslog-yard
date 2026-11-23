@@ -123,17 +123,35 @@ func GenerateSelfSigned(certFile, keyFile string, hosts []string) error {
 	if err := os.MkdirAll(filepath.Dir(certFile), 0o755); err != nil {
 		return err
 	}
-	if err := writePEM(keyFile, "EC PRIVATE KEY", keyDER, 0o600); err != nil {
-		return err
-	}
-	return writePEM(certFile, "CERTIFICATE", der, 0o644)
-}
-
-func writePEM(path, blockType string, der []byte, mode os.FileMode) (err error) {
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	// Stage both files before replacing either, so a failed write leaves
+	// the existing pair matched.
+	keyTmp, err := stagePEM(keyFile, "EC PRIVATE KEY", keyDER, 0o600)
 	if err != nil {
 		return err
+	}
+	certTmp, err := stagePEM(certFile, "CERTIFICATE", der, 0o644)
+	if err != nil {
+		os.Remove(keyTmp)
+		return err
+	}
+	if err := os.Rename(keyTmp, keyFile); err != nil {
+		os.Remove(keyTmp)
+		os.Remove(certTmp)
+		return err
+	}
+	if err := os.Rename(certTmp, certFile); err != nil {
+		os.Remove(certTmp)
+		return err
+	}
+	return nil
+}
+
+// stagePEM writes the block to path+".tmp" and returns that path.
+func stagePEM(path, blockType string, der []byte, mode os.FileMode) (tmp string, err error) {
+	tmp = path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return "", err
 	}
 	defer func() {
 		if err != nil {
@@ -144,16 +162,16 @@ func writePEM(path, blockType string, der []byte, mode os.FileMode) (err error) 
 	// left by an interrupted run keeps its old (maybe world-readable) mode.
 	if err := f.Chmod(mode); err != nil {
 		f.Close()
-		return err
+		return "", err
 	}
 	if err := pem.Encode(f, &pem.Block{Type: blockType, Bytes: der}); err != nil {
 		f.Close()
-		return err
+		return "", err
 	}
 	if err := f.Close(); err != nil {
-		return err
+		return "", err
 	}
-	return os.Rename(tmp, path)
+	return tmp, nil
 }
 
 // Require returns a friendly error when the identity files are missing.

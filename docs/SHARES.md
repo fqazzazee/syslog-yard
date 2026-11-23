@@ -95,6 +95,11 @@ instead.
   (already the default here) avoids the rename-while-open failure mode.
   Expect `compress` to be slower over SMB; consider switching it off on
   high-volume cache nodes.
+- **Directory permissions**: logrotate refuses to rotate a file whose parent
+  directory is world-writable or writable by a non-root group, so retention
+  stops and the share keeps growing. Mount the share so the cache directory
+  is `0755` root-owned (for CIFS, `dir_mode=0755`). The valve reports the
+  failure as `rotateError` in `GET /api/status`.
 - **Disk-full behaves like local disk-full**: syslog-ng drops or blocks per
   its destination settings. Size-based retention (`max size`) is the knob
   that keeps a share from filling.
