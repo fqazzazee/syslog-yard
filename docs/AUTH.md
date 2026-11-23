@@ -237,7 +237,9 @@ succeeded.
   period of inactivity (default 30 days). Admins set it in the bucket under account
   menu → **Settings… → Session**. Any authenticated request slides the expiry forward, so the timeout
   effectively starts once a browser tab is closed or left idle. Note that an open
-  tab polling the UI counts as activity. The expiry is throttled to at most one
+  tab polling the UI counts as activity. An open hose or valve stream does not:
+  it re-checks the session every 30 seconds without extending it, and closes
+  once the session has expired. The expiry is throttled to at most one
   write per minute per session, so it adds no meaningful load. Lowering the
   timeout also shortens sessions that are already open; raising it doesn't
   extend them.
@@ -245,7 +247,10 @@ succeeded.
   from one client address lock that pair out for 5 minutes (the count keeps
   growing while failures arrive less than 5 minutes apart); 100 failures for
   one username from all addresses within 15 minutes lock the account for 15
-  minutes. Password changes are throttled the same way, per user. Unknown
+  minutes. Password changes are throttled the same way, per user. The
+  throttle tracks at most 10,000 keys; if all of them are locked or in use, a
+  new key is checked without being counted rather than refused, and existing
+  lockouts still apply. Unknown
   usernames cost the same bcrypt comparison as real ones and get the same
   answer. Logins made through the hose or valve arrive from those
   containers; the bucket trusts them by name (`YARD_TRUSTED_PROXIES`, set
