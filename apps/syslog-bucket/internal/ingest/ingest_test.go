@@ -209,6 +209,78 @@ func TestToEntryNormalizes(t *testing.T) {
 	}
 }
 
+type fakeToucher struct {
+	err   error
+	calls [][]int64
+}
+
+func (f *fakeToucher) TouchSources(_ context.Context, ids []int64) error {
+	f.calls = append(f.calls, ids)
+	return f.err
+}
+
+// A failed last_seen write keeps the ids for the next attempt; a successful
+// one clears them.
+func TestTouchSourcesRetainsIDsOnFailure(t *testing.T) {
+	s, _ := testServer(&fakeInserter{})
+	f := &fakeToucher{err: errors.New("db down")}
+	s.toucher = f
+	s.sources["fw1|192.0.2.1"] = 7
+	if id, err := s.sourceID(context.Background(), "fw1", "192.0.2.1"); err != nil || id != 7 {
+		t.Fatalf("sourceID = %d, %v", id, err)
+	}
+	s.touchSources(context.Background())
+	f.err = nil
+	s.touchSources(context.Background())
+	s.touchSources(context.Background()) // nothing pending: no write
+	if len(f.calls) != 2 || len(f.calls[1]) != 1 || f.calls[1][0] != 7 {
+		t.Fatalf("touch calls = %v, want [[7] [7]]", f.calls)
+	}
+}
+
+// A source that keeps sending has last_seen refreshed even though its id is
+// served from the in-memory cache.
+func TestSourceLastSeenAdvancesPG(t *testing.T) {
+	st := storetest.New(t)
+	ctx := context.Background()
+	s := New(st, parsers.NewRegistry(parsers.Generic{}), nil, nil, nil, "")
+	cancel, done := runServe(t, s)
+	defer cancel()
+
+	conn, err := net.Dial("tcp", s.addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	send := func(want int64) {
+		t.Helper()
+		if _, err := conn.Write([]byte(`{"host":"fw1","app":"a","severity":"info","message":"m","source_ip":"192.0.2.1"}` + "\n")); err != nil {
+			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(5 * time.Second); s.Stats().Inserted < want; time.Sleep(5 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("record %d was not inserted", want)
+			}
+		}
+	}
+	send(1)
+	old := time.Now().Add(-time.Hour).UTC()
+	if _, err := st.Pool.Exec(ctx, `UPDATE sources SET last_seen = $1`, old); err != nil {
+		t.Fatal(err)
+	}
+	send(2)
+	cancel()
+	waitDone(t, done, 10*time.Second)
+
+	var got time.Time
+	if err := st.Pool.QueryRow(ctx, `SELECT last_seen FROM sources`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.After(old.Add(time.Minute)) {
+		t.Errorf("last_seen stayed at %v after a later record", got)
+	}
+}
+
 // End to end against Postgres: records written over TCP right before
 // shutdown are all committed by the time Run returns.
 func TestShutdownCommitsInFlightRecordsPG(t *testing.T) {
