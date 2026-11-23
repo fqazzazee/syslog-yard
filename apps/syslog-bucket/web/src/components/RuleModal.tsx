@@ -82,6 +82,9 @@ export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, ot
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The stored rule: starts as the prop and picks up a create, because
+  // "Save + run on history" keeps the dialog open afterwards.
+  const [stored, setStored] = useState<Rule | null>(rule);
 
   const patchAction = (i: number, patch: Partial<Action>) =>
     setActions(actions.map((a, j) => (j === i ? { ...a, ...patch } : a)));
@@ -91,12 +94,13 @@ export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, ot
     setError(null);
     try {
       let saved: Rule;
-      if (rule) {
-        saved = { ...rule, name, enabled, condition, actions };
+      if (stored) {
+        saved = { ...stored, name, enabled, condition, actions };
         await updateRule(saved);
       } else {
         saved = await createRule({ name, enabled, condition, actions, position: 0 });
       }
+      setStored(saved);
       return saved;
     } catch (e) {
       setError(String(e));
@@ -136,10 +140,10 @@ export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, ot
   };
 
   const remove = async () => {
-    if (!rule || !confirm(`Delete rule "${rule.name}"? Tags it already applied stay.`)) return;
+    if (!stored || !confirm(`Delete rule "${stored.name}"? Tags it already applied stay.`)) return;
     setBusy(true);
     try {
-      await deleteRule(rule.id);
+      await deleteRule(stored.id);
       onClose(true);
     } catch (e) {
       setError(String(e));
@@ -150,7 +154,7 @@ export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, ot
   const hasNotify = actions.some((a) => a.type === "notify");
 
   return (
-    <Modal title={readOnly ? "View rule" : rule ? "Edit rule" : "New rule"} onClose={() => onClose(!readOnly && rule !== null)}>
+    <Modal title={readOnly ? "View rule" : stored ? "Edit rule" : "New rule"} onClose={() => onClose(!readOnly && stored !== null)}>
       {readOnly && <Banner kind="info">Read-only: your role can view rules but not change them.</Banner>}
       {/* A disabled fieldset turns every control below into a read-only view. */}
       <fieldset className="plain-fieldset" disabled={readOnly}>
@@ -266,7 +270,7 @@ export default function RuleModal({ rule, seed, tags, channels, mitreCatalog, ot
             Close
           </button>
         )}
-        {!readOnly && rule && (
+        {!readOnly && stored && (
           <button className="danger danger-left" disabled={busy} onClick={() => void remove()}>
             Delete
           </button>

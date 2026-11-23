@@ -3,6 +3,7 @@ import { Banner, IconButton, Loading } from "../../../../shared/web/src/ui";
 import { fetchNetConfig, fetchNetEntries, fetchNetSummary, putNetConfig, refreshNetFeeds, type NetRefreshResult } from "./../api";
 import { useVisibleInterval } from "./../hooks";
 import type { Entry, Filters, NetConfig, NetSummary, User } from "./../types";
+import CommaListInput from "./CommaListInput";
 import { Icon } from "./Icon";
 
 interface Props {
@@ -428,12 +429,12 @@ function NetConfigEditor({ onSaved }: { onSaved: (r: NetRefreshResult) => void }
               setCfg({ ...cfg, custom });
             }}
           />
-          <input
+          <CommaListInput
             placeholder="CIDRs, comma-separated (10.8.0.0/16, 192.0.2.7)"
-            value={c.cidrs.join(", ")}
-            onChange={(e) => {
+            value={c.cidrs}
+            onChange={(cidrs) => {
               const custom = [...cfg.custom];
-              custom[i] = { ...c, cidrs: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) };
+              custom[i] = { ...c, cidrs };
               setCfg({ ...cfg, custom });
             }}
           />

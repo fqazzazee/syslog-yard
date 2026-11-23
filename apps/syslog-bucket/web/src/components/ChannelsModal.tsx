@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Banner, IconButton } from "../../../../shared/web/src/ui";
 import { createChannel, deleteChannel, fetchNotificationLog, testChannel, updateChannel } from "./../api";
 import type { Channel, ChannelKind, Delivery } from "./../types";
+import CommaListInput, { parseCommaList } from "./CommaListInput";
 import Modal from "./Modal";
 
 interface Props {
@@ -155,7 +156,7 @@ function ChannelConfig({ channel, onConfig }: { channel: Channel; onConfig: (k: 
   const str = (k: string) => (cfg[k] === undefined || cfg[k] === null ? "" : String(cfg[k]));
 
   if (channel.kind === "smtp") {
-    const to = Array.isArray(cfg.to) ? (cfg.to as string[]).join(", ") : str("to");
+    const to = Array.isArray(cfg.to) ? (cfg.to as string[]) : parseCommaList(str("to"));
     return (
       <div className="channel-config">
         <label>
@@ -176,11 +177,7 @@ function ChannelConfig({ channel, onConfig }: { channel: Channel; onConfig: (k: 
         </label>
         <label>
           To (comma-separated)
-          <input
-            value={to}
-            placeholder="soc@example.com"
-            onChange={(e) => onConfig("to", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
-          />
+          <CommaListInput value={to} placeholder="soc@example.com" onChange={(list) => onConfig("to", list)} />
         </label>
         <label>
           Username
