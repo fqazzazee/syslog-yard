@@ -38,6 +38,9 @@ type Server struct {
 	notify    *notify.Dispatcher
 	httpPort  int        // TCP port of this UI/API; sources may not take it
 	mu        sync.Mutex // serializes graph writes and applies
+	// genCert writes the self-signed identity; replaced in tests because
+	// the real paths are fixed under /data.
+	genCert func(hosts []string) error
 }
 
 // maxGraphBody caps a graph save. Every other mutating route takes
@@ -60,6 +63,9 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 		rotator:   rotator,
 		tap:       tp,
 		notify:    nd,
+		genCert: func(hosts []string) error {
+			return certs.GenerateSelfSigned(codegen.CertFile, codegen.KeyFile, hosts)
+		},
 	}
 	s.syncActive()
 	s.mux.HandleFunc("GET /api/graph", s.getGraph)
@@ -139,13 +145,32 @@ func (s *Server) putGraph(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
+	// Parse accepts any JSON object as an empty graph, so a wrong file
+	// would replace the draft; an empty graph must say so explicitly.
+	var lists struct {
+		Nodes json.RawMessage `json:"nodes"`
+		Edges json.RawMessage `json:"edges"`
+	}
+	if err := json.Unmarshal(data, &lists); err != nil {
+		httpError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	if g.Nodes == nil || g.Edges == nil || lists.Nodes == nil || lists.Edges == nil {
+		httpError(w, http.StatusUnprocessableEntity, fmt.Errorf("not a flow graph: \"nodes\" and \"edges\" must both be arrays"))
+		return
+	}
+	normalized, err := json.Marshal(g)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err)
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.checkDeployment(g); err != nil {
 		httpError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
-	if err := atomicWrite(s.graphPath, data); err != nil {
+	if err := atomicWrite(s.graphPath, normalized); err != nil {
 		httpError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -416,7 +441,13 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 	resp := struct {
 		supervisor.Status
 		Throughput map[string]int64 `json:"throughput,omitempty"`
+		// RotateError is the last cache rotation's failure, so retention
+		// that has stopped is visible outside the container log.
+		RotateError string `json:"rotateError,omitempty"`
 	}{Status: st}
+	if s.rotator != nil {
+		resp.RotateError = s.rotator.LastError()
+	}
 	// Per-node processed counters for the wire labels; cheap enough to read on
 	// each poll, and only meaningful while syslog-ng is up.
 	if st.Running {
@@ -489,8 +520,17 @@ func (s *Server) certGenerate(w http.ResponseWriter, _ *http.Request) {
 	if hn, err := os.Hostname(); err == nil && hn != "" {
 		hosts = append(hosts, hn)
 	}
-	if err := certs.GenerateSelfSigned(codegen.CertFile, codegen.KeyFile, hosts); err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.genCert(hosts); err != nil {
 		httpError(w, http.StatusInternalServerError, err)
+		return
+	}
+	// syslog-ng reads the pair at load time, so live TLS ports keep the old
+	// certificate until it reloads. If it isn't running, its next start
+	// picks up the new files.
+	if err := s.sup.Reload(); err != nil && !errors.Is(err, supervisor.ErrNotRunning) {
+		httpError(w, http.StatusInternalServerError, fmt.Errorf("certificate generated, but syslog-ng did not reload and may still serve the previous one: %w", err))
 		return
 	}
 	writeJSON(w, certs.Inspect(codegen.CertFile))
