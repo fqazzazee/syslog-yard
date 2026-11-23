@@ -154,10 +154,25 @@ type ipRange struct{ first, last netip.Addr }
 func NewSet(name string, prefixes []netip.Prefix) *Set {
 	rs := make([]ipRange, 0, len(prefixes))
 	for _, p := range prefixes {
+		if !p.IsValid() {
+			continue
+		}
 		rs = append(rs, ipRange{first: p.Masked().Addr(), last: lastAddr(p)})
 	}
 	sort.Slice(rs, func(i, j int) bool { return rs[i].first.Less(rs[j].first) })
-	return &Set{Name: name, ranges: rs}
+	// Merge overlaps so the ranges are disjoint: Contains probes only the
+	// rightmost range starting at or before an address.
+	merged := rs[:0]
+	for _, r := range rs {
+		if n := len(merged); n > 0 && r.first.Compare(merged[n-1].last) <= 0 {
+			if r.last.Compare(merged[n-1].last) > 0 {
+				merged[n-1].last = r.last
+			}
+			continue
+		}
+		merged = append(merged, r)
+	}
+	return &Set{Name: name, ranges: merged}
 }
 
 func (s *Set) Len() int { return len(s.ranges) }

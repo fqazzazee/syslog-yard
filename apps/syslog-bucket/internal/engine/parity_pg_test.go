@@ -49,8 +49,12 @@ type fixture struct {
 	st      *store.Store
 	tags    []int64
 	sources []int64
+	channel int64
 	now     time.Time
 }
+
+// parityChannel is the notify target for rules; rule_refs requires it to exist.
+var parityChannel = store.Channel{Name: "parity", Kind: "webhook", Enabled: true, RatePerMin: 30}
 
 // newFixture fills a database with entries covering every field, NULLs and
 // missing structured keys included. The same seed yields the same rows, ids
@@ -60,6 +64,11 @@ func newFixture(t *testing.T, seed uint64, n int) fixture {
 	st := storetest.New(t)
 	ctx := context.Background()
 	f := fixture{st: st, now: time.Now()}
+	ch, err := st.CreateChannel(ctx, parityChannel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.channel = ch.ID
 	for i := range 3 {
 		tag, err := st.CreateTag(ctx, store.Tag{Name: fmt.Sprint("tag", i)})
 		if err != nil {
@@ -394,6 +403,9 @@ func runBoth(t *testing.T, label string, seed uint64, n int, mkRules func(f fixt
 			t.Fatal(err)
 		}
 	}
+	if _, err := ing.CreateChannel(ctx, parityChannel); err != nil {
+		t.Fatal(err)
+	}
 	for i := range 2 {
 		if _, err := ing.UpsertSource(ctx, fmt.Sprint("src", i), fmt.Sprint("192.0.2.", i+1)); err != nil {
 			t.Fatal(err)
@@ -434,7 +446,7 @@ func TestRuleParityFixtures(t *testing.T) {
 			{Name: "escalated", Condition: rules.Cond{Field: "priority", Op: "eq", Value: float64(3)},
 				Actions: []rules.Action{{Type: "tag", TagID: f.tags[1]}}},
 			{Name: "noise", Condition: rules.Cond{Not: &rules.Cond{Field: "facility", Op: "lt", Value: float64(12)}},
-				Actions: []rules.Action{{Type: "suppress"}, {Type: "notify", ChannelID: 0}}},
+				Actions: []rules.Action{{Type: "suppress"}, {Type: "notify", ChannelID: f.channel}}},
 			{Name: "no user", Condition: rules.Cond{Not: &rules.Cond{Field: "structured.user", Op: "eq", Value: "bob"}},
 				Actions: []rules.Action{{Type: "set_ot", OT: []string{"CL-KT", "CL-NEW"}}, {Type: "set_priority", Priority: 1}}},
 			{Name: "tagged", Condition: rules.Cond{TagID: f.tags[2]},

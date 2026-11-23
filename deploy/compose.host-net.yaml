@@ -4,6 +4,9 @@
 #
 #   docker compose -f compose.yaml -f compose.host-net.yaml up -d
 #
+# To have yardctl and its boot service keep this override, add to deploy/.env:
+#   YARD_COMPOSE_OVERLAYS=compose.host-net.yaml
+#
 # Notes:
 # - The valve's IN ports now bind host ports directly: its UI on 8081, the
 #   External IN block on 6514 (no PublishPort mapping in between). An IN
@@ -16,13 +19,24 @@
 #       (127.0.0.1:5515);
 #     * sign-in (YARD_AUTH_URL) → the bucket UI's published port 8082,
 #       over loopback — so leave YARD_BIND at 0.0.0.0 or 127.0.0.1.
+# - The valve UI binds YARD_BIND directly, since no port mapping applies it.
+# - The hose stays on yardnet and reaches the valve through the host gateway
+#   (extra_hosts below). A host firewall must allow the bridge to reach the
+#   valve's IN port and 8081. With YARD_BIND=127.0.0.1 the UI is not reachable
+#   that way, so "Trust valve's certificate" fails: paste the PEM instead.
+#   Only the hose gets this alias: the bucket trusts "syslog-valve" as a
+#   proxy by name, and must not resolve it to the gateway.
 services:
+  syslog-hose:
+    extra_hosts:
+      - "syslog-valve:host-gateway"
+
   syslog-valve:
     network_mode: host
     networks: !reset []
     ports: !reset []
     environment:
-      VALVE_ADDR: ":8081"
+      VALVE_ADDR: "${YARD_BIND:-0.0.0.0}:8081"
       VALVE_DATA: /data
       VALVE_SUGGESTED_FORWARD: "127.0.0.1:5515"
       YARD_AUTH_URL: "http://127.0.0.1:8082"

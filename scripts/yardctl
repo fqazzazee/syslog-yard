@@ -13,6 +13,7 @@
 #   yardctl service-remove    stop starting at boot (suite keeps running)
 #   yardctl smoke      send a test message through valve -> bucket
 #   yardctl reset-admin   set a fresh random syslog-bucket admin password
+#   yardctl bind-sso-accounts <issuer>   attach older SSO accounts to their provider
 #
 # UI ports: 8080 (hose) 8081 (valve) 8082 (bucket); syslog entry: 6514 udp+tcp.
 # status, smoke and reset-admin also work for the podman quadlet units
@@ -27,16 +28,71 @@ SYSLOG_PORT=6514
 info() { printf '\e[1;34m[yardctl]\e[0m %s\n' "$*"; }
 die()  { printf '\e[1;31m[yardctl]\e[0m %s\n' "$*" >&2; exit 1; }
 
+# load_overlays reads YARD_COMPOSE_OVERLAYS (the environment, else
+# deploy/.env, so the boot service sees it too): compose files to layer on
+# the base one, separated by spaces or commas, relative to deploy/. The file
+# is parsed rather than sourced because it also holds passwords.
+load_overlays() {
+    local setting="" word path words=()
+    if [ -n "${YARD_COMPOSE_OVERLAYS+set}" ]; then
+        setting=$YARD_COMPOSE_OVERLAYS
+    elif [ -f "$YARD_DIR/deploy/.env" ]; then
+        setting=$(sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}YARD_COMPOSE_OVERLAYS=//p' "$YARD_DIR/deploy/.env" \
+            | tail -n 1 | sed 's/[[:space:]]#.*$//' | tr -d "\"'\r")
+    fi
+    read -ra words <<<"${setting//,/ }"
+    COMPOSE_ARGS=(-f "$COMPOSE_FILE")
+    OVERLAY_FILES=()
+    for word in ${words[@]+"${words[@]}"}; do
+        case "$word" in
+            /*) path=$word ;;
+            *)  path=$YARD_DIR/deploy/$word ;;
+        esac
+        [ -f "$path" ] || die "YARD_COMPOSE_OVERLAYS: no such file: $path"
+        COMPOSE_ARGS+=(-f "$path")
+        OVERLAY_FILES+=("$path")
+    done
+}
+
 compose() {
+    load_overlays
     if command -v docker >/dev/null && docker compose version >/dev/null 2>&1; then
-        docker compose -f "$COMPOSE_FILE" "$@"
+        docker compose "${COMPOSE_ARGS[@]}" "$@"
     elif command -v podman >/dev/null && podman compose version >/dev/null 2>&1; then
-        podman compose -f "$COMPOSE_FILE" "$@"
+        podman compose "${COMPOSE_ARGS[@]}" "$@"
     elif command -v podman-compose >/dev/null; then
-        podman-compose -f "$COMPOSE_FILE" "$@"
+        podman-compose "${COMPOSE_ARGS[@]}" "$@"
     else
         die "no compose runtime found — run: yardctl prereqs"
     fi
+}
+
+# have_compose reports whether compose() has a provider to run.
+have_compose() {
+    { command -v docker >/dev/null && docker compose version >/dev/null 2>&1; } \
+        || { command -v podman >/dev/null && podman compose version >/dev/null 2>&1; } \
+        || { command -v podman-compose >/dev/null && command -v podman >/dev/null; }
+}
+
+# guard_host_net refuses to recreate a host-network valve from a file set
+# without the host-network override: that would move it back onto the
+# bridge, where its saved 127.0.0.1:5515 OUT no longer reaches the bucket.
+guard_host_net() {
+    load_overlays
+    if [ "${#OVERLAY_FILES[@]}" -gt 0 ] \
+        && grep -qsE '^[[:space:]]*network_mode:[[:space:]]*"?host' "${OVERLAY_FILES[@]}"; then
+        return 0
+    fi
+    local engine=podman id
+    if command -v docker >/dev/null && docker compose version >/dev/null 2>&1; then
+        engine=docker
+    fi
+    command -v "$engine" >/dev/null || return 0
+    id=$("$engine" ps -aq --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME:-syslog-yard}" \
+        --filter label=com.docker.compose.service=syslog-valve 2>/dev/null | head -n 1) || return 0
+    [ -n "$id" ] || return 0
+    [ "$("$engine" inspect --format '{{.HostConfig.NetworkMode}}' "$id" 2>/dev/null)" = host ] || return 0
+    die "syslog-valve runs on the host network but the override is not loaded — add YARD_COMPOSE_OVERLAYS=compose.host-net.yaml to deploy/.env"
 }
 
 # quadlet reports whether the suite runs as podman quadlet units rather
@@ -64,6 +120,7 @@ yard_exec() {
 # images, and starts the suite. An offline host falls back to whatever
 # base images are cached rather than failing.
 up() {
+    guard_host_net
     if ! compose build --pull; then
         info "could not pull fresh base images (offline?) — building from the local cache"
         compose build
@@ -71,11 +128,58 @@ up() {
     compose pull bucket-db bucket-syslog \
         || info "could not refresh postgres/syslog-ng images — using the local ones"
     compose up -d
+    sync_bucket_conf
+}
+
+# sync_bucket_conf recreates bucket-syslog when its config differs from the
+# checkout. bucket.conf is a single-file bind mount: git replaces the file on
+# pull, the container keeps the old inode, and compose does not notice. Best
+# effort: a check that cannot run warns and leaves the service alone. An
+# overlay that mounts its own config owns it, so there is nothing to compare.
+sync_bucket_conf() {
+    local conf=$YARD_DIR/deploy/syslog-ng/bucket.conf want got
+    load_overlays
+    if [ "${#OVERLAY_FILES[@]}" -gt 0 ] \
+        && grep -qsE '^[^#]*/etc/syslog-ng' "${OVERLAY_FILES[@]}"; then
+        return 0
+    fi
+    want=$(sha256sum <"$conf" 2>/dev/null) || want=""
+    want=${want%% *}
+    got=$(compose exec -T bucket-syslog sha256sum /etc/syslog-ng/syslog-ng.conf </dev/null 2>/dev/null) || got=""
+    got=$(printf '%s\n' "$got" | sed -n 's/^\([0-9a-f]\{64\}\)[[:space:]].*/\1/p' | head -n 1)
+    if [ -z "$want" ] || [ -z "$got" ]; then
+        info "warning: could not compare bucket-syslog's config — if bucket.conf changed, run: yardctl restart"
+    elif [ "$want" != "$got" ]; then
+        info "bucket.conf changed — recreating bucket-syslog"
+        compose up -d --force-recreate --no-deps bucket-syslog \
+            || info "warning: could not recreate bucket-syslog — it may still be on the old config"
+    fi
 }
 
 prereqs() {
-    if command -v docker >/dev/null || command -v podman >/dev/null; then
+    if have_compose; then
         info "container runtime already present: $(command -v docker || command -v podman)"
+    elif command -v podman >/dev/null; then
+        # Checked before docker: podman-docker provides a `docker` shim.
+        info "podman found without a compose provider — installing podman-compose"
+        if command -v dnf >/dev/null; then
+            sudo dnf install -y podman-compose
+        elif command -v apt-get >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y podman-compose
+        else
+            die "unsupported distro: install podman-compose manually"
+        fi
+    elif command -v docker >/dev/null; then
+        info "docker found without the compose plugin — installing it"
+        if command -v dnf >/dev/null; then
+            sudo dnf install -y docker-compose-plugin || sudo dnf install -y docker-compose
+        elif command -v apt-get >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y docker-compose-v2 || sudo apt-get install -y docker-compose-plugin
+        else
+            die "unsupported distro: install the docker compose plugin manually"
+        fi
     elif command -v dnf >/dev/null; then
         info "installing podman + podman-compose (dnf)"
         sudo dnf install -y podman podman-compose
@@ -91,6 +195,7 @@ prereqs() {
     for tool in curl logger; do
         command -v "$tool" >/dev/null || info "note: '$tool' not found — needed for status/smoke"
     done
+    have_compose || die "no working compose provider after install — install podman-compose or the docker compose plugin"
     info "prereqs OK"
 }
 
@@ -250,6 +355,12 @@ reset_admin() {
     info "other admin sessions were signed out; sign in at http://localhost:8082"
 }
 
+bind_sso_accounts() {
+    [ -n "${1:-}" ] || die "usage: yardctl bind-sso-accounts <issuer-url>"
+    yard_exec syslog-bucket syslog-bucket bind-sso-accounts "$1" \
+        || die "could not bind the accounts — is the suite up? (yardctl up)"
+}
+
 case "${1:-}" in
     prereqs)          prereqs ;;
     up|start)         up && status ;;
@@ -261,8 +372,9 @@ case "${1:-}" in
     firewall-remove)  firewall remove ;;
     service-install)  service_install ;;
     service-remove)   service_remove ;;
-    service-up)       compose up -d ;; # systemd ExecStart hook (no build/curl)
+    service-up)       guard_host_net; compose up -d ;; # systemd ExecStart hook (no build/curl)
     smoke)            smoke ;;
     reset-admin)      reset_admin ;;
+    bind-sso-accounts) shift; bind_sso_accounts "$@" ;;
     *)                grep '^#   yardctl' "$0" | sed 's/^# *//'; exit 1 ;;
 esac

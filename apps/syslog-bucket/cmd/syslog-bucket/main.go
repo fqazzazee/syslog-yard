@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -47,8 +49,10 @@ func runCommand(name string, args []string) error {
 	switch name {
 	case "reset-admin":
 		return resetAdmin(args)
+	case "bind-sso-accounts":
+		return bindSSOAccounts(args)
 	default:
-		return fmt.Errorf("unknown command %q (known: reset-admin)", name)
+		return fmt.Errorf("unknown command %q (known: reset-admin, bind-sso-accounts)", name)
 	}
 }
 
@@ -90,6 +94,47 @@ func resetAdmin(args []string) error {
 		}
 	}
 	fmt.Printf("admin password reset to: %s\n", password)
+	return nil
+}
+
+// bindSSOAccounts assigns an issuer to SSO accounts that have none. Only run
+// it for the provider those accounts came from: a user at that issuer with a
+// matching subject signs in as the account, with its role.
+func bindSSOAccounts(args []string) error {
+	if len(args) != 1 {
+		return errors.New("usage: syslog-bucket bind-sso-accounts <issuer-url>")
+	}
+	issuer := auth.NormalizeIssuer(args[0])
+	if u, err := url.Parse(issuer); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return fmt.Errorf("invalid issuer URL %q", args[0])
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cfg := config.FromEnv()
+	st, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		return err
+	}
+	bound, skipped, err := st.BindUnboundOIDCAccounts(ctx, issuer)
+	if err != nil {
+		return err
+	}
+	summary, err := json.Marshal(map[string]any{"via": "bind-sso-accounts command", "issuer": issuer, "bound": bound, "skipped": skipped})
+	if err != nil {
+		return err
+	}
+	if err := st.InsertAudit(ctx, []store.AuditEvent{{
+		ActorName: "bind-sso-accounts", Action: audit.SettingsOIDC, TargetType: "settings",
+		TargetID: "oidc", Summary: summary, Success: true,
+	}}); err != nil {
+		slog.Error("audit: record bind-sso-accounts", "error", err)
+	}
+	fmt.Printf("bound %d SSO account(s) to %s; %d left unbound\n", bound, issuer, skipped)
 	return nil
 }
 

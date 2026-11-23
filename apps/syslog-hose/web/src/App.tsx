@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AppShell } from "../../../shared/web/src/AppShell";
-import { useHashRoute } from "../../../shared/web/src/hooks";
+import { useEventStream, useHashRoute } from "../../../shared/web/src/hooks";
 import { errorText } from "../../../shared/web/src/http";
 import { Login } from "../../../shared/web/src/Login";
 import { Badge, Banner, Button, EmptyState, PageHeader } from "../../../shared/web/src/ui";
@@ -83,8 +83,12 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   useEffect(() => {
     refreshPresets();
     api.hints().then(setHints).catch(() => {});
-    const es = new EventSource("/api/stream");
-    es.onmessage = (m) => {
+  }, []);
+
+  const streamDown = useEventStream(
+    "/api/stream",
+    "/api/jobs",
+    (m) => {
       let data: { jobs?: Job[]; events?: TailEvent[] };
       try {
         data = JSON.parse(m.data) as typeof data;
@@ -97,12 +101,12 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
         const rows = incoming.map((e) => ({ ...e, uid: ++nextUid.current }));
         setEvents((prev) => [...prev, ...rows].slice(-300));
       }
-    };
-    es.onerror = () => {
-      /* EventSource auto-reconnects */
-    };
-    return () => es.close();
-  }, []);
+    },
+    // A new connection replays the tail buffer; start over so rows don't double.
+    () => {
+      if (!pausedRef.current) setEvents([]);
+    },
+  );
 
   const act = (fn: () => Promise<unknown>) => {
     setError("");
@@ -147,6 +151,11 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
         ) : null,
       }}
     >
+      {streamDown && (
+        <Banner kind="warning" className="page-banner">
+          Live updates disconnected, so job status may be out of date. Reconnecting…
+        </Banner>
+      )}
       {error && (
         <Banner className="page-banner" onDismiss={() => setError("")}>
           {error}

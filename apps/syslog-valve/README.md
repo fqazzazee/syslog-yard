@@ -67,6 +67,21 @@ error in its panel.
   bind (`0.0.0.0`, `::`) overlaps every address. A source also can't take
   the TCP port of the valve's own UI (`VALVE_ADDR`). Both are rejected with
   422 before anything reaches syslog-ng.
+- **Source framing.** TCP, TLS and `udp+tcp` sources have a **Framing**
+  setting (`framing` in the graph); UDP ignores it.
+  - **Newline** (`newline`, or no value) emits `transport("tcp")` or
+    `transport("tls")`. Saved graphs without the field keep this parsing
+    after an upgrade. It doesn't understand octet-counted frames, so a
+    sender such as the hose needs Auto.
+  - **Auto** (`auto`) emits `transport("auto")`, keeps `tls(...)` on TLS
+    ports, and accepts both octet-counted and newline-delimited senders.
+    **Limitation:** if the first line on a connection has no `<PRI>` and
+    starts with a digit (`2026-11-22T...`, `22 Nov ...`, `5000 dropped...`),
+    syslog-ng reads the number as an octet count. Messages are truncated or
+    lost with no error, so use Newline for devices that may omit the PRI.
+
+  New sources from **Internal IN** start on Auto. **External IN** starts on
+  Newline because it faces arbitrary devices.
 - **Rollback** takes the graph archived with a history entry through the
   same path as Apply: it regenerates the syslog-ng config, `logrotate.conf`
   and the notify targets from that graph and records the result as a new

@@ -10,11 +10,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"mime"
 	"net/http"
 	"net/netip"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +35,11 @@ const (
 	// deployments aren't logged out before they configure it.
 	defaultIdleTTL = 30 * 24 * time.Hour
 	minPassword    = 8
+	maxPassword    = 72 // bcrypt's input limit, in bytes
+
+	// passwordCheckWait is how long a request queues for a bcrypt slot before
+	// it is told to retry.
+	passwordCheckWait = 5 * time.Second
 
 	// Brute-force throttle (see guard): one source is locked out of an
 	// account for loginWindow after loginMaxFails consecutive bad passwords;
@@ -50,6 +57,9 @@ type Service struct {
 	loginGuard   *guard // POST /api/auth/login, keyed by username
 	pwGuard      *guard // PUT /api/auth/password, keyed by user id
 
+	// checks bounds concurrent bcrypt comparisons.
+	checks chan struct{}
+
 	// oidc, idleTTL and trusted are runtime-configurable, so they're guarded
 	// rather than fixed at construction.
 	mu      sync.RWMutex
@@ -65,6 +75,7 @@ func New(st *store.Store, cookieSecure bool) *Service {
 		cookieSecure: cookieSecure,
 		loginGuard:   newGuard(),
 		pwGuard:      newGuard(),
+		checks:       make(chan struct{}, max(2, runtime.GOMAXPROCS(0))),
 		idleTTL:      defaultIdleTTL,
 	}
 }
@@ -155,6 +166,9 @@ func Bootstrap(ctx context.Context, st *store.Store, adminPassword string) error
 	if generated {
 		adminPassword = generatePassword()
 	}
+	if len(adminPassword) > maxPassword {
+		return fmt.Errorf("BUCKET_ADMIN_PASSWORD is %d bytes long; the maximum is %d", len(adminPassword), maxPassword)
+	}
 	hash, err := HashPassword(adminPassword)
 	if err != nil {
 		return err
@@ -182,8 +196,8 @@ func Bootstrap(ctx context.Context, st *store.Store, adminPassword string) error
 func ResetAdmin(ctx context.Context, st *store.Store, password string) (string, error) {
 	if password == "" {
 		password = generatePassword()
-	} else if len(password) < minPassword {
-		return "", fmt.Errorf("password must be at least %d characters", minPassword)
+	} else if err := ValidatePassword(password); err != nil {
+		return "", err
 	}
 	hash, err := HashPassword(password)
 	if err != nil {
@@ -213,6 +227,18 @@ func ResetAdmin(ctx context.Context, st *store.Store, password string) (string, 
 	return password, nil
 }
 
+// ValidatePassword checks a new password against the length limits. The
+// maximum is bcrypt's: it refuses to hash anything longer.
+func ValidatePassword(pw string) error {
+	if len(pw) < minPassword {
+		return fmt.Errorf("password must be at least %d characters", minPassword)
+	}
+	if len(pw) > maxPassword {
+		return fmt.Errorf("password must be at most %d bytes", maxPassword)
+	}
+	return nil
+}
+
 func HashPassword(pw string) (string, error) {
 	h, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
 	return string(h), err
@@ -239,6 +265,30 @@ func checkPassword(u *store.User, pw string) bool {
 		hash = []byte(u.PasswordHash)
 	}
 	return bcrypt.CompareHashAndPassword(hash, []byte(pw)) == nil && usable
+}
+
+// errCheckBusy means no bcrypt slot came free within passwordCheckWait.
+var errCheckBusy = errors.New("password check queue is full")
+
+// gatedCheck runs checkPassword under the concurrency bound, so a burst of
+// sign-ins queues instead of starving the process of CPU.
+func (s *Service) gatedCheck(ctx context.Context, u *store.User, pw string) (bool, error) {
+	wait := time.NewTimer(passwordCheckWait)
+	defer wait.Stop()
+	select {
+	case s.checks <- struct{}{}:
+		defer func() { <-s.checks }()
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case <-wait.C:
+		return false, errCheckBusy
+	}
+	return checkPassword(u, pw), nil
+}
+
+func checkUnavailable(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "1")
+	http.Error(w, "server busy — try again shortly", http.StatusServiceUnavailable)
 }
 
 func tooManyAttempts(w http.ResponseWriter, retry time.Duration) {
@@ -291,6 +341,9 @@ var publicAPI = map[string]bool{
 	"/api/auth/oidc/callback": true,
 }
 
+// sessionCheckPath is the non-sliding session check (HandleSessionCheck).
+const sessionCheckPath = "/api/auth/session"
+
 // viewerWritable are the only non-GET paths a read-only viewer may call.
 var viewerWritable = map[string]bool{
 	"/api/auth/logout":   true,
@@ -315,9 +368,12 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 				// Inactivity timeout: a request is activity, so push the expiry
 				// forward (throttled in the store). Refresh the cookie's Max-Age
 				// to match when it actually moved.
-				idle := s.currentIdle()
-				if slid, _ := s.store.SlideSession(r.Context(), tokenHash, idle); slid {
-					s.setSessionCookie(w, c.Value, idle)
+				// The stream session check only observes, so it never slides.
+				if r.URL.Path != sessionCheckPath {
+					idle := s.currentIdle()
+					if slid, _ := s.store.SlideSession(r.Context(), tokenHash, idle); slid {
+						s.setSessionCookie(w, c.Value, idle)
+					}
 				}
 			}
 		}
@@ -369,6 +425,14 @@ func (s *Service) SessionActive(ctx context.Context, r *http.Request) bool {
 	return err == nil && u != nil
 }
 
+// HandleSessionCheck answers 204 for a live session; Middleware has already
+// answered 401 otherwise. Hose and valve streams poll it to learn that a
+// session ended. It is the one authenticated route that isn't activity, so
+// Middleware doesn't slide the session for it.
+func (s *Service) HandleSessionCheck(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // --- session plumbing ---
 
 func (s *Service) issueSession(ctx context.Context, w http.ResponseWriter, userID int64) error {
@@ -400,18 +464,26 @@ func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	key, ip := strings.ToLower(strings.TrimSpace(req.Username)), s.clientIP(r)
-	if ok, retry := s.loginGuard.allow(key, ip); !ok {
+	// Hashed so what the throttle retains doesn't grow with the username.
+	key, ip := hashToken(strings.ToLower(strings.TrimSpace(req.Username))), s.clientIP(r)
+	attempt, retry := s.loginGuard.reserve(key, ip)
+	if attempt == nil {
 		tooManyAttempts(w, retry)
 		return
 	}
+	defer attempt.release()
 	u, err := s.store.GetUserByUsername(r.Context(), strings.TrimSpace(req.Username))
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if !checkPassword(u, req.Password) {
-		s.loginGuard.fail(key, ip)
+	ok, err := s.gatedCheck(r.Context(), u, req.Password)
+	if err != nil {
+		checkUnavailable(w)
+		return
+	}
+	if !ok {
+		attempt.fail()
 		// The actor is whoever claimed the username; no account is resolved
 		// (or revealed) for a failed attempt. Throttled attempts above are not
 		// recorded: they are cheap to send and would let anyone flood the log.
@@ -424,7 +496,7 @@ func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
-	s.loginGuard.succeed(key, ip)
+	attempt.succeed()
 	if err := s.issueSession(r.Context(), w, u.ID); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -491,12 +563,19 @@ func (s *Service) HandlePassword(w http.ResponseWriter, r *http.Request) {
 	// The old password is a guessable secret too: throttle it like a login so
 	// a stolen session can't be used to brute-force the real password.
 	key, ip := "id:"+strconv.FormatInt(u.ID, 10), s.clientIP(r)
-	if ok, retry := s.pwGuard.allow(key, ip); !ok {
+	attempt, retry := s.pwGuard.reserve(key, ip)
+	if attempt == nil {
 		tooManyAttempts(w, retry)
 		return
 	}
-	if !checkPassword(u, req.Old) {
-		s.pwGuard.fail(key, ip)
+	defer attempt.release()
+	ok, err := s.gatedCheck(r.Context(), u, req.Old)
+	if err != nil {
+		checkUnavailable(w)
+		return
+	}
+	if !ok {
+		attempt.fail()
 		s.record(r, audit.Event{
 			Action: audit.PasswordChange, TargetType: "user", TargetID: strconv.FormatInt(u.ID, 10),
 			Summary: map[string]any{"reason": "current password incorrect"},
@@ -504,9 +583,9 @@ func (s *Service) HandlePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "current password is incorrect", http.StatusForbidden)
 		return
 	}
-	s.pwGuard.succeed(key, ip)
-	if len(req.New) < minPassword {
-		http.Error(w, "new password must be at least 8 characters", http.StatusBadRequest)
+	attempt.succeed()
+	if err := ValidatePassword(req.New); err != nil {
+		http.Error(w, "new "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	hash, err := HashPassword(req.New)

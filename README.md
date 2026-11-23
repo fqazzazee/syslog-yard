@@ -151,6 +151,7 @@ Settings the compose file reads from your shell or `deploy/.env`:
 |---|---|---|
 | `YARD_BIND` | `0.0.0.0` | address the three UIs are published on (`127.0.0.1` = loopback only) |
 | `BUCKET_DB_PASSWORD` | `syslog_bucket` | Postgres password, used when the `bucket-dbdata` volume is first created; [rotating it](docs/SECURITY.md#changing-the-postgres-password) on an existing volume takes one `ALTER ROLE` |
+| `YARD_COMPOSE_OVERLAYS` | none | extra compose files `yardctl` and its boot service load, relative to `deploy/`; set to `compose.host-net.yaml` for a host-network valve |
 
 Everything else is set per service in `deploy/compose.yaml`; each tool's
 variables are listed in its README ([hose](apps/syslog-hose/README.md#configuration),

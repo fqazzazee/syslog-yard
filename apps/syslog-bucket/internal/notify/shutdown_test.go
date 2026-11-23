@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/syslog-yard/syslog-bucket/internal/store"
+	"github.com/syslog-yard/syslog-bucket/internal/store/storetest"
 )
 
 func TestShutdownDeliversQueuedThenStops(t *testing.T) {
@@ -39,6 +40,49 @@ func TestShutdownDeliversQueuedThenStops(t *testing.T) {
 		t.Errorf("delivered %d of 10 queued notifications", hits)
 	}
 	d.Dispatch(batch) // after Shutdown: counted as dropped, no panic
+}
+
+// A rate-limited storm leaves one summary row per (channel, rule), not one
+// row per refused delivery.
+func TestRateLimitedDropsAggregateInLogPG(t *testing.T) {
+	st := storetest.New(t)
+	ctx := context.Background()
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	ch, err := st.CreateChannel(ctx, store.Channel{Name: "c", Kind: "slack", Enabled: true, RatePerMin: 2,
+		Config: json.RawMessage(`{"url":"` + srv.URL + `"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := New(st)
+	d.guard.AllowLoopback = true
+	if err := d.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 12; i++ {
+		d.handle(ctx, job{entry: store.Entry{}, channelID: ch.ID})
+	}
+	d.flushDrops()
+
+	rows, err := st.RecentDeliveries(ctx, &ch.ID, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, dropped := 0, []store.Delivery{}
+	for _, r := range rows {
+		switch r.Status {
+		case "ok":
+			ok++
+		case "dropped":
+			dropped = append(dropped, r)
+		}
+	}
+	if ok != 2 || len(dropped) != 1 {
+		t.Fatalf("got %d ok and %d dropped rows, want 2 and 1", ok, len(dropped))
+	}
+	if want := "rate limited: 10 deliveries dropped"; dropped[0].Detail != want {
+		t.Errorf("detail = %q, want %q", dropped[0].Detail, want)
+	}
 }
 
 func TestShutdownAbandonsSlowDeliveries(t *testing.T) {

@@ -44,7 +44,8 @@ bar). Click a technique to open its entries (`#/attack/<technique>`). The catalo
 ## Sorting & device class (bucket)
 
 - **Sortable columns.** Click a log-table header — Time, Severity, Pri, Host,
-  App, or Class — to sort; click again to flip direction. Time sort keeps the
+  App, or Class — to sort; click again to flip direction, except Time, which is
+  always newest-first. Time sort keeps the
   streaming + "load older" behaviour; a column sort returns one ranked page and
   re-orders live arrivals client-side so nothing jumps out of place.
 - **Device class.** Each event is tagged with a coarse class

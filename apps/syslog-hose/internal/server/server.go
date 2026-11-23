@@ -298,10 +298,15 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
+	ctx, stop := yardauth.WatchSession(r) // ends the stream on revocation
+	defer stop()
 	var cursor int64
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	send := func() bool {
+		if ctx.Err() != nil {
+			return false
+		}
 		events := s.mgr.TailSince(cursor)
 		if len(events) > 0 {
 			cursor = events[len(events)-1].Seq
@@ -321,7 +326,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	}
 	for {
 		select {
-		case <-r.Context().Done():
+		case <-ctx.Done():
 			return
 		case <-tick.C:
 			if !send() {

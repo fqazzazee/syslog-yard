@@ -90,6 +90,13 @@ You can configure it two ways:
   endpoint): saving an enabled config with a new issuer and a blank secret
   answers 400 and asks you to re-enter it. On save the bucket probes the issuer's discovery document and warns (non
   fatally) if it can't be reached yet.
+
+  SSO accounts belong to the issuer that created them, so changing the issuer
+  starts new accounts. Accounts from before v0.3.0 bind to the issuer in effect
+  at the first v0.3.0 start. If none was set, they can't sign in by SSO until
+  you attach them with `yardctl bind-sso-accounts <issuer-url>`. Use only the
+  provider they came from: a user there with a matching subject gets that
+  account and its role.
 - **By environment variable** (legacy / infrastructure-as-code): set the vars
   below. They seed the config when nothing has been saved in the UI; once you
   save in the UI, the stored config takes over (it wins over the env vars).
@@ -237,7 +244,9 @@ succeeded.
   period of inactivity (default 30 days). Admins set it in the bucket under account
   menu → **Settings… → Session**. Any authenticated request slides the expiry forward, so the timeout
   effectively starts once a browser tab is closed or left idle. Note that an open
-  tab polling the UI counts as activity. The expiry is throttled to at most one
+  tab polling the UI counts as activity. An open hose or valve stream does not:
+  it re-checks the session every 30 seconds without extending it, and closes
+  once the session has expired. The expiry is throttled to at most one
   write per minute per session, so it adds no meaningful load. Lowering the
   timeout also shortens sessions that are already open; raising it doesn't
   extend them.
@@ -245,7 +254,10 @@ succeeded.
   from one client address lock that pair out for 5 minutes (the count keeps
   growing while failures arrive less than 5 minutes apart); 100 failures for
   one username from all addresses within 15 minutes lock the account for 15
-  minutes. Password changes are throttled the same way, per user. Unknown
+  minutes. Password changes are throttled the same way, per user. The
+  throttle tracks at most 10,000 keys; if all of them are locked or in use, a
+  new key is checked without being counted rather than refused, and existing
+  lockouts still apply. Unknown
   usernames cost the same bcrypt comparison as real ones and get the same
   answer. Logins made through the hose or valve arrive from those
   containers; the bucket trusts them by name (`YARD_TRUSTED_PROXIES`, set

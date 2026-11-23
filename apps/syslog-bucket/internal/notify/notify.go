@@ -60,8 +60,10 @@ type Dispatcher struct {
 	// Queue-full drops are counted here and written to notification_log as
 	// one aggregate row per (channel, rule) every dropFlushEvery, so a storm
 	// never turns into an INSERT per dropped delivery on the ingest goroutine.
-	dropMu sync.Mutex
-	drops  map[dropKey]int
+	// Rate-limited deliveries are aggregated the same way in rateDrops.
+	dropMu    sync.Mutex
+	drops     map[dropKey]int
+	rateDrops map[dropKey]int
 
 	// Shutdown plumbing: workers deliver under deliverCtx (not Run's ctx) so
 	// queued jobs can still go out after the process starts stopping;
@@ -80,11 +82,12 @@ type dropKey struct{ channelID, ruleID int64 }
 
 func New(st *store.Store) *Dispatcher {
 	d := &Dispatcher{
-		st:       st,
-		queue:    make(chan job, queueDepth),
-		channels: map[int64]store.Channel{},
-		limiters: map[int64]*limiter{},
-		drops:    map[dropKey]int{},
+		st:        st,
+		queue:     make(chan job, queueDepth),
+		channels:  map[int64]store.Channel{},
+		limiters:  map[int64]*limiter{},
+		drops:     map[dropKey]int{},
+		rateDrops: map[dropKey]int{},
 	}
 	d.deliverCtx, d.cancelDeliver = context.WithCancel(context.Background())
 	d.guard = netguard.New()
@@ -187,17 +190,28 @@ func (d *Dispatcher) countDrop(channelID, ruleID int64) {
 	d.dropMu.Unlock()
 }
 
-// flushDrops writes one notification_log row per (channel, rule) summarising
-// the deliveries dropped since the last flush.
+func (d *Dispatcher) countRateDrop(channelID, ruleID int64) {
+	d.dropMu.Lock()
+	d.rateDrops[dropKey{channelID, ruleID}]++
+	d.dropMu.Unlock()
+}
+
+// flushDrops writes one notification_log row per (channel, rule) and drop
+// reason summarising the deliveries dropped since the last flush.
 func (d *Dispatcher) flushDrops() {
 	d.dropMu.Lock()
-	drops := d.drops
-	d.drops = map[dropKey]int{}
+	drops, rateDrops := d.drops, d.rateDrops
+	d.drops, d.rateDrops = map[dropKey]int{}, map[dropKey]int{}
 	d.dropMu.Unlock()
 	for k, n := range drops {
 		slog.Warn("notify: queue full, dropped deliveries", "channel", k.channelID, "rule", k.ruleID, "count", n)
 		d.log(store.Delivery{ChannelID: k.channelID, RuleID: ptr(k.ruleID), Status: "dropped",
 			Detail: fmt.Sprintf("dispatch queue full: %d deliveries dropped", n)})
+	}
+	for k, n := range rateDrops {
+		slog.Warn("notify: rate limited, dropped deliveries", "channel", k.channelID, "rule", k.ruleID, "count", n)
+		d.log(store.Delivery{ChannelID: k.channelID, RuleID: ptr(k.ruleID), Status: "dropped",
+			Detail: fmt.Sprintf("rate limited: %d deliveries dropped", n)})
 	}
 }
 
@@ -294,8 +308,7 @@ func (d *Dispatcher) handle(ctx context.Context, j job) {
 		return
 	}
 	if lim != nil && !lim.allow(ch.RatePerMin) {
-		rec.Status, rec.Detail = "dropped", "rate limited"
-		d.log(rec)
+		d.countRateDrop(j.channelID, j.ruleID)
 		return
 	}
 	if err := d.deliver(ctx, ch, j.entry, summary(j.entry)); err != nil {

@@ -229,6 +229,23 @@ func CheckNotifyURL(raw string) error {
 	return nil
 }
 
+// MaskNotifyURL keeps only a URL's scheme and host, in the form the bucket
+// shows read-only users. A URL without both masks to "".
+func MaskNotifyURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + "/…"
+}
+
+// IsMaskedURL reports whether raw is the output of MaskNotifyURL rather
+// than a usable URL.
+func IsMaskedURL(raw string) bool {
+	s := strings.TrimSpace(raw)
+	return s != "" && MaskNotifyURL(s) == s
+}
+
 // Sanitize replaces control characters in every free-text field with a
 // space and reports whether anything changed. It is for loading graphs
 // saved by older versions, which validated less; new input is rejected by

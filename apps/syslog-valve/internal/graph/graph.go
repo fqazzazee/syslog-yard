@@ -26,6 +26,10 @@ const (
 	PortElse  = "else"
 )
 
+// MaxLogPaths caps the log {} blocks one graph may compile to: codegen
+// emits one per source-to-sink path, and paths multiply at each fan-out.
+const MaxLogPaths = 4096
+
 // Severity indices follow syslog: 0=emerg .. 7=debug.
 var SeverityNames = []string{"emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"}
 
@@ -35,6 +39,7 @@ type Config struct {
 	Transport string `json:"transport,omitempty"` // source/forward: udp | tcp | tls
 	Port      int    `json:"port,omitempty"`
 	Bind      string `json:"bind,omitempty"`      // source: listen address
+	Framing   string `json:"framing,omitempty"`   // source stream listeners: "" or newline | auto
 	Host      string `json:"host,omitempty"`      // forward: destination host
 	TLSVerify bool   `json:"tlsVerify,omitempty"` // forward+tls: verify peer against system CAs
 
@@ -164,13 +169,19 @@ func (g *Graph) Validate() error {
 	if err := g.checkListeners(); err != nil {
 		return err
 	}
-	return g.checkCycles()
+	if err := g.checkCycles(); err != nil {
+		return err
+	}
+	return g.checkLogPaths()
 }
 
 func validateNode(n Node) error {
 	switch n.Type {
 	case TypeSource:
 		if err := checkTransport(n); err != nil {
+			return err
+		}
+		if err := checkFraming(n); err != nil {
 			return err
 		}
 		return checkPort(n)
@@ -259,24 +270,84 @@ func (g *Graph) validateEdge(e Edge) error {
 }
 
 func (g *Graph) checkCycles() error {
-	var visit func(id string, stack map[string]bool) error
-	visit = func(id string, stack map[string]bool) error {
-		if stack[id] {
+	next := map[string][]string{}
+	for _, e := range g.Edges {
+		next[e.From] = append(next[e.From], e.To)
+	}
+	// Each node is walked once: a node already finished can't reach the
+	// current stack, or the walk that finished it would have found the cycle.
+	onStack, done := map[string]bool{}, map[string]bool{}
+	var visit func(id string) error
+	visit = func(id string) error {
+		if onStack[id] {
 			return fmt.Errorf("graph has a cycle through %q", id)
 		}
-		stack[id] = true
-		defer delete(stack, id)
-		for _, e := range g.EdgesFrom(id) {
-			if err := visit(e.To, stack); err != nil {
+		if done[id] {
+			return nil
+		}
+		onStack[id] = true
+		for _, to := range next[id] {
+			if err := visit(to); err != nil {
 				return err
 			}
 		}
+		delete(onStack, id)
+		done[id] = true
 		return nil
 	}
 	for _, n := range g.Nodes {
 		if n.Type == TypeSource {
-			if err := visit(n.ID, map[string]bool{}); err != nil {
+			if err := visit(n.ID); err != nil {
 				return err
+			}
+		}
+	}
+	return nil
+}
+
+// checkLogPaths refuses a graph that would compile to more than MaxLogPaths
+// log {} blocks. Paths are counted per node rather than walked, since their
+// number can be exponential in the graph's size. Disabled nodes generate
+// nothing, so only the enabled graph counts. Runs after checkCycles.
+func (g *Graph) checkLogPaths() error {
+	en := g.Enabled()
+	filters := map[string]bool{}
+	for _, n := range en.Nodes {
+		if n.Type == TypeFilter {
+			filters[n.ID] = true
+		}
+	}
+	next := map[string][]string{}
+	for _, e := range en.Edges {
+		next[e.From] = append(next[e.From], e.To)
+	}
+	// Counts saturate at MaxLogPaths+1 so they can't overflow.
+	memo := map[string]int{}
+	var count func(id string) int
+	count = func(id string) int {
+		if v, ok := memo[id]; ok {
+			return v
+		}
+		total := 0
+		for _, to := range next[id] {
+			if filters[to] {
+				total += count(to)
+			} else {
+				total++
+			}
+			if total > MaxLogPaths {
+				total = MaxLogPaths + 1
+				break
+			}
+		}
+		memo[id] = total
+		return total
+	}
+	total := 0
+	for _, n := range en.Nodes {
+		if n.Type == TypeSource {
+			if total += count(n.ID); total > MaxLogPaths {
+				return fmt.Errorf("graph expands to more than %d log paths; reduce the fan-out between filters", MaxLogPaths)
 			}
 		}
 	}
@@ -296,6 +367,15 @@ func checkTransport(n Node) error {
 		return fmt.Errorf("node %q: udp+tcp only works on sources; pick one transport for a forward", label(n))
 	default:
 		return fmt.Errorf("node %q: transport must be udp, tcp or tls, got %q", label(n), n.Config.Transport)
+	}
+}
+
+func checkFraming(n Node) error {
+	switch n.Config.Framing {
+	case "", "newline", "auto":
+		return nil
+	default:
+		return fmt.Errorf("node %q: framing must be newline or auto, got %q", label(n), n.Config.Framing)
 	}
 }
 

@@ -37,6 +37,7 @@ var routePolicy = map[string]policy{
 	"GET /":                                 public, // SPA; renders the login page itself
 	"POST /api/auth/logout":                 signed,
 	"GET /api/auth/me":                      signed,
+	"GET /api/auth/session":                 signed,
 	"PUT /api/auth/password":                signed,
 	"GET /api/mitre":                        signed,
 	"GET /api/mitre/summary":                signed,

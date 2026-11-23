@@ -30,6 +30,7 @@ import {
   type HistoryEntry,
 } from "./api";
 import { nodeTypes, rfType, type FlowNode } from "./FlowNodes";
+import { parseGraphFile } from "./graphShape";
 import { NodePanel } from "./NodePanel";
 import { TailView } from "./TailView";
 
@@ -82,7 +83,7 @@ function fromFlow(nodes: FlowNode[], edges: Edge[]): Graph {
 }
 
 const DEFAULTS: Record<NodeType, GraphNode["config"]> = {
-  source: { transport: "udp", port: 514, bind: "0.0.0.0" },
+  source: { transport: "udp", port: 514, bind: "0.0.0.0", framing: "auto" },
   filter: { severityMax: 3 },
   forward: { transport: "udp", port: 514, host: "" },
   cache: { dir: "", rotate: 7, maxSizeMB: 100, maxAgeDays: 14, compress: true },
@@ -356,6 +357,8 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   };
 
   const save = async (): Promise<boolean> => {
+    // Until a graph has loaded the canvas says nothing about what is saved.
+    if (savedKey === null) return false;
     try {
       const g = fromFlow(nodes, edges);
       await api.saveGraph(g);
@@ -431,7 +434,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
       return;
     }
     try {
-      const g = JSON.parse(await file.text()) as Graph;
+      const g = parseGraphFile(await file.text());
       await api.saveGraph(g);
       loadGraph(g);
       setSelected(null);
@@ -472,7 +475,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
       label: "External IN",
       icon: "add" as const,
       title: "Listen for syslog from other machines (host port 6514)",
-      onSelect: () => addNode("source", { name: "external syslog", config: { transport: "udp+tcp", port: 6514 } }),
+      onSelect: () => addNode("source", { name: "external syslog", config: { transport: "udp+tcp", port: 6514, framing: "newline" } }),
     },
     { id: "filter", label: "Filter", icon: "add" as const, onSelect: () => addNode("filter") },
     { id: "forward", label: "OUT port", icon: "add" as const, onSelect: () => addNode("forward") },
@@ -487,6 +490,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
         ? `syslog-ng ${status.version} running (pid ${status.pid}, ${status.restarts} restarts)`
         : "syslog-ng not running"}
       {status?.lastError && <span className="err"> — {status.lastError}</span>}
+      {status?.rotateError && <span className="err"> — cache rotation failed: {status.rotateError}</span>}
     </span>
   );
 
@@ -558,7 +562,13 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
                         e.target.value = "";
                       }}
                     />
-                    <Button variant="primary" icon="check" onClick={() => void apply()}>
+                    <Button
+                      variant="primary"
+                      icon="check"
+                      disabled={savedKey === null}
+                      title={savedKey === null ? "The saved graph has not loaded. Reload, or import a graph." : undefined}
+                      onClick={() => void apply()}
+                    >
                       Apply
                     </Button>
                   </>

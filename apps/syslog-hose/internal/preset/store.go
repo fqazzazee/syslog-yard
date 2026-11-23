@@ -55,6 +55,7 @@ func NewStore(dir string) (*Store, error) {
 				fmt.Fprintf(os.Stderr, "syslog-hose: skipping custom preset %s: %v\n", f, err)
 				continue
 			}
+			p.file = f
 			s.presets[p.Name] = p
 		}
 	}
@@ -95,16 +96,26 @@ func (s *Store) Save(raw []byte) (*Preset, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if existing, ok := s.presets[p.Name]; ok && existing.Builtin {
+	existing, ok := s.presets[p.Name]
+	if ok && existing.Builtin {
 		return nil, fmt.Errorf("%q is a built-in preset; choose another name", p.Name)
 	}
 	if s.dir == "" {
 		return nil, fmt.Errorf("no data directory configured for custom presets")
 	}
 	path := filepath.Join(s.dir, sanitize(p.Name)+".yaml")
+	if ok && existing.file != "" {
+		path = existing.file
+	}
+	for _, other := range s.presets {
+		if other.Name != p.Name && other.file == path {
+			return nil, fmt.Errorf("preset name %q conflicts with existing preset %q; choose another name", p.Name, other.Name)
+		}
+	}
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		return nil, err
 	}
+	p.file = path
 	s.presets[p.Name] = p
 	return p, nil
 }
@@ -121,6 +132,9 @@ func (s *Store) Delete(name string) error {
 		return fmt.Errorf("cannot delete built-in preset %q", name)
 	}
 	delete(s.presets, name)
+	if p.file != "" {
+		return os.Remove(p.file)
+	}
 	return os.Remove(filepath.Join(s.dir, sanitize(name)+".yaml"))
 }
 

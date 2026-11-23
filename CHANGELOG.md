@@ -6,6 +6,68 @@ All notable changes to syslog-yard are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-22
+
+This release fixes the problems found in a full code review, including
+several security issues. Upgrade the bucket, hose and valve together.
+
+### Upgrade notes
+
+- Valve TCP, TLS and udp+tcp sources keep their current newline parsing. If
+  one receives TCP or TLS from the hose or another octet-counted sender, set
+  its new Framing option to Auto and Apply. Keep Newline for devices that may
+  omit the syslog PRI: Auto reads a leading number as a frame length, which
+  can truncate or lose those messages.
+- SSO accounts are now tied to their identity provider's issuer. Keep the
+  issuer configured across the upgrade: existing accounts bind to the one in
+  effect at first start. If none is set, they can't sign in by SSO until you
+  run `yardctl bind-sso-accounts <issuer-url>` for the provider they came from.
+  Later issuer changes create new accounts, with roles to reassign.
+- If untrusted viewer accounts had access to the valve, rotate the webhook and
+  Slack URLs in its notify nodes. Earlier versions showed them to viewers.
+- Host-network installs must add `YARD_COMPOSE_OVERLAYS=compose.host-net.yaml`
+  to `deploy/.env` before the next `yardctl up` or boot. Without it, `yardctl`
+  now stops rather than moving the valve back onto the bridge. With a host
+  firewall, allow the container bridge to reach the valve's IN port and 8081.
+- Quadlet installs should follow the updated "Updating" steps in
+  `deploy/quadlet/README.md`, which now cover unit files and `bucket.conf`.
+- Valve cache directories on shares must not be world-writable or writable by
+  a non-root group, or log rotation will not run (for CIFS, use
+  `dir_mode=0755`). The valve status bar now shows this failure.
+- An unattended hose or valve tab no longer extends a session, so users are
+  signed out at the configured idle timeout.
+- New limits: passwords over 72 bytes and valve graphs that expand to more
+  than 4096 log paths are refused.
+
+### Security
+
+- bucket: a stored SMTP password is kept only while the host, port, username
+  and TLS mode that will actually be used are unchanged.
+- bucket: login and password-change attempts count against the throttle while
+  they are being checked, concurrent password checks are bounded, and throttle
+  memory no longer grows with username length or count.
+- bucket: SSO accounts are bound to their issuer, so the same subject at a
+  different issuer gets a separate account.
+- valve: read-only users see notify URLs reduced to scheme and host, including
+  in graph exports.
+- hose, valve: open live streams re-check their session every 30 seconds
+  without extending it, and close once it is revoked or idle-expired. A bucket
+  outage does not end them.
+- hose: preset templates run within CPU and memory limits. Oversized burst,
+  duration and weight values are rejected, and existing jobs with such values
+  load safely.
+- valve: graph validation runs in linear time.
+- deploy: under the host-network override, the valve UI honors `YARD_BIND`.
+
+### Added
+
+- bucket: a Compact/Wrap toggle above the log table. Compact (the new
+  default) keeps each entry to one line, with the full message on hover and
+  in the detail pane, so about three times as many rows fit on screen; Wrap
+  shows long messages in full. The choice is remembered per browser.
+- valve: a per-source Framing setting for TCP, TLS and udp+tcp sources. New
+  Internal IN sources default to Auto, and External IN starts on Newline.
+
 ### Changed
 
 - bucket: the tags and channels that enabled rules use are tracked in a
@@ -14,13 +76,44 @@ All notable changes to syslog-yard are recorded here. The format follows
   channel an enabled rule uses, or to save or enable a rule that points at a
   missing one, so a concurrent edit can no longer slip between the check
   and the write. Disabled rules still never block a delete ([#29]).
+- valve: the image moves to Alpine 3.24 (syslog-ng 4.11), which Auto framing
+  requires.
+- bucket: the Time column is always newest-first, because ascending order only
+  reversed the newest page.
 
-### Added
+### Fixed
 
-- bucket: a Compact/Wrap toggle above the log table. Compact (the new
-  default) keeps each entry to one line, with the full message on hover and
-  in the detail pane, so about three times as many rows fit on screen; Wrap
-  shows long messages in full. The choice is remembered per browser.
+- bucket: the TCP 514 listener accepts octet-counted and newline-delimited
+  syslog, and `yardctl up` recreates `bucket-syslog` when its config changes.
+- bucket: network classification matches every address in sets with nested or
+  overlapping CIDR ranges.
+- bucket: rate-limited notifications are logged as one summary row per channel
+  and rule every 10 seconds, instead of one row per drop.
+- bucket: `sources.last_seen` keeps updating while a device is sending.
+- bucket: passwords over bcrypt's 72-byte limit get a clear error instead of a
+  500, and an overlong `BUCKET_ADMIN_PASSWORD` is named at startup.
+- bucket web: a failed log query no longer leaves the previous view's rows on
+  screen, and the live tail recovers.
+- bucket web: changing a condition's field selects a valid operator; comma
+  lists can be typed normally; Save + run on history no longer creates a
+  duplicate rule; unknown framework links show an error instead of loading
+  forever; the empty log table gives the right syslog port.
+- hose: UDP jobs start before their destination resolves, retry the lookup and
+  follow address changes.
+- hose: custom presets whose names map to one filename no longer overwrite
+  each other.
+- hose, valve: active users are no longer signed out at the original cookie
+  lifetime.
+- hose, valve web: live views reconnect after a dropped stream, show when they
+  are disconnected, and return to login when the session has ended.
+- valve: regenerating the certificate reloads syslog-ng and reports a failed
+  reload.
+- valve: importing a file that is not a graph can no longer replace the saved
+  graph, and Apply stays disabled until the saved graph has loaded.
+- yardctl: compose overlays apply to every command and the boot service, and
+  `prereqs` installs a missing compose provider.
+- deploy: under the host-network override, the hose can reach the valve by
+  name.
 
 ## [0.2.0] - 2026-11-05
 
@@ -317,7 +410,8 @@ Advisories: [GHSA-6g7h-r7gg-27cj] (critical, valve),
 
 Released under the MIT License; see the commit history for its contents.
 
-[Unreleased]: https://github.com/fqazzazee/syslog-yard/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/fqazzazee/syslog-yard/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/fqazzazee/syslog-yard/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/fqazzazee/syslog-yard/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/fqazzazee/syslog-yard/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/fqazzazee/syslog-yard/releases/tag/v0.1.0

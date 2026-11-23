@@ -48,8 +48,8 @@ func (s *server) createUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "username and a valid role (admin/analyst/viewer) required", http.StatusBadRequest)
 		return
 	}
-	if len(req.Password) < 8 {
-		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
+	if err := auth.ValidatePassword(req.Password); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	hash, err := auth.HashPassword(req.Password)
@@ -100,8 +100,8 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 	// leave a half-applied update behind.
 	var hash string
 	if req.Password != nil {
-		if len(*req.Password) < 8 {
-			http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
+		if err := auth.ValidatePassword(*req.Password); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		var err error

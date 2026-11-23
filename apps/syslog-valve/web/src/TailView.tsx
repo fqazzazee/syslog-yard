@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Button } from "../../../shared/web/src/ui";
+import { useEventStream } from "../../../shared/web/src/hooks";
+import { Badge, Button } from "../../../shared/web/src/ui";
 import type { TailEvent } from "./api";
 
 // TailView streams every message entering the valve (SSE from the tap
@@ -18,9 +19,10 @@ export function TailView({ variant }: { variant: "drawer" | "page" }) {
     bodyRef.current?.scrollTo(0, bodyRef.current.scrollHeight);
   }, [events]);
 
-  useEffect(() => {
-    const es = new EventSource("/api/tail");
-    es.onmessage = (m) => {
+  const streamDown = useEventStream(
+    "/api/tail",
+    "/api/status",
+    (m) => {
       if (pausedRef.current) return;
       let ev: TailEvent;
       try {
@@ -30,14 +32,18 @@ export function TailView({ variant }: { variant: "drawer" | "page" }) {
       }
       const row = { ...ev, uid: ++nextUid.current };
       setEvents((prev) => [...prev, row].slice(-300));
-    };
-    return () => es.close();
-  }, []);
+    },
+    // A new connection replays the tail buffer; start over so rows don't double.
+    () => {
+      if (!pausedRef.current) setEvents([]);
+    },
+  );
 
   return (
     <section className={`tail-view tail-${variant}`} aria-label="Live tail">
       <div className="tail-bar">
         <span className="muted">in-flight messages, newest last</span>
+        <span role="status">{streamDown && <Badge tone="warning">disconnected, reconnecting…</Badge>}</span>
         <span className="spacer" />
         <Button size="sm" icon={paused ? "play_arrow" : "pause"} aria-pressed={paused} onClick={() => setPaused(!paused)}>
           {paused ? "Resume" : "Pause"}

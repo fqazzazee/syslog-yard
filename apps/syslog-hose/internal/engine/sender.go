@@ -19,6 +19,8 @@ type Sender interface {
 
 // NewSender builds a sender for transport "udp", "tcp" or "tls".
 // TCP and TLS use RFC 6587 octet-counting framing and reconnect lazily.
+// UDP also connects on first send and re-resolves the destination while
+// running, so a receiver that is late or changes address is picked up.
 // tlsConf (see TLSConfig) applies to "tls" only; nil verifies the
 // receiver against the system roots. Cancelling ctx aborts in-progress
 // dials (and, for streams, writes).
@@ -26,12 +28,7 @@ func NewSender(ctx context.Context, transport, host string, port int, tlsConf *t
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	switch transport {
 	case "udp":
-		var d net.Dialer
-		conn, err := d.DialContext(ctx, "udp", addr)
-		if err != nil {
-			return nil, err
-		}
-		return &udpSender{conn: conn}, nil
+		return &udpSender{ctx: ctx, addr: addr, dial: dialUDP}, nil
 	case "tcp", "tls":
 		s := &streamSender{ctx: ctx, addr: addr}
 		if transport == "tls" {
@@ -46,13 +43,76 @@ func NewSender(ctx context.Context, transport, host string, port int, tlsConf *t
 	}
 }
 
-type udpSender struct{ conn net.Conn }
+const (
+	udpRefresh        = 30 * time.Second // how often a live socket re-resolves
+	udpRefreshTimeout = time.Second      // limit on a lookup while a socket works
+	udpRedialMin      = time.Second      // minimum gap between dial attempts on failure
+)
+
+// udpSender keeps a connected socket to the current address of its
+// destination. A failed refresh keeps the socket it has.
+type udpSender struct {
+	ctx      context.Context
+	addr     string
+	dial     func(ctx context.Context, addr string) (net.Conn, error)
+	conn     net.Conn
+	dialedAt time.Time // last dial attempt
+}
+
+func dialUDP(ctx context.Context, addr string) (net.Conn, error) {
+	var d net.Dialer
+	return d.DialContext(ctx, "udp", addr)
+}
+
+// redial resolves the destination again and moves to a new socket only if
+// the address changed, so the source port stays stable otherwise.
+func (u *udpSender) redial(timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(u.ctx, timeout)
+	defer cancel()
+	u.dialedAt = time.Now()
+	conn, err := u.dial(ctx, u.addr)
+	if err != nil {
+		return err
+	}
+	if u.conn != nil {
+		if conn.RemoteAddr().String() == u.conn.RemoteAddr().String() {
+			conn.Close()
+			return nil
+		}
+		u.conn.Close()
+	}
+	u.conn = conn
+	return nil
+}
 
 func (u *udpSender) Send(msg string) error {
+	if u.conn == nil {
+		if wait := udpRedialMin - time.Since(u.dialedAt); !u.dialedAt.IsZero() && wait > 0 {
+			return fmt.Errorf("destination %s unavailable, retrying in %s", u.addr, wait.Round(time.Millisecond))
+		}
+		if err := u.redial(ioTimeout); err != nil {
+			return err
+		}
+	} else if time.Since(u.dialedAt) >= udpRefresh {
+		_ = u.redial(udpRefreshTimeout)
+	}
 	_, err := u.conn.Write([]byte(msg))
+	if err == nil || u.ctx.Err() != nil || time.Since(u.dialedAt) < udpRedialMin {
+		return err
+	}
+	if u.redial(udpRefreshTimeout) != nil {
+		return err
+	}
+	_, err = u.conn.Write([]byte(msg))
 	return err
 }
-func (u *udpSender) Close() error { return u.conn.Close() }
+
+func (u *udpSender) Close() error {
+	if u.conn == nil {
+		return nil
+	}
+	return u.conn.Close()
+}
 
 const (
 	ioTimeout   = 5 * time.Second        // dial and per-write deadline

@@ -58,7 +58,11 @@ export default function LogTable(props: Props) {
         <EmptyState icon="inbox" title="No entries match">
           <p>Waiting for logs… Send a test message:</p>
           <p>
-            <code>logger -n 127.0.0.1 -P 5514 -T --rfc3164 "hello syslog-bucket"</code>
+            <code>logger -n 127.0.0.1 -P 6514 -T --rfc3164 "hello syslog-bucket"</code>
+          </p>
+          <p>
+            In the full suite, port 6514 needs an applied External IN flow in the valve. A standalone bucket listens on
+            5514 instead.
           </p>
         </EmptyState>
       </div>

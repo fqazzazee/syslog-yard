@@ -38,6 +38,10 @@ type Server struct {
 	notify    *notify.Dispatcher
 	httpPort  int        // TCP port of this UI/API; sources may not take it
 	mu        sync.Mutex // serializes graph writes and applies
+	authOn    bool       // yard auth enforced; notify URLs are then role-gated
+	// genCert writes the self-signed identity; replaced in tests because
+	// the real paths are fixed under /data.
+	genCert func(hosts []string) error
 }
 
 // maxGraphBody caps a graph save. Every other mutating route takes
@@ -60,6 +64,9 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 		rotator:   rotator,
 		tap:       tp,
 		notify:    nd,
+		genCert: func(hosts []string) error {
+			return certs.GenerateSelfSigned(codegen.CertFile, codegen.KeyFile, hosts)
+		},
 	}
 	s.syncActive()
 	s.mux.HandleFunc("GET /api/graph", s.getGraph)
@@ -91,6 +98,7 @@ func New(sup *supervisor.Supervisor, dataDir string, ui fs.FS, hints map[string]
 	if guard == nil {
 		guard = yardauth.New("", false)
 	}
+	s.authOn = guard.Enabled()
 	// The certificate is public (every TLS client receives it in the
 	// handshake); syslog-hose fetches it server-side to trust it.
 	guard.AllowAnonymous("/api/certs/pem")
@@ -109,14 +117,105 @@ func (s *Server) loadGraph() ([]byte, error) {
 	return data, err
 }
 
-func (s *Server) getGraph(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) getGraph(w http.ResponseWriter, r *http.Request) {
 	data, err := s.loadGraph()
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if !s.canReadNotifyURLs(r) {
+		if data, err = maskedGraph(data); err != nil {
+			httpError(w, http.StatusInternalServerError, fmt.Errorf("stored graph is unreadable"))
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(data)
+}
+
+// canReadNotifyURLs reports whether the caller may see full notify URLs,
+// which are bearer secrets: anyone in standalone mode, otherwise only the
+// roles that can edit the graph.
+func (s *Server) canReadNotifyURLs(r *http.Request) bool {
+	if !s.authOn {
+		return true
+	}
+	u := yardauth.UserFrom(r.Context())
+	return u != nil && (u.Role == "admin" || u.Role == "analyst")
+}
+
+// viewerNode is a node as read-only users get it: URL masked, with has_url
+// saying whether one is set. It exists only on the wire, so the flag never
+// joins the stored graph's schema.
+type viewerNode struct {
+	graph.Node
+	Config viewerConfig `json:"config"`
+}
+
+type viewerConfig struct {
+	graph.Config
+	HasURL bool `json:"has_url,omitempty"`
+}
+
+// maskedGraph re-encodes a stored graph with every URL masked. It goes
+// through the typed graph rather than patching the JSON so that no spelling
+// of the key in the stored file can slip past.
+func maskedGraph(data []byte) ([]byte, error) {
+	g, _, err := graph.Decode(data)
+	if err != nil {
+		return nil, err
+	}
+	nodes := make([]viewerNode, 0, len(g.Nodes))
+	for _, n := range g.Nodes {
+		c := viewerConfig{Config: n.Config, HasURL: n.Config.URL != ""}
+		c.URL = graph.MaskNotifyURL(n.Config.URL)
+		nodes = append(nodes, viewerNode{Node: n, Config: c})
+	}
+	edges := g.Edges
+	if edges == nil {
+		edges = []graph.Edge{}
+	}
+	return json.Marshal(struct {
+		Nodes []viewerNode `json:"nodes"`
+		Edges []graph.Edge `json:"edges"`
+	}{nodes, edges})
+}
+
+// restoreMaskedURLs swaps masked notify URLs in a submitted graph back to
+// the stored value, so a graph loaded under a read-only role can't replace
+// a secret with its mask. A mask is honoured only for the same node and the
+// same scheme and host; any other mask is refused. Callers hold s.mu.
+func (s *Server) restoreMaskedURLs(data []byte) ([]byte, error) {
+	var g graph.Graph
+	if json.Unmarshal(data, &g) != nil {
+		return data, nil // graph.Parse reports it
+	}
+	var stored *graph.Graph
+	changed := false
+	for i := range g.Nodes {
+		n := &g.Nodes[i]
+		if !graph.IsMaskedURL(n.Config.URL) {
+			continue
+		}
+		if stored == nil {
+			stored = &graph.Graph{}
+			if raw, err := s.loadGraph(); err == nil {
+				if sg, _, err := graph.Decode(raw); err == nil {
+					stored = sg
+				}
+			}
+		}
+		prev := stored.Node(n.ID)
+		if prev == nil || graph.MaskNotifyURL(prev.Config.URL) != strings.TrimSpace(n.Config.URL) {
+			return nil, fmt.Errorf("node %q: the notify URL is masked; enter the full URL", n.ID)
+		}
+		n.Config.URL = prev.Config.URL
+		changed = true
+	}
+	if !changed {
+		return data, nil
+	}
+	return json.Marshal(&g)
 }
 
 // SetHTTPPort records the TCP port the valve's own HTTP server listens on,
@@ -134,18 +233,41 @@ func (s *Server) putGraph(w http.ResponseWriter, r *http.Request) {
 		secure.WriteBodyError(w, err)
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if data, err = s.restoreMaskedURLs(data); err != nil {
+		httpError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
 	g, err := graph.Parse(data)
 	if err != nil {
 		httpError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// Parse accepts any JSON object as an empty graph, so a wrong file
+	// would replace the draft; an empty graph must say so explicitly.
+	var lists struct {
+		Nodes json.RawMessage `json:"nodes"`
+		Edges json.RawMessage `json:"edges"`
+	}
+	if err := json.Unmarshal(data, &lists); err != nil {
+		httpError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	if g.Nodes == nil || g.Edges == nil || lists.Nodes == nil || lists.Edges == nil {
+		httpError(w, http.StatusUnprocessableEntity, fmt.Errorf("not a flow graph: \"nodes\" and \"edges\" must both be arrays"))
+		return
+	}
+	normalized, err := json.Marshal(g)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err)
+		return
+	}
 	if err := s.checkDeployment(g); err != nil {
 		httpError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
-	if err := atomicWrite(s.graphPath, data); err != nil {
+	if err := atomicWrite(s.graphPath, normalized); err != nil {
 		httpError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -416,7 +538,13 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 	resp := struct {
 		supervisor.Status
 		Throughput map[string]int64 `json:"throughput,omitempty"`
+		// RotateError is the last cache rotation's failure, so retention
+		// that has stopped is visible outside the container log.
+		RotateError string `json:"rotateError,omitempty"`
 	}{Status: st}
+	if s.rotator != nil {
+		resp.RotateError = s.rotator.LastError()
+	}
 	// Per-node processed counters for the wire labels; cheap enough to read on
 	// each poll, and only meaningful while syslog-ng is up.
 	if st.Running {
@@ -489,8 +617,17 @@ func (s *Server) certGenerate(w http.ResponseWriter, _ *http.Request) {
 	if hn, err := os.Hostname(); err == nil && hn != "" {
 		hosts = append(hosts, hn)
 	}
-	if err := certs.GenerateSelfSigned(codegen.CertFile, codegen.KeyFile, hosts); err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.genCert(hosts); err != nil {
 		httpError(w, http.StatusInternalServerError, err)
+		return
+	}
+	// syslog-ng reads the pair at load time, so live TLS ports keep the old
+	// certificate until it reloads. If it isn't running, its next start
+	// picks up the new files.
+	if err := s.sup.Reload(); err != nil && !errors.Is(err, supervisor.ErrNotRunning) {
+		httpError(w, http.StatusInternalServerError, fmt.Errorf("certificate generated, but syslog-ng did not reload and may still serve the previous one: %w", err))
 		return
 	}
 	writeJSON(w, certs.Inspect(codegen.CertFile))
@@ -507,9 +644,14 @@ func (s *Server) tail(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
+	ctx, stop := yardauth.WatchSession(r) // ends the stream on revocation
+	defer stop()
 	replay, ch, cancel := s.tap.Subscribe()
 	defer cancel()
 	send := func(ev tap.Event) bool {
+		if ctx.Err() != nil {
+			return false
+		}
 		payload, _ := json.Marshal(ev)
 		if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
 			return false
@@ -524,7 +666,7 @@ func (s *Server) tail(w http.ResponseWriter, r *http.Request) {
 	}
 	for {
 		select {
-		case <-r.Context().Done():
+		case <-ctx.Done():
 			return
 		case ev := <-ch:
 			if !send(ev) {
@@ -588,6 +730,10 @@ func (s *Server) notifyTest(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := graph.CheckNotifyURL(body.URL); err != nil {
 		httpError(w, http.StatusBadRequest, err)
+		return
+	}
+	if graph.IsMaskedURL(body.URL) {
+		httpError(w, http.StatusBadRequest, fmt.Errorf("the notify URL is masked; enter the full URL to test it"))
 		return
 	}
 	if err := s.notify.TestSend(r.Context(), body.Kind, body.URL); err != nil {

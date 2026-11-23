@@ -100,6 +100,44 @@ func TestGenerateUDPTCPSource(t *testing.T) {
 	}
 }
 
+func TestGenerateSourceFraming(t *testing.T) {
+	const tlsOpts = ` tls(key-file("/data/certs/valve.key") cert-file("/data/certs/valve.crt") peer-verify(optional-untrusted))`
+	net := func(tr, opts string) string {
+		return `network(ip("0.0.0.0") transport("` + tr + `") port(6514)` + opts + ` flags(no-parse));`
+	}
+	for _, tc := range []struct {
+		name, transport, framing string
+		want                     []string
+	}{
+		{"legacy tcp", "tcp", "", []string{net("tcp", "")}},
+		{"legacy tls", "tls", "", []string{net("tls", tlsOpts)}},
+		{"legacy udp+tcp", "udp+tcp", "", []string{net("udp", ""), net("tcp", "")}},
+		{"newline tcp", "tcp", "newline", []string{net("tcp", "")}},
+		{"newline tls", "tls", "newline", []string{net("tls", tlsOpts)}},
+		{"auto tcp", "tcp", "auto", []string{net("auto", "")}},
+		{"auto tls keeps tls()", "tls", "auto", []string{net("auto", tlsOpts)}},
+		{"auto udp+tcp only changes tcp", "udp+tcp", "auto", []string{net("udp", ""), net("auto", "")}},
+		{"auto leaves udp alone", "udp", "auto", []string{net("udp", "")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := testGraph()
+			g.Nodes[0].Config = graph.Config{Transport: tc.transport, Port: 6514, Framing: tc.framing}
+			conf, err := Generate(g, "4.8", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(conf, want) {
+					t.Errorf("generated config missing %q:\n%s", want, conf)
+				}
+			}
+			if got := strings.Count(conf, "flags(no-parse)"); got != len(tc.want) {
+				t.Errorf("got %d source drivers, want %d:\n%s", got, len(tc.want), conf)
+			}
+		})
+	}
+}
+
 func TestGenerateSkipsDisabled(t *testing.T) {
 	// Disabling the source drops its listener, its tap, and every path
 	// through it; the forward stays defined but unused.

@@ -222,12 +222,19 @@ func (o *OIDC) redeem(ctx context.Context, code string, f flowState) (identity, 
 	return id, "", nil
 }
 
-// userForSubject finds the account bound to an OIDC subject, creating one
-// on first sign-in (OIDC subject mapping). Username collisions
-// with existing local accounts get a subject-derived suffix rather than
-// silently hijacking the local account.
+// NormalizeIssuer is the form an issuer is compared and stored in.
+func NormalizeIssuer(s string) string {
+	return strings.TrimRight(strings.TrimSpace(s), "/")
+}
+
+// userForSubject finds the account bound to an OIDC identity (issuer plus
+// subject), creating one on first sign-in. A subject means nothing outside
+// its issuer, so the same value at another issuer is a new account. Username
+// collisions with existing accounts get an identity-derived suffix rather
+// than silently hijacking the existing account.
 func (s *Service) userForSubject(ctx context.Context, o *OIDC, subject, preferred, email, name string) (*store.User, error) {
-	if u, err := s.store.GetUserByOIDCSubject(ctx, subject); err != nil || u != nil {
+	issuer := NormalizeIssuer(o.Issuer)
+	if u, err := s.store.GetUserByOIDCIdentity(ctx, issuer, subject); err != nil || u != nil {
 		return u, err
 	}
 	username := strings.TrimSpace(preferred)
@@ -242,10 +249,10 @@ func (s *Service) userForSubject(ctx context.Context, o *OIDC, subject, preferre
 		role = DefaultOIDCRole
 	}
 	u := store.User{Username: username, DisplayName: name, Email: email, Role: role}
-	created, err := s.store.CreateUser(ctx, u, subject)
-	if err != nil && len(subject) >= 6 {
-		u.Username = username + "-" + subject[:6]
-		created, err = s.store.CreateUser(ctx, u, subject)
+	created, err := s.store.CreateOIDCUser(ctx, u, issuer, subject)
+	if err != nil {
+		u.Username = username + "-" + hashToken(issuer + "\x00" + subject)[:8]
+		created, err = s.store.CreateOIDCUser(ctx, u, issuer, subject)
 	}
 	if err != nil {
 		return nil, err
