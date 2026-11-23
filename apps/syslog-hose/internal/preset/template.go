@@ -114,7 +114,9 @@ func formatBound(format string, args []any) int64 {
 	}
 	verbs := int64(strings.Count(format, "%"))
 	if strings.Contains(format, "[") {
-		content = verbs * largest
+		// Indexed verbs can repeat one argument; surplus arguments still
+		// print as %!(EXTRA ...), so keep the larger of the two counts.
+		content = max(content, verbs*largest)
 	}
 	return int64(len(format)) + 6*content + verbs*(width+32)
 }
