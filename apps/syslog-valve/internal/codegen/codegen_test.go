@@ -94,7 +94,7 @@ func TestGenerateUDPTCPSource(t *testing.T) {
 	}
 	want := "        source {\n" +
 		`            network(ip("0.0.0.0") transport("udp") port(6514) flags(no-parse));` + "\n" +
-		`            network(ip("0.0.0.0") transport("tcp") port(6514) flags(no-parse));` + "\n        };"
+		`            network(ip("0.0.0.0") transport("auto") port(6514) flags(no-parse));` + "\n        };"
 	if !strings.Contains(conf, want) {
 		t.Errorf("generated config missing dual-transport source:\n%s", conf)
 	}
@@ -296,7 +296,7 @@ func TestGenerateTLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`transport("tls") port(6514) tls(key-file("/data/certs/valve.key") cert-file("/data/certs/valve.crt") peer-verify(optional-untrusted))`,
+		`transport("auto") port(6514) tls(key-file("/data/certs/valve.key") cert-file("/data/certs/valve.crt") peer-verify(optional-untrusted))`,
 		`network("siem" port(6514) transport("tls") tls(peer-verify(required-trusted) ca-dir("/etc/ssl/certs"))`,
 		`network("lab" port(6514) transport("tls") tls(peer-verify(optional-untrusted))`,
 	} {
