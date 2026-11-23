@@ -9,12 +9,13 @@ import (
 	"time"
 )
 
-// switchBucket answers /api/auth/me with a settable status, and with a
-// refreshed session cookie while slide is set.
+// switchBucket answers /api/auth/me and the non-sliding session check with a
+// settable status, and with a refreshed session cookie while slide is set.
 type switchBucket struct {
 	status atomic.Int32
 	slide  atomic.Bool
 	calls  atomic.Int32
+	me     atomic.Int32
 	srv    *httptest.Server
 }
 
@@ -24,6 +25,9 @@ func newSwitchBucket(t *testing.T) *switchBucket {
 	b.status.Store(http.StatusOK)
 	b.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b.calls.Add(1)
+		if r.URL.Path == "/api/auth/me" {
+			b.me.Add(1)
+		}
 		code := int(b.status.Load())
 		if code != http.StatusOK {
 			http.Error(w, "no", code)
@@ -31,6 +35,10 @@ func newSwitchBucket(t *testing.T) *switchBucket {
 		}
 		if c, err := r.Cookie(cookieName); err == nil && b.slide.Load() {
 			http.SetCookie(w, &http.Cookie{Name: cookieName, Value: c.Value, Path: "/", MaxAge: 1800})
+		}
+		if r.URL.Path == "/api/auth/session" {
+			w.WriteHeader(http.StatusNoContent)
+			return
 		}
 		w.Write([]byte(`{"id":7,"username":"alice","role":"analyst"}`))
 	}))
@@ -149,21 +157,27 @@ func TestSlidSessionRefreshesBrowserCookie(t *testing.T) {
 	}
 }
 
-// A stream's recheck may be the request that slides the session, and its
-// response can't reach the browser, so the next request has to carry it.
-func TestRecheckSlideReachesNextRequest(t *testing.T) {
+// A stream is not activity: its rechecks must use the non-sliding check and
+// must never queue a refreshed cookie for the browser.
+func TestRecheckDoesNotSlideSession(t *testing.T) {
 	b := newSwitchBucket(t)
 	g := New(b.srv.URL, false)
 	g.SetSessionRecheck(10 * time.Millisecond)
 	watch(t, g, "tok")
-	before := b.calls.Load()
+	me, before := b.me.Load(), b.calls.Load()
 	b.slide.Store(true)
 	deadline := time.Now().Add(3 * time.Second)
-	for b.calls.Load() < before+2 && time.Now().Before(deadline) {
+	for b.calls.Load() < before+3 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if c := sessionCookieOf(through(g, "tok", nil)); c == nil || c.MaxAge <= 0 {
-		t.Fatalf("next request did not carry the refreshed cookie: %+v", c)
+	if b.calls.Load() < before+3 {
+		t.Fatal("stream did not recheck")
+	}
+	if got := b.me.Load(); got != me {
+		t.Errorf("rechecks called the sliding /api/auth/me %d times", got-me)
+	}
+	if c := sessionCookieOf(through(g, "tok", nil)); c != nil {
+		t.Errorf("a recheck queued a refreshed cookie: %+v", c)
 	}
 }
 

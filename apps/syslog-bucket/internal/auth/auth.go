@@ -341,6 +341,9 @@ var publicAPI = map[string]bool{
 	"/api/auth/oidc/callback": true,
 }
 
+// sessionCheckPath is the non-sliding session check (HandleSessionCheck).
+const sessionCheckPath = "/api/auth/session"
+
 // viewerWritable are the only non-GET paths a read-only viewer may call.
 var viewerWritable = map[string]bool{
 	"/api/auth/logout":   true,
@@ -365,9 +368,12 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 				// Inactivity timeout: a request is activity, so push the expiry
 				// forward (throttled in the store). Refresh the cookie's Max-Age
 				// to match when it actually moved.
-				idle := s.currentIdle()
-				if slid, _ := s.store.SlideSession(r.Context(), tokenHash, idle); slid {
-					s.setSessionCookie(w, c.Value, idle)
+				// The stream session check only observes, so it never slides.
+				if r.URL.Path != sessionCheckPath {
+					idle := s.currentIdle()
+					if slid, _ := s.store.SlideSession(r.Context(), tokenHash, idle); slid {
+						s.setSessionCookie(w, c.Value, idle)
+					}
 				}
 			}
 		}
@@ -417,6 +423,14 @@ func (s *Service) SessionActive(ctx context.Context, r *http.Request) bool {
 	}
 	u, err := s.store.GetSessionUser(ctx, hashToken(c.Value))
 	return err == nil && u != nil
+}
+
+// HandleSessionCheck answers 204 for a live session; Middleware has already
+// answered 401 otherwise. Hose and valve streams poll it to learn that a
+// session ended. It is the one authenticated route that isn't activity, so
+// Middleware doesn't slide the session for it.
+func (s *Service) HandleSessionCheck(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- session plumbing ---

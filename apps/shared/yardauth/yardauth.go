@@ -57,8 +57,8 @@ type Guard struct {
 	cache map[string]cacheEntry
 	// slid holds, per token, the new cookie expiry the bucket reported and
 	// the browser hasn't been told yet. The bucket refreshes at most once a
-	// minute, and that answer may land on a cached path or a stream recheck
-	// whose response can't carry a cookie, so it waits for the next request.
+	// minute, and that answer may land on a cached path, so it waits for the
+	// next request.
 	slid map[string]time.Time
 
 	recheck time.Duration // see SetSessionRecheck
@@ -88,7 +88,8 @@ func UserFrom(ctx context.Context) *User {
 // WatchSession returns a context for a long-lived response: it is cancelled
 // when the request ends or the bucket definitely rejects the session (401).
 // Anything else, such as a bucket outage, keeps the stream open and is
-// retried at the next recheck. Call the returned function when done.
+// retried at the next recheck. Rechecks don't count as activity, so an open
+// stream can't hold off the idle timeout. Call the returned function when done.
 func WatchSession(r *http.Request) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(r.Context())
 	s, ok := r.Context().Value(sessionKey{}).(*session)
@@ -104,7 +105,7 @@ func WatchSession(r *http.Request) (context.Context, context.CancelFunc) {
 				return
 			case <-tick.C:
 			}
-			if u, err := s.guard.fetch(ctx, s.token); err == nil && u == nil {
+			if live, err := s.guard.sessionLive(ctx, s.token); err == nil && !live {
 				cancel()
 				return
 			}
@@ -333,6 +334,33 @@ func (g *Guard) fetch(ctx context.Context, token string) (*User, error) {
 	}
 	g.mu.Unlock()
 	return &u, nil
+}
+
+// sessionLive asks the bucket whether token is still a live session, without
+// counting as activity: the expiry doesn't move and no cookie comes back. It
+// answers false only for a definite 401; every other failure is an error.
+func (g *Guard) sessionLive(ctx context.Context, token string) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.authURL+"/api/auth/session", nil)
+	if err != nil {
+		return false, err
+	}
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: token})
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		return true, nil
+	case http.StatusUnauthorized:
+		g.mu.Lock()
+		delete(g.cache, token)
+		delete(g.slid, token)
+		g.mu.Unlock()
+		return false, nil
+	}
+	return false, errors.New("auth service answered " + resp.Status)
 }
 
 // --- handlers ---
