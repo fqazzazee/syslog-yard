@@ -73,6 +73,16 @@ func (t *throttle) allow(key string) (bool, time.Duration) {
 // with release, failReserved or reset, so parallel attempts can't overrun the
 // limit while their password checks are still running.
 func (t *throttle) reserve(key string) (bool, time.Duration) {
+	ok, _, retry := t.reserveTracked(key)
+	return ok, retry
+}
+
+// reserveTracked is reserve, also reporting whether the attempt holds a
+// reservation. When the table is full of entries that can't be evicted, a new
+// key is admitted without one: a full table must not lock out unrelated users,
+// and the bcrypt concurrency gate still bounds the work. Existing keys keep
+// their lockouts and limits.
+func (t *throttle) reserveTracked(key string) (ok, tracked bool, retry time.Duration) {
 	now := time.Now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -80,23 +90,23 @@ func (t *throttle) reserve(key string) (bool, time.Duration) {
 	a := t.entries[key]
 	if a == nil {
 		if !t.makeRoom(now) {
-			return false, busyRetry
+			return true, false, 0
 		}
 		a = &attempt{start: now, seen: now}
 		t.entries[key] = a
 	}
 	if !a.until.IsZero() && now.Before(a.until) {
-		return false, a.until.Sub(now)
+		return false, false, a.until.Sub(now)
 	}
 	count := a.count
 	if t.expired(a, now) {
 		count = 0
 	}
 	if count+a.inflight >= t.max {
-		return false, busyRetry
+		return false, false, busyRetry
 	}
 	a.inflight++
-	return true, 0
+	return true, true, 0
 }
 
 // release gives back a reservation whose attempt reached no verdict.
@@ -256,20 +266,27 @@ type slot struct {
 	g               *guard
 	account, source string
 	settled         bool
+	// Whether each throttle holds a reservation; see reserveTracked.
+	sourceTracked, accountTracked bool
 }
 
 // reserve admits one password attempt for account from ip, counting it
 // against both limits until it is settled. A nil slot means refused.
 func (g *guard) reserve(account, ip string) (*slot, time.Duration) {
 	source := sourceKey(account, ip)
-	if ok, retry := g.perSource.reserve(source); !ok {
+	ok, sourceTracked, retry := g.perSource.reserveTracked(source)
+	if !ok {
 		return nil, retry
 	}
-	if ok, retry := g.perAccount.reserve(account); !ok {
-		g.perSource.release(source)
+	ok, accountTracked, retry := g.perAccount.reserveTracked(account)
+	if !ok {
+		if sourceTracked {
+			g.perSource.release(source)
+		}
 		return nil, retry
 	}
-	return &slot{g: g, account: account, source: source}, 0
+	return &slot{g: g, account: account, source: source,
+		sourceTracked: sourceTracked, accountTracked: accountTracked}, 0
 }
 
 func (s *slot) fail() {
@@ -277,8 +294,16 @@ func (s *slot) fail() {
 		return
 	}
 	s.settled = true
-	s.g.perSource.failReserved(s.source)
-	s.g.perAccount.failReserved(s.account)
+	if s.sourceTracked {
+		s.g.perSource.failReserved(s.source)
+	} else {
+		s.g.perSource.fail(s.source)
+	}
+	if s.accountTracked {
+		s.g.perAccount.failReserved(s.account)
+	} else {
+		s.g.perAccount.fail(s.account)
+	}
 }
 
 func (s *slot) succeed() {
@@ -295,8 +320,12 @@ func (s *slot) release() {
 		return
 	}
 	s.settled = true
-	s.g.perSource.release(s.source)
-	s.g.perAccount.release(s.account)
+	if s.sourceTracked {
+		s.g.perSource.release(s.source)
+	}
+	if s.accountTracked {
+		s.g.perAccount.release(s.account)
+	}
 }
 
 // clientIP returns the address a request came from: the TCP peer, unless the

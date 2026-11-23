@@ -203,13 +203,48 @@ func TestThrottleEntriesAreCapped(t *testing.T) {
 		t.Error("an in-flight reservation was evicted")
 	}
 
-	// Full of entries that can't be evicted: new keys are refused, not added.
+	// Full of entries that can't be evicted: new keys are admitted, not added.
 	tr = newThrottle(1, time.Minute)
 	tr.limit = 1
 	tr.fail("locked")
-	if ok, _ := tr.reserve("new"); ok || len(tr.entries) != 1 {
+	if ok, _ := tr.reserve("new"); !ok || len(tr.entries) != 1 {
 		t.Errorf("reserve on a full table: ok=%v entries=%d", ok, len(tr.entries))
 	}
+	if ok, _ := tr.reserve("locked"); ok {
+		t.Error("a full table released an existing lockout")
+	}
+}
+
+// An attempt admitted untracked on a full table must not settle against a
+// reservation the same key gets once room opens up.
+func TestUntrackedSlotLeavesLaterReservationAlone(t *testing.T) {
+	g := newGuard()
+	g.perSource.limit, g.perAccount.limit = 1, 1
+	blocker, _ := g.reserve("filler", "203.0.113.9")
+	if blocker == nil {
+		t.Fatal("filler refused")
+	}
+	untracked, _ := g.reserve("alice", "198.51.100.7")
+	if untracked == nil {
+		t.Fatal("unrelated key refused on a full table")
+	}
+	if len(g.perSource.entries) != 1 || len(g.perAccount.entries) != 1 {
+		t.Fatalf("table grew past its limit: %d/%d", len(g.perSource.entries), len(g.perAccount.entries))
+	}
+	blocker.release()
+	tracked, _ := g.reserve("alice", "198.51.100.7")
+	if tracked == nil {
+		t.Fatal("refused once room opened")
+	}
+	untracked.release()
+	source := sourceKey("alice", "198.51.100.7")
+	if a := g.perSource.entries[source]; a == nil || a.inflight != 1 {
+		t.Fatalf("untracked release touched the tracked reservation: %+v", a)
+	}
+	if a := g.perAccount.entries["alice"]; a == nil || a.inflight != 1 {
+		t.Fatalf("untracked release touched the tracked account reservation: %+v", a)
+	}
+	tracked.release()
 }
 
 func TestThrottleIsolatesKeys(t *testing.T) {
