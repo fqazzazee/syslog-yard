@@ -82,8 +82,52 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (*User, 
 	return s.getUserWhere(ctx, `username = $1`, username)
 }
 
-func (s *Store) GetUserByOIDCSubject(ctx context.Context, subject string) (*User, error) {
-	return s.getUserWhere(ctx, `oidc_subject = $1`, subject)
+// GetUserByOIDCIdentity finds the account bound to subject at issuer.
+func (s *Store) GetUserByOIDCIdentity(ctx context.Context, issuer, subject string) (*User, error) {
+	u, err := scanUser(s.Pool.QueryRow(ctx,
+		`SELECT `+userCols+` FROM users WHERE oidc_issuer = $1 AND oidc_subject = $2`, issuer, subject))
+	if err != nil {
+		if isNoRows(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return u, nil
+}
+
+// BindLegacyOIDCIssuer runs once per database: it assigns issuer to the SSO
+// accounts created before issuers were recorded. Later calls do nothing, so an
+// issuer configured afterwards can never inherit those accounts. With no
+// issuer configured they stay unbound (and can't sign in by SSO) until an
+// admin binds them. It returns how many accounts were bound and left unbound.
+func (s *Store) BindLegacyOIDCIssuer(ctx context.Context, issuer string) (bound, unbound int64, err error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `
+		INSERT INTO app_settings (key, value)
+		VALUES ('oidc_issuer_backfill', jsonb_build_object('issuer', $1::text))
+		ON CONFLICT (key) DO NOTHING`, issuer)
+	if err != nil {
+		return 0, 0, err
+	}
+	if tag.RowsAffected() == 0 {
+		return 0, 0, tx.Commit(ctx)
+	}
+	if issuer != "" {
+		tag, err = tx.Exec(ctx, `UPDATE users SET oidc_issuer = $1
+			WHERE oidc_subject IS NOT NULL AND oidc_issuer IS NULL`, issuer)
+		if err != nil {
+			return 0, 0, err
+		}
+		bound = tag.RowsAffected()
+	} else if err := tx.QueryRow(ctx, `SELECT count(*) FROM users
+		WHERE oidc_subject IS NOT NULL AND oidc_issuer IS NULL`).Scan(&unbound); err != nil {
+		return 0, 0, err
+	}
+	return bound, unbound, tx.Commit(ctx)
 }
 
 func (s *Store) getUserWhere(ctx context.Context, where string, arg any) (*User, error) {
@@ -108,6 +152,18 @@ func (s *Store) CreateUser(ctx context.Context, u User, oidcSubject string) (Use
 		Scan(&u.ID, &u.CreatedAt)
 	u.HasPassword = u.PasswordHash != ""
 	u.OIDC = oidcSubject != ""
+	return u, err
+}
+
+// CreateOIDCUser inserts an SSO account bound to subject at issuer.
+func (s *Store) CreateOIDCUser(ctx context.Context, u User, issuer, subject string) (User, error) {
+	err := s.Pool.QueryRow(ctx, `
+		INSERT INTO users (username, display_name, email, role, oidc_issuer, oidc_subject)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, created_at`,
+		u.Username, u.DisplayName, u.Email, u.Role, issuer, subject).
+		Scan(&u.ID, &u.CreatedAt)
+	u.OIDC = true
 	return u, err
 }
 

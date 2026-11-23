@@ -98,10 +98,39 @@ func buildOIDC(c oidcSettings) *auth.OIDC {
 // service. Called once at startup and after every settings change.
 func (s *server) applyStoredSettings(ctx context.Context) {
 	oc, _ := s.resolveOIDC(ctx)
-	s.authSvc.SetOIDC(buildOIDC(oc))
+	if err := s.bindLegacyOIDC(ctx); err != nil {
+		// Without the binding, existing SSO users would get new, empty accounts.
+		slog.Error("bind existing SSO accounts to the issuer; SSO stays off", "error", err)
+		s.authSvc.SetOIDC(nil)
+	} else {
+		s.authSvc.SetOIDC(buildOIDC(oc))
+	}
 	idle := time.Duration(s.resolveIdleMinutes(ctx)) * time.Minute
 	s.authSvc.SetIdleTTL(idle)
 	s.capSessions(ctx, idle)
+}
+
+// bindLegacyOIDC assigns SSO accounts from before issuers were recorded to the
+// configured issuer (stored or env, even if SSO is currently switched off).
+// It takes effect once per database. The stored row is read strictly first:
+// resolveOIDC treats a read error as "no row" and would fall back to env.
+func (s *server) bindLegacyOIDC(ctx context.Context) error {
+	if _, _, err := s.store.GetSetting(ctx, "oidc"); err != nil {
+		return err
+	}
+	oc, _ := s.resolveOIDC(ctx)
+	bound, unbound, err := s.store.BindLegacyOIDCIssuer(ctx, auth.NormalizeIssuer(oc.Issuer))
+	if err != nil {
+		return err
+	}
+	if bound > 0 {
+		slog.Info("bound existing SSO accounts to the configured issuer", "accounts", bound, "issuer", oc.Issuer)
+	}
+	if unbound > 0 {
+		slog.Warn("existing SSO accounts have no issuer because none is configured; they can't sign in by SSO until bound",
+			"accounts", unbound)
+	}
+	return nil
 }
 
 // capSessions shortens live sessions to the current idle window, so lowering
@@ -171,6 +200,11 @@ func (s *server) putOIDCSettings(w http.ResponseWriter, r *http.Request) {
 	if in.DefaultRole == "" {
 		in.DefaultRole = auth.DefaultOIDCRole
 	}
+	// Existing accounts belong to the issuer in place before this save.
+	if err := s.bindLegacyOIDC(r.Context()); err != nil {
+		s.internalError(w, "bind sso accounts", err)
+		return
+	}
 	if err := s.store.PutSetting(r.Context(), "oidc", in); err != nil {
 		s.internalError(w, "save oidc settings", err)
 		return
@@ -237,7 +271,7 @@ func oidcAuditSummary(prev, in oidcSettings, secretSent bool) map[string]any {
 }
 
 func normIssuer(s string) string {
-	return strings.TrimRight(strings.TrimSpace(s), "/")
+	return auth.NormalizeIssuer(s)
 }
 
 func (s *server) putSessionSettings(w http.ResponseWriter, r *http.Request) {
