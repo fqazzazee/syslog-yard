@@ -30,6 +30,7 @@ import {
   type HistoryEntry,
 } from "./api";
 import { nodeTypes, rfType, type FlowNode } from "./FlowNodes";
+import { parseGraphFile } from "./graphShape";
 import { NodePanel } from "./NodePanel";
 import { TailView } from "./TailView";
 
@@ -356,6 +357,8 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
   };
 
   const save = async (): Promise<boolean> => {
+    // Until a graph has loaded the canvas says nothing about what is saved.
+    if (savedKey === null) return false;
     try {
       const g = fromFlow(nodes, edges);
       await api.saveGraph(g);
@@ -431,7 +434,7 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
       return;
     }
     try {
-      const g = JSON.parse(await file.text()) as Graph;
+      const g = parseGraphFile(await file.text());
       await api.saveGraph(g);
       loadGraph(g);
       setSelected(null);
@@ -558,7 +561,13 @@ function Workspace({ user, onSignOut }: { user: AuthUser | null; onSignOut: () =
                         e.target.value = "";
                       }}
                     />
-                    <Button variant="primary" icon="check" onClick={() => void apply()}>
+                    <Button
+                      variant="primary"
+                      icon="check"
+                      disabled={savedKey === null}
+                      title={savedKey === null ? "The saved graph has not loaded. Reload, or import a graph." : undefined}
+                      onClick={() => void apply()}
+                    >
                       Apply
                     </Button>
                   </>
