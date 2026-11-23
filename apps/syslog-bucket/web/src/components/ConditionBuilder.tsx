@@ -190,7 +190,15 @@ export default function ConditionBuilder({ value, onChange, tags }: Props) {
                 value={FIELD_DEFS.some((d) => d.value === row.field) ? row.field : "custom"}
                 onChange={(e) => {
                   const v = e.target.value;
-                  patchRow(i, v === "custom" ? { field: "structured." } : { field: v, op: "contains" });
+                  if (v === "custom") {
+                    patchRow(i, { field: "structured.", op: "contains" });
+                    return;
+                  }
+                  // The op must be one the new field offers, or the select
+                  // shows its first option while state keeps a rejected one.
+                  const def = FIELD_DEFS.find((d) => d.value === v);
+                  const value = def?.numeric && !Number.isFinite(Number(row.value)) ? "" : row.value;
+                  patchRow(i, { field: v, op: def?.ops[0] ?? "contains", value });
                 }}
               >
                 {FIELD_DEFS.map((d) => (
