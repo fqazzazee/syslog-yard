@@ -187,3 +187,37 @@ func TestLoadSanitizesOldGraphs(t *testing.T) {
 		t.Fatalf("clean graph: sanitized=%v err=%v", sanitized, err)
 	}
 }
+
+func TestValidateSourceFraming(t *testing.T) {
+	for _, framing := range []string{"", "newline", "auto"} {
+		g := base()
+		g.Nodes[0].Config.Transport = "tcp"
+		g.Nodes[0].Config.Framing = framing
+		if err := g.Validate(); err != nil {
+			t.Errorf("framing %q rejected: %v", framing, err)
+		}
+	}
+	for _, framing := range []string{"octet", "AUTO", " auto", "auto\n"} {
+		g := base()
+		g.Nodes[0].Config.Transport = "tcp"
+		g.Nodes[0].Config.Framing = framing
+		err := g.Validate()
+		if err == nil || !strings.Contains(err.Error(), "framing") {
+			t.Errorf("framing %q: want a framing error, got %v", framing, err)
+		}
+	}
+}
+
+func TestLegacyGraphJSONHasNoFraming(t *testing.T) {
+	var g Graph
+	src := `{"nodes":[{"id":"s","type":"source","name":"in","config":{"transport":"tcp","port":514}}],"edges":[]}`
+	if err := json.Unmarshal([]byte(src), &g); err != nil {
+		t.Fatal(err)
+	}
+	if g.Nodes[0].Config.Framing != "" {
+		t.Errorf("legacy graph framing = %q, want empty", g.Nodes[0].Config.Framing)
+	}
+	if err := g.Validate(); err != nil {
+		t.Errorf("legacy graph rejected: %v", err)
+	}
+}

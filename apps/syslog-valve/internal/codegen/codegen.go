@@ -84,10 +84,11 @@ func Generate(g *graph.Graph, version string, shares Shares) (string, error) {
 			// notify) is a legacy-format template that would drop SDATA.
 			fmt.Fprintf(&b, "\n# source %s\nsource s_%s {\n    channel {\n        source {\n", comment(name(n)), graph.Ident(n.ID))
 			for _, tr := range transports {
-				// Stream listeners use "auto" so both RFC 6587 framings
-				// work: octet-counted (the hose) and newline-delimited
-				// (most devices). tls() still enforces TLS on the port.
-				if tr == "tcp" || tr == "tls" {
+				// Framing "auto" accepts both RFC 6587 framings: octet-counted
+				// (the hose) and newline-delimited. It is opt-in because it
+				// reads a leading digit as an octet count, which breaks
+				// senders that omit the PRI. tls() still enforces TLS.
+				if n.Config.Framing == "auto" && (tr == "tcp" || tr == "tls") {
 					tr = "auto"
 				}
 				fmt.Fprintf(&b, "            network(ip(%s) transport(%s) port(%d)%s flags(no-parse));\n", q(bind), q(tr), n.Config.Port, tls)

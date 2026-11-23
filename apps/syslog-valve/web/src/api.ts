@@ -11,6 +11,7 @@ export interface NodeConfig {
   transport?: "udp" | "tcp" | "tls" | "udp+tcp"; // udp+tcp: sources only
   port?: number;
   bind?: string;
+  framing?: "newline" | "auto"; // source stream listeners; unset means newline
   host?: string;
   tlsVerify?: boolean; // forward+tls: verify peer against system CAs
   // filter

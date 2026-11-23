@@ -102,6 +102,23 @@ export function NodePanel({
                   : `Internal: yard services reach this at syslog-valve:${node.config.port ?? 514} (the hose sends here by default). Not reachable from outside the host unless published in deploy/compose.yaml.`}
               </p>
             )}
+            {node.type === "source" && node.config.transport !== "udp" && (
+              <>
+                <label>
+                  Framing
+                  <select
+                    value={node.config.framing || "newline"}
+                    onChange={(e) => set({ framing: e.target.value as "newline" | "auto" })}
+                  >
+                    <option value="auto">Auto</option>
+                    <option value="newline">Newline</option>
+                  </select>
+                </label>
+                <p className="muted">
+                  Auto accepts octet-counted senders such as the hose. Newline is for devices that may omit the syslog PRI.
+                </p>
+              </>
+            )}
             {node.config.transport === "tls" && node.type === "source" && <CertPanel />}
             {node.config.transport === "tls" && node.type === "forward" && (
               <label className="check">
