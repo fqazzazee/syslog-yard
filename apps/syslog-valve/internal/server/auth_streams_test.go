@@ -100,7 +100,7 @@ func TestViewerNeverReceivesNotifyURL(t *testing.T) {
 		t.Fatalf("viewer graph lost structure: %s", w.Body)
 	}
 	for _, n := range got.Nodes {
-		if n.ID == "notify-1" && (n.Config.URL != "http://10.9.9.9/…" || !n.Config.HasURL) {
+		if n.ID == "notify-1" && (n.Config.URL != "http://127.0.0.1/…" || !n.Config.HasURL) {
 			t.Fatalf("viewer notify config = %+v", n.Config)
 		}
 	}
@@ -147,7 +147,7 @@ func TestEditorSavingMaskedGraphKeepsStoredURL(t *testing.T) {
 		t.Fatalf("unmatched mask: %d %s", w.Code, w.Body)
 	}
 	// Nor may a mask of a different host pick up the stored secret.
-	moved := bytes.ReplaceAll(masked, []byte("10.9.9.9"), []byte("10.8.8.8"))
+	moved := bytes.ReplaceAll(masked, []byte("127.0.0.1"), []byte("127.0.0.2"))
 	if w := as(srv, "tok-analyst", "PUT", "/api/graph", moved); w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("mask of another host: %d %s", w.Code, w.Body)
 	}
@@ -168,7 +168,7 @@ func TestNotifyTestRefusesMaskedURL(t *testing.T) {
 	e := newEnv(t)
 	bucket, _ := roleBucket(t)
 	srv, _ := e.guarded(bucket.URL)
-	w := as(srv, "tok-analyst", "POST", "/api/notify/test", []byte(`{"kind":"webhook","url":"http://10.9.9.9/…"}`))
+	w := as(srv, "tok-analyst", "POST", "/api/notify/test", []byte(`{"kind":"webhook","url":"http://127.0.0.1/…"}`))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("got %d %s", w.Code, w.Body)
 	}

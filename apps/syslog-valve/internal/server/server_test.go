@@ -125,7 +125,7 @@ func flow(cacheDir string, withNotify bool, port int) []byte {
 	}
 	if withNotify {
 		g.Nodes = append(g.Nodes, graph.Node{ID: "notify-1", Type: graph.TypeNotify, Name: "page",
-			Config: graph.Config{NotifyKind: "webhook", URL: "http://10.9.9.9/hook"}})
+			Config: graph.Config{NotifyKind: "webhook", URL: "http://127.0.0.1/hook"}})
 		g.Edges = append(g.Edges, graph.Edge{From: "source-1", To: "notify-1"})
 	}
 	data, _ := json.Marshal(g)
