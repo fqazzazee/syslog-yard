@@ -191,3 +191,56 @@ func TestExistingFilesStayWithTheirPreset(t *testing.T) {
 		t.Fatalf("my-fw's own file was not removed: %v", err)
 	}
 }
+
+// Only a real verb's width or precision can pad the output: digits and stars
+// in literal text, or an operand too large to be a width, must not count.
+func TestPrintfLiteralTextIsNotAWidth(t *testing.T) {
+	for tmpl, want := range map[string]string{
+		`{{printf "serial=20240101123000 id=%d" 5}}`: "serial=20240101123000 id=5",
+		`{{printf "id=1048576 %d" 5}}`:               "id=1048576 5",
+		`{{printf "ts=1732276800 %d" 5}}`:            "ts=1732276800 5",
+		`{{printf "%d id=1048576" 5}}`:               "5 id=1048576",
+		`{{printf "100%%1048576 %d" 5}}`:             "100%1048576 5",
+		`{{printf "%d%%20240101123000" 5}}`:          "5%20240101123000",
+		`{{printf "a*b %d" 20240101123000}}`:         "a*b 20240101123000",
+		`{{printf "%*d" 2 20240101123000}}`:          "20240101123000",
+		`{{printf "%[1]d 1048576" 5}}`:               "5 1048576",
+	} {
+		msg, err := renderWithin(t, parseOne(t, tmpl), 5*time.Second)
+		if err != nil {
+			t.Errorf("%s: %v", tmpl, err)
+			continue
+		}
+		if got := strings.TrimPrefix(msg, "<134>"); got != want {
+			t.Errorf("%s: got %q, want %q", tmpl, got, want)
+		}
+	}
+}
+
+// Every way of asking for a huge width or precision stays over the limit.
+func TestPrintfHugeWidthsStayBounded(t *testing.T) {
+	for _, tc := range []struct {
+		format string
+		args   []any
+	}{
+		{"%2000000d", []any{1}},
+		{"%.2000000d", []any{1}},
+		{"%-+# 02000000d", []any{1}},
+		{"%5.2000000d", []any{1}},
+		{"%%%2000000d", []any{1}},
+		{"%[1]2000000d", []any{1}},
+		{"%[1].2000000d", []any{1}},
+		{"%[x]2000000d", []any{1}},
+		{"%[1][%2000000d]", []any{1}},
+		{"%*d%*d", []any{1000000, 1, 1000000, 1}},
+		{"%.*d%.*d", []any{1000000, 1, 1000000, 1}},
+		{"%-*d%-*d", []any{-1000000, 1, -1000000, 1}},
+		{"%[2]*[1]d%[2]*[1]d", []any{1, 1000000}},
+		{"%[3]*.[2]*[1]d%[3]*.[2]*[1]d", []any{1, 1000000, 1000000}},
+		{"%*d%*d", []any{int64(1000000), 1, int64(1000000), 1}},
+	} {
+		if got := formatBound(tc.format, tc.args); got <= maxFormatSize {
+			t.Errorf("%q %v: bound %d is within the limit", tc.format, tc.args, got)
+		}
+	}
+}

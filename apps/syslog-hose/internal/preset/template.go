@@ -22,6 +22,7 @@ const (
 	stepOverhead   = 256
 	maxRenderWork  = 64 << 20 // total bytes built by string helpers per render
 	maxFormatSize  = 1 << 20  // largest printf result worth attempting
+	fmtMaxNumber   = 1000000  // package fmt's limit on widths and precisions
 	renderStepFunc = "renderStep"
 )
 
@@ -104,15 +105,8 @@ func argSize(a any) int64 {
 // of it is allocated: widths and precisions can pad, %q and %x can expand,
 // and explicit argument indexes can reuse the largest argument.
 func formatBound(format string, args []any) int64 {
-	var width, run, content, largest int64
-	for i := 0; i < len(format); i++ {
-		if c := format[i]; c >= '0' && c <= '9' {
-			run = min(run*10+int64(c-'0'), 1<<24)
-			width = max(width, run)
-		} else {
-			run = 0
-		}
-	}
+	var content, largest int64
+	width := formatPadding(format, args)
 	for _, a := range args {
 		n := argSize(a)
 		content += n
@@ -122,17 +116,101 @@ func formatBound(format string, args []any) int64 {
 	if strings.Contains(format, "[") {
 		content = verbs * largest
 	}
-	if strings.Contains(format, "*") {
-		for _, a := range args {
-			switch v := a.(type) {
-			case int:
-				width = max(width, min(int64(v), 1<<24), min(-int64(v), 1<<24))
-			case int64:
-				width = max(width, min(v, 1<<24), min(-v, 1<<24))
-			}
+	return int64(len(format)) + 6*content + verbs*(width+32)
+}
+
+// formatPadding returns the largest width or precision of any verb in format,
+// following the parser in package fmt so that literal text and %% never count.
+// A * may take any integer operand; fmt ignores those beyond fmtMaxNumber.
+func formatPadding(format string, args []any) int64 {
+	var most, star int64
+	for _, a := range args {
+		var v int64
+		switch n := a.(type) {
+		case int:
+			v = int64(n)
+		case int64:
+			v = n
+		}
+		if v >= -fmtMaxNumber && v <= fmtMaxNumber {
+			star = max(star, v, -v)
 		}
 	}
-	return int64(len(format)) + 6*content + verbs*(width+32)
+	n := len(format)
+	for i := 0; i < n; {
+		if format[i] != '%' {
+			i++
+			continue
+		}
+		i++
+		for i < n && strings.IndexByte("#0+- ", format[i]) >= 0 {
+			i++
+		}
+		var pad int64
+		var afterIndex bool
+		field := func() {
+			i, afterIndex = skipArgIndex(format, i)
+			if i < n && format[i] == '*' {
+				i++
+				pad = max(pad, star)
+				afterIndex = false
+				return
+			}
+			var v int64
+			v, _, i = fmtNumber(format, i, n)
+			pad = max(pad, v)
+		}
+		field()
+		if i+1 < n && format[i] == '.' {
+			i++
+			field()
+		}
+		if !afterIndex {
+			i, _ = skipArgIndex(format, i)
+		}
+		if i >= n {
+			break
+		}
+		if format[i] != '%' { // %% ignores any width it was given
+			most = max(most, pad)
+		}
+		i++
+	}
+	return most
+}
+
+// skipArgIndex steps over an explicit argument index such as [2] at format[i]
+// and reports whether it was well formed, as fmt's parseArgNumber does.
+func skipArgIndex(format string, i int) (int, bool) {
+	if i >= len(format) || format[i] != '[' {
+		return i, false
+	}
+	if len(format)-i < 3 {
+		return i + 1, false
+	}
+	for j := i + 1; j < len(format); j++ {
+		if format[j] == ']' {
+			_, ok, next := fmtNumber(format, i+1, j)
+			return j + 1, ok && next == j
+		}
+	}
+	return i + 1, false
+}
+
+// fmtNumber reads a decimal from s[start:end] as fmt's parsenum does,
+// including giving up and consuming the rest of s[:end] on an oversized one.
+func fmtNumber(s string, start, end int) (num int64, ok bool, next int) {
+	if start >= end {
+		return 0, false, end
+	}
+	for next = start; next < end && s[next] >= '0' && s[next] <= '9'; next++ {
+		if num > fmtMaxNumber {
+			return 0, false, end
+		}
+		num = num*10 + int64(s[next]-'0')
+		ok = true
+	}
+	return num, ok, next
 }
 
 // keep accounts for a string built by a helper and enforces the size limits.
