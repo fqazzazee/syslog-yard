@@ -48,6 +48,10 @@ type JobConfig struct {
 // rate after jitter/burst multipliers.
 const maxRate = 50000
 
+// maxJobSeconds bounds the burst and duration fields: far beyond any real
+// schedule, and small enough that converting to time.Duration cannot overflow.
+const maxJobSeconds = 1<<31 - 1
+
 // Validate checks the parts that would otherwise fail at start time.
 func (c *JobConfig) Validate() error {
 	if c.Name == "" {
@@ -89,6 +93,9 @@ func (c *JobConfig) Validate() error {
 	case "", "steady", "jitter", "burst":
 	default:
 		return fmt.Errorf("rateMode must be steady, jitter or burst")
+	}
+	if c.BurstEvery > maxJobSeconds || c.BurstLen > maxJobSeconds || c.DurationSec > maxJobSeconds {
+		return fmt.Errorf("burstEvery, burstLen and durationSec are capped at %d seconds", maxJobSeconds)
 	}
 	return nil
 }
@@ -215,8 +222,8 @@ func (j *job) start(lookup presetLookup, emit onEvent) error {
 	j.epsMilli.Store(0)
 	j.mu.Unlock()
 
-	// Dial outside the lock (DNS can be slow). A concurrent halt cancels ctx
-	// and waits on done, which finish closes on every path.
+	// Build the sender outside the lock. A concurrent halt cancels ctx and
+	// waits on done, which finish closes on every path.
 	sender, err := newJobSender(ctx, cfg)
 	if err != nil {
 		j.finish(done)
@@ -298,7 +305,7 @@ func (j *job) run(ctx context.Context, cfg JobConfig, startedAt time.Time, sende
 	pace := newPacer(startedAt) // first event goes out on the first tick
 	deadline := time.Time{}
 	if cfg.DurationSec > 0 {
-		deadline = startedAt.Add(time.Duration(cfg.DurationSec) * time.Second)
+		deadline = startedAt.Add(time.Duration(min(cfg.DurationSec, maxJobSeconds)) * time.Second)
 	}
 
 	failing := false // the last send failed; cleared on the next success
@@ -399,8 +406,8 @@ func newRateShape(cfg JobConfig, rng *rand.Rand) rateShape {
 		mode:        cfg.RateMode,
 		jitterPct:   cfg.JitterPct,
 		burstFactor: cfg.BurstFactor,
-		burstEvery:  time.Duration(max(cfg.BurstEvery, 10)) * time.Second,
-		burstLen:    time.Duration(max(cfg.BurstLen, 1)) * time.Second,
+		burstEvery:  time.Duration(min(max(cfg.BurstEvery, 10), maxJobSeconds)) * time.Second,
+		burstLen:    time.Duration(min(max(cfg.BurstLen, 1), maxJobSeconds)) * time.Second,
 		rng:         rng,
 	}
 	if rs.jitterPct <= 0 {

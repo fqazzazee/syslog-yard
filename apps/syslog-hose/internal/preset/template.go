@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"strings"
 	"text/template"
+	"text/template/parse"
 	"time"
 )
 
@@ -13,9 +14,151 @@ const (
 	maxRandHex  = 1024     // longest randHex string
 	maxSeqNames = 256      // distinct seq counters per renderer
 	maxRendered = 64 << 10 // rendered payload; larger than any UDP datagram
+
+	// Execution cannot be preempted, so each loop pass and template call is
+	// charged its overhead plus the size of its body. The budget leaves room
+	// for a loop of maxRendered passes, which is as many as can emit output.
+	maxRenderCost  = 32 << 20
+	stepOverhead   = 256
+	maxRenderWork  = 64 << 20 // total bytes built by string helpers per render
+	maxFormatSize  = 1 << 20  // largest printf result worth attempting
+	renderStepFunc = "renderStep"
 )
 
-var errRenderTooLong = fmt.Errorf("rendered message exceeds %d bytes", maxRendered)
+var (
+	errRenderTooLong = fmt.Errorf("rendered message exceeds %d bytes", maxRendered)
+	errRenderBudget  = fmt.Errorf("template exceeded its render budget")
+)
+
+// boundTemplate makes every loop pass and template call count against the
+// render budget, by adding a step action that outputs nothing.
+func boundTemplate(t *template.Template) error {
+	for _, tmpl := range t.Templates() {
+		if tmpl.Tree == nil || tmpl.Root == nil {
+			continue
+		}
+		cost := stepOverhead + len(tmpl.Root.String())
+		if err := addRangeSteps(tmpl.Root); err != nil {
+			return err
+		}
+		if err := prependStep(tmpl.Root, cost); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func addRangeSteps(list *parse.ListNode) error {
+	if list == nil {
+		return nil
+	}
+	for _, n := range list.Nodes {
+		var body, alt *parse.ListNode
+		cost := 0
+		switch n := n.(type) {
+		case *parse.IfNode:
+			body, alt = n.List, n.ElseList
+		case *parse.WithNode:
+			body, alt = n.List, n.ElseList
+		case *parse.RangeNode:
+			body, alt = n.List, n.ElseList
+			cost = stepOverhead + len(n.Pipe.String()) + len(body.String())
+		default:
+			continue
+		}
+		if err := addRangeSteps(body); err != nil {
+			return err
+		}
+		if err := addRangeSteps(alt); err != nil {
+			return err
+		}
+		if cost > 0 {
+			if err := prependStep(body, cost); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func prependStep(list *parse.ListNode, cost int) error {
+	st, err := template.New("step").
+		Funcs(template.FuncMap{renderStepFunc: func(int) string { return "" }}).
+		Parse(fmt.Sprintf("{{%s %d}}", renderStepFunc, cost))
+	if err != nil {
+		return err
+	}
+	list.Nodes = append([]parse.Node{st.Tree.Root.Nodes[0]}, list.Nodes...)
+	return nil
+}
+
+// argSize estimates the formatted size of one template argument.
+func argSize(a any) int64 {
+	if s, ok := a.(string); ok {
+		return int64(len(s))
+	}
+	return 32
+}
+
+// formatBound is an upper estimate of a printf result, computed before any
+// of it is allocated: widths and precisions can pad, %q and %x can expand,
+// and explicit argument indexes can reuse the largest argument.
+func formatBound(format string, args []any) int64 {
+	var width, run, content, largest int64
+	for i := 0; i < len(format); i++ {
+		if c := format[i]; c >= '0' && c <= '9' {
+			run = min(run*10+int64(c-'0'), 1<<24)
+			width = max(width, run)
+		} else {
+			run = 0
+		}
+	}
+	for _, a := range args {
+		n := argSize(a)
+		content += n
+		largest = max(largest, n)
+	}
+	verbs := int64(strings.Count(format, "%"))
+	if strings.Contains(format, "[") {
+		content = verbs * largest
+	}
+	if strings.Contains(format, "*") {
+		for _, a := range args {
+			switch v := a.(type) {
+			case int:
+				width = max(width, min(int64(v), 1<<24), min(-int64(v), 1<<24))
+			case int64:
+				width = max(width, min(v, 1<<24), min(-v, 1<<24))
+			}
+		}
+	}
+	return int64(len(format)) + 6*content + verbs*(width+32)
+}
+
+// keep accounts for a string built by a helper and enforces the size limits.
+func (c *renderContext) keep(s string) (string, error) {
+	if len(s) > maxRendered {
+		return "", errRenderTooLong
+	}
+	if c.work += len(s); c.work > maxRenderWork {
+		return "", errRenderBudget
+	}
+	return s, nil
+}
+
+// capped wraps a variadic string builtin with the render limits.
+func (c *renderContext) capped(fn func(...any) string) func(...any) (string, error) {
+	return func(args ...any) (string, error) {
+		var n int64
+		for _, a := range args {
+			n += argSize(a)
+		}
+		if n > maxRendered {
+			return "", errRenderTooLong
+		}
+		return c.keep(fn(args...))
+	}
+}
 
 // cappedBuffer collects template output and fails once it would grow past
 // maxRendered, which aborts the template execution.
@@ -39,6 +182,8 @@ type renderContext struct {
 	now      time.Time
 	rng      *rand.Rand
 	seqs     map[string]int64
+	cost     int // charged by loop passes and template calls so far
+	work     int // bytes built by string helpers so far
 }
 
 func newRenderContext(p *Preset, hostname string, rng *rand.Rand, seqs map[string]int64) *renderContext {
@@ -50,6 +195,23 @@ func newRenderContext(p *Preset, hostname string, rng *rand.Rand, seqs map[strin
 
 func (c *renderContext) funcs() template.FuncMap {
 	return template.FuncMap{
+		renderStepFunc: func(cost int) (string, error) {
+			if c.cost += cost; c.cost > maxRenderCost {
+				return "", errRenderBudget
+			}
+			return "", nil
+		},
+		"print":    c.capped(fmt.Sprint),
+		"println":  c.capped(fmt.Sprintln),
+		"html":     c.capped(template.HTMLEscaper),
+		"js":       c.capped(template.JSEscaper),
+		"urlquery": c.capped(template.URLQueryEscaper),
+		"printf": func(format string, args ...any) (string, error) {
+			if formatBound(format, args) > maxFormatSize {
+				return "", errRenderTooLong
+			}
+			return c.keep(fmt.Sprintf(format, args...))
+		},
 		"now":      func(layout string) string { return c.now.Format(layout) },
 		"hostname": func() string { return c.hostname },
 		"appname":  func() string { return c.appname },
@@ -67,7 +229,7 @@ func (c *renderContext) funcs() template.FuncMap {
 			}
 			return lo + c.rng.Intn(hi-lo+1)
 		},
-		"randHex": func(n int) string {
+		"randHex": func(n int) (string, error) {
 			const hex = "0123456789abcdef"
 			n = min(n, maxRandHex) // templates come from users (preview, presets)
 			var sb strings.Builder
@@ -75,7 +237,7 @@ func (c *renderContext) funcs() template.FuncMap {
 			for i := 0; i < n; i++ {
 				sb.WriteByte(hex[c.rng.Intn(16)])
 			}
-			return sb.String()
+			return c.keep(sb.String())
 		},
 		"oneOf": func(opts ...string) string {
 			if len(opts) == 0 {
